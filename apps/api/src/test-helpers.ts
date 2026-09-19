@@ -6,15 +6,18 @@ import { buildServer } from './server.js';
 
 export const ORIGIN = 'https://dashboard.example.com';
 
-export const TEST_CONFIG = ApiConfig.parse({
-  NODE_ENV: 'test',
-  LOG_LEVEL: 'fatal',
-  DATABASE_URL: 'postgres://unused/db',
-  PUBLIC_URL: ORIGIN,
-  APPROVAL_KEY: 'ab'.repeat(32),
-  AUTH_SECRET: 'test-secret-that-is-at-least-32-characters-long',
-  BREACHED_PASSWORD_CHECK: 'false',
-});
+export function testConfig(databaseUrl: string) {
+  return ApiConfig.parse({
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'fatal',
+    DATABASE_URL: databaseUrl,
+    PUBLIC_URL: ORIGIN,
+    APPROVAL_KEY: 'ab'.repeat(32),
+    CONTROL_PLANE_KEY: 'cd'.repeat(32),
+    AUTH_SECRET: 'test-secret-that-is-at-least-32-characters-long',
+    BREACHED_PASSWORD_CHECK: 'false',
+  });
+}
 
 export interface TestApp {
   app: FastifyInstance;
@@ -30,7 +33,7 @@ export async function startTestApp(options: { authRateLimit?: boolean } = {}): P
   const mailer = memoryMailer();
   const queued: string[] = [];
   const app = await buildServer({
-    config: TEST_CONFIG,
+    config: testConfig(database.url),
     db: database.db,
     mailer,
     authRateLimit: options.authRateLimit ?? false,

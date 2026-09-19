@@ -19,3 +19,4 @@ minimumReleaseAgeExclude:
   - eslint@10.11.0
   - turbo@2.11.2
   - bullmq@6.3.8
+  - '@fastify/websocket@11.3.1'

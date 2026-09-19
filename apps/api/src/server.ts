@@ -7,6 +7,9 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
+import websocket from '@fastify/websocket';
+import { agentRoutes, Gateway } from './agents/gateway.js';
+import { privateKeyFromSeed } from './agents/frames.js';
 import { createAuth } from './auth/auth.js';
 import { logMailer, smtpMailer, type Mailer } from './auth/mailer.js';
 import type { ApiConfig } from './config.js';
@@ -88,6 +91,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(
     accountRoutes({ auth, db, secret: config.AUTH_SECRET, publicUrl: config.PUBLIC_URL }),
   );
+  await app.register(websocket, { options: { maxPayload: 1 << 20 } });
+  const gatewayDeps = {
+    db,
+    databaseUrl: config.DATABASE_URL,
+    key: privateKeyFromSeed(config.CONTROL_PLANE_KEY),
+    now: deps.now ?? (() => new Date()),
+    log: app.log,
+  };
+  const gateway = new Gateway(gatewayDeps);
+  await gateway.start();
+  app.addHook('onClose', () => gateway.stop());
+  await app.register(agentRoutes(gateway, gatewayDeps));
+
   await app.register(
     operationRoutes({
       db,
