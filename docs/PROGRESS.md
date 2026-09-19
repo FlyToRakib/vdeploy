@@ -1,9 +1,22 @@
 # VDeploy Implementation Progress
 
-**Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.17d — M2 exit on the VPS testbed
+**Milestone:** M3 — AI (M1 complete 2026-09-19, M2 complete 2026-09-21)
+**Task:** 3.1 — next milestone, not started
 **Status:** in progress
-**Updated:** 2026-09-21 00:30 UTC
+**Updated:** 2026-09-21 03:00 UTC
+
+## M2 exit — met 2026-09-21
+
+`scripts/e2e.mjs --vps` in the VPS testbed: 30 checks, including a real app
+from GitHub (fetched, built by Railpack on the server, served), a folder and
+a .zip uploaded and deployed, an instant URL over HTTPS (the testbed's own
+ACME server; real certificates wait on the ports decision in Blocked), a bad
+deploy auto-rolled-back with the cause in plain words, live logs, and the
+control-plane restore drill. `--walkthrough` then drives the dashboard in a
+real browser as a person who does not code: create the owner, connect a
+server with the one command shown, put a folder online, watch it go live and
+its output stream in, and survive a broken version. Baseline verified
+unchanged before and after both runs.
 
 ## M1 exit — met 2026-09-19
 
@@ -74,10 +87,11 @@ verified unchanged before, after, and after testbed teardown.
 [e2e] ✓ control plane gone: apps kept running and healed without it — vd-01m2xsytyfqs3xy4t6c53p18v6-v5-r0-0
 [e2e] ✓ restored: same session, agent re-attached, same containers, audit chain intact
 [e2e] M1 exit criteria and restore drill: 30 checks passed is the non-coder walkthrough in a real browser (Playwright, Edge by default): create the owner, add a server and paste the one command it shows, upload a folder, see "we think this is a Node.js app", create it, watch it go Live and its output stream in, upload a broken version, and read on the page that the last change did not go through, why ("needs a setting called DATABASE_URL") and that the version before still serves. Found and fixed on the way: an uploaded project had no way to upload a new version from the dashboard ("Upload a new version" on the project page); a rollback message could end "again.. The previous release"; HSTS and upgrade-insecure-requests are sent only over HTTPS, so a plain-http origin works. HTTPS here is the testbed's own ACME test server; real certificates wait on the VPS ports decision (see Blocked)
+- [x] 2.17d M2 exit on the VPS testbed: the full e2e (30 checks) and the non-coder walkthrough, both against the testbed on the test VPS, with the production baseline verified unchanged before and after each run — 13 containers, host nginx, every service and both web ports untouched
 
 ## Doing
 
-- [ ] 2.17d M2 exit on the VPS testbed: the e2e and the walkthrough there, baseline unchanged before and after
+- [ ] 3.1 M3 begins: context engine and the tool registry generated from the contracts (docs/vdeploy.md §26)
 
 ## Next
 

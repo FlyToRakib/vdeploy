@@ -97,10 +97,21 @@ function ensureTestbed() {
   throw new Error('inner Docker never became ready');
 }
 
+/** Sends only the images the testbed does not already have, by id (a slow link over ssh). */
 function loadImages() {
-  log('loading the control-plane and dashboard images into the testbed');
-  const image = execFileSync('docker', ['save', IMAGE, WEB_IMAGE], { maxBuffer: 2 ** 31 });
-  inTestbed('docker load -q', image);
+  const missing = [IMAGE, WEB_IMAGE].filter((image) => {
+    const here = execFileSync('docker', ['image', 'inspect', '-f', '{{.Id}}', image], {
+      encoding: 'utf8',
+    }).trim();
+    const there = inTestbed(
+      `docker image inspect -f '{{.Id}}' ${image} 2>/dev/null || true`,
+    ).trim();
+    return here !== there;
+  });
+  if (missing.length === 0) return log('the testbed already has both images');
+  log(`loading ${missing.join(' and ')} into the testbed`);
+  const archive = execFileSync('docker', ['save', ...missing], { maxBuffer: 2 ** 31 });
+  inTestbed('docker load -q', archive);
 }
 
 /** A rerun starts clean: everything here lives inside the testbed's own daemon. */
