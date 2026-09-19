@@ -1,9 +1,17 @@
 # VDeploy Implementation Progress
 
-**Milestone:** M1 — Kernel
-**Task:** none — 
+**Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
+**Task:** 2.1 — agent-managed Traefik with the file provider, atomic routing files
 **Status:** in progress
-**Updated:** 2026-09-19 14:50 UTC
+**Updated:** 2026-09-19 14:52 UTC
+
+## M1 exit — met 2026-09-19
+
+`scripts/e2e.mjs --vps` in the VPS testbed: a container deploys from a spec
+(digest-pinned), survives an agent restart, self-heals after being killed,
+every action is in the verified audit chain; the control-plane restore drill
+passes; the adversarial L6 suite (38 hostile frames) passes in CI. Baseline
+verified unchanged before, after, and after testbed teardown.
 
 ## Done
 
@@ -35,9 +43,26 @@
 
 ## Doing
 
+- [ ] 2.1 agent-managed Traefik (file provider, atomic write-temp + rename per project, joins project networks)
 
+## Next (M2)
 
-## Next (M1)
+- [ ] 2.2 health-gated blue/green through Traefik: HTTP startup probe, switch, drain, auto-rollback
+- [ ] 2.3 instant URLs — wildcard base domain + zero-domain fallback (sslip.io style), HTTP-01 via Traefik
+- [ ] 2.4 DNS verification before any ACME request (A/AAAA vs server IP, Cloudflare proxy detection, registrar guidance)
+- [ ] 2.5 env vars + versioned secrets (AES-256-GCM envelope, per-project DEK), delivery to the agent, build-time vs runtime split
+- [ ] 2.6 resource governor at plan time (capacity, requests, headroom) + capacity in plain words
+- [ ] 2.7 builds on the server: Dockerfile + Nixpacks via BuildKit, registry cache, build caps, detection preview
+- [ ] 2.8 direct upload deploy (folder/ZIP → archive source)
+- [ ] 2.9 release command (pre-start phase, gated on success)
+- [ ] 2.10 live logs (agent ring buffer → gateway → SSE) and deploy history
+- [ ] 2.11 persistent-folder detection at build time + deploy-time guard
+- [ ] 2.12 deterministic plain-language diagnostic layer
+- [ ] 2.13 extended preflight (IPv6, panel, port-conflict process, existing Docker) + external reachability probe
+- [ ] 2.14 notifications (email, webhook)
+- [ ] 2.15 GitHub App + webhooks (needs credentials — see Blocked)
+- [ ] 2.16 dashboard: servers + enrollment, projects, deploys, logs, config (Simple/Advanced), approvals
+- [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright)
 
 
 
@@ -69,7 +94,7 @@
 
 ## Blocked / needs the user
 
-- (none)
+- (none yet) — M2 will need, when it reaches them: a **GitHub App** (app id, private key, webhook secret) for 2.15, and for real HTTPS on the test VPS a way to receive ports 80/443 that does not touch production nginx (the testbed will use a local ACME test server, Pebble, until then).
 
 ## Environment
 
