@@ -75,7 +75,7 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
     .returning();
   if (!row) return 'skipped';
 
-  const world = await loadPlanWorld(deps.db, row.projectId, row.args.releaseId);
+  const world = await loadPlanWorld(deps.db, row.projectId, row.args);
   let fresh: string;
   try {
     fresh = buildPlan(row.operation as OperationName, row.args, world).planHash;

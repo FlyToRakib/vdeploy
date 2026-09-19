@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.6 — resource governor at plan time
+**Task:** 2.7 — builds on the server
 **Status:** in progress
-**Updated:** 2026-09-19 16:15 UTC
+**Updated:** 2026-09-19 16:25 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -22,14 +22,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.4 DNS verified before any certificate: the worker checks every certificate host (Let's Encrypt domains, instant and redirecting hosts) — A/AAAA against the server's IPv4/IPv6, Cloudflare proxy ranges, CNAME on the apex, zone from SOA for registrar-ready "name" values — re-checking on a doubling countdown (15 s → 5 min), never a retry button; the agent attaches the ACME resolver only to verified hosts and serves the rest on plain HTTP; `domain.status` shows status, what DNS returned, and copy-paste records; `server.set_address` sets a NAT'd server's address by hand (detection never overwrites it); an address change re-verifies everything. Verified in local dind with a CoreDNS resolver: host verified, then HTTPS served (e2e check)
 - [x] 2.5a secret store: per-project data key wrapped by `SECRETS_KEY` (AES-256-GCM), values AES-256-GCM under it with the (secret, version) as associated data; versions immutable (DB trigger); `secret.set` (human only), `secret.generate` (server-made random value — usable by the AI, which never sees it), `secret.list` (names and versions only), `secret.read_value` (step-up, audited, answer never stored for idempotent replay); restore runbook lists `SECRETS_KEY`
 - [x] 2.5b `env.set`/`env.unset` (runtime env, or build args with `target: build`) as planned spec changes — planner and worker share `specAfter`, so the applied spec is the approved one; releases pin secret versions (entry version or current), references checked before the spec is written; each agent's X25519 key (sent in its signed hello) receives values sealed with ECDH + HKDF-SHA256 + AES-256-GCM bound to server/project/secret/version — frames and `desired.json` never hold a value; the agent opens them only to create a container (Go/TS cross-language vector test); `secret.rotate` = fresh value of the same shape → new release → health-gated deploy (generated secrets only). Verified in local dind: the value reaches the container, not the frame or disk; offline self-heal still works. ADR 0007
+- [x] 2.6 resource governor: the planner refuses (`capacity_exceeded`, 409) any create, spec edit, env change, scale, start or rollback whose memory or CPU requests would oversubscribe the server — capacity is what the agent reports net of its reserve for the OS, itself and Traefik; committed is every other running project's requests × replicas; stopped projects hold nothing. Checked when planning and again when the worker re-plans at apply time; capacity stays out of the plan hash. The refusal says what is short, by how much, and what to do. `server.resources` answers in plain words: "server-01 has 768 MB of 1.8 GB memory free — it fits about 3 more apps this size"
 
 ## Doing
 
-- [ ] 2.6 resource governor at plan time (capacity, requests, headroom) + capacity in plain words
+- [ ] 2.7 builds on the server: Dockerfile + Nixpacks via BuildKit, registry cache, build caps, detection preview
 
 ## Next (M2)
 
-- [ ] 2.7 builds on the server: Dockerfile + Nixpacks via BuildKit, registry cache, build caps, detection preview
 - [ ] 2.8 direct upload deploy (folder/ZIP → archive source)
 - [ ] 2.9 release command (pre-start phase, gated on success)
 - [ ] 2.10 live logs (agent ring buffer → gateway → SSE) and deploy history
@@ -49,6 +49,7 @@ verified unchanged before, after, and after testbed teardown.
 - The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.
 - Liveness/readiness probes after startup (§ health.liveness/readiness) are not run by the agent yet; startup probes gate traffic (2.2). Snapshots before destructive steps arrive with backups (M4); until then the agent never deletes volumes at all.
 - Instant URLs: settings are per org only (not per server); `{env}`/`{team}` patterns wait for environments and teams; no automatic sslip.io ↔ nip.io failover on Let's Encrypt rate limits (needs ACME outcomes from the agent, 2.12); a custom domain added later is not yet checked against other projects' instant hosts (2.4). The agent reads its interface addresses at start only.
+- Governor: the brief blue/green overlap (old and new replicas together) is not counted, disk is not budgeted, and the agent's reserve is a fixed 256 MB; rule-based autoscaling with governor veto is not built yet.
 - Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); no bulk env import/export yet (2.16); build secrets are stored but used only once builds exist (2.7); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
 - DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale); `domain.add` does not yet refuse a host another project routes (the agent refuses such a frame).
 

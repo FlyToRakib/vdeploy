@@ -1,10 +1,12 @@
-import { VDeployError, type OperationName } from '@vdeploy/contracts';
+import { readSpec, VDeployError, type OperationName } from '@vdeploy/contracts';
+import { describeCapacity, footprint } from '@vdeploy/core';
 import {
   deployments,
   domainChecksFor,
   listSecrets,
   projects,
   releases,
+  serverBudget,
   servers,
   urlSettingsFor,
 } from '@vdeploy/db';
@@ -12,6 +14,15 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Handler } from './context.js';
 
 const id = (args: Record<string, unknown>, field: string): string => String(args[field]);
+
+/** An app with every default: the size "more apps like this" means on an empty server. */
+const DEFAULT_APP = {
+  apiVersion: 'vdeploy/v1',
+  kind: 'Application',
+  metadata: { name: 'app' },
+  source: { type: 'image', image: 'app' },
+  build: { strategy: 'image' },
+};
 
 /** Reads that need live data from the agent answer honestly until that data exists. */
 const notYet: Handler = () =>
@@ -102,11 +113,26 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
     return row;
   },
   'server.resources': async ({ deps, args }) => {
-    const [row] = await deps.db
-      .select({ capacity: servers.capacity })
-      .from(servers)
-      .where(eq(servers.id, id(args, 'serverId')));
-    return row?.capacity ?? null;
+    const serverId = id(args, 'serverId');
+    const budget = await serverBudget(deps.db, serverId, null);
+    if (!budget) throw new VDeployError('not_found', 'Server not found');
+    // "This size" means the apps already here, or a new app with default requests.
+    const specs = await deps.db
+      .select({ spec: projects.spec })
+      .from(projects)
+      .where(and(eq(projects.serverId, serverId), isNull(projects.deletedAt)));
+    const sizes = specs.map((r) => footprint(readSpec(r.spec))).filter((f) => f.memoryBytes > 0);
+    const typical = sizes.length
+      ? {
+          memoryBytes: sizes.reduce((sum, f) => sum + f.memoryBytes, 0) / sizes.length,
+          cpu: sizes.reduce((sum, f) => sum + f.cpu, 0) / sizes.length,
+        }
+      : footprint(readSpec(DEFAULT_APP));
+    return {
+      capacity: budget.capacity,
+      committed: budget.committed,
+      summary: describeCapacity(budget, typical),
+    };
   },
   'urls.get': async ({ deps, actor }) => ({
     settings: await urlSettingsFor(deps.db, actor.orgId),

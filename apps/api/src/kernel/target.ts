@@ -71,5 +71,5 @@ export function loadPlanContext(
   args: Record<string, unknown>,
 ): Promise<PlanContext> {
   const projectId = target.kind === 'project' ? target.id : null;
-  return loadPlanWorld(db, projectId, args.releaseId);
+  return loadPlanWorld(db, projectId, args);
 }

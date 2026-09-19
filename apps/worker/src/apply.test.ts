@@ -86,7 +86,7 @@ async function plan(
   reasons: string[] = [],
 ) {
   const projectId = typeof args.projectId === 'string' ? args.projectId : null;
-  const built = buildPlan(operation, args, await loadPlanWorld(t.db, projectId, args.releaseId));
+  const built = buildPlan(operation, args, await loadPlanWorld(t.db, projectId, args));
   const [row] = await t.db
     .insert(plans)
     .values({

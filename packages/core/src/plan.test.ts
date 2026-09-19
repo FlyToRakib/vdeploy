@@ -134,6 +134,77 @@ describe('buildPlan', () => {
   });
 });
 
+describe('the resource governor at plan time', () => {
+  const MiB = 1024 ** 2;
+  const server = (freeMiB: number) => ({
+    name: 'server-01',
+    capacity: { memoryBytes: 1024 * MiB, cpus: 2 },
+    committed: { memoryBytes: (1024 - freeMiB) * MiB, cpu: 0 },
+  });
+
+  it('refuses a change that would oversubscribe the server', () => {
+    const project = makeProject(makeSpec({ scaling: { min: 1, max: 4 } }));
+    const scale = () =>
+      buildPlan(
+        'project.scale',
+        { projectId: project.id, replicas: 4 },
+        { project, server: server(512) },
+      );
+    expect(codeOf(scale)).toBe('capacity_exceeded');
+    expect(() => scale()).toThrow(/needs 1 GB of memory and server-01 has 512 MB free/);
+    expect(
+      codeOf(() =>
+        buildPlan(
+          'project.scale',
+          { projectId: project.id, replicas: 2 },
+          { project, server: server(512) },
+        ),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('checks new projects, spec edits and starts, but not stopped projects', () => {
+    const spec = makeSpec({ runtime: { replicas: 2 } });
+    expect(
+      codeOf(() => buildPlan('project.create', { spec }, { project: null, server: server(256) })),
+    ).toBe('capacity_exceeded');
+    const stopped = { ...makeProject(spec), running: false };
+    expect(
+      codeOf(() =>
+        buildPlan(
+          'project.update_spec',
+          { projectId: stopped.id, spec },
+          { project: stopped, server: server(0) },
+        ),
+      ),
+    ).toBeUndefined();
+    expect(
+      codeOf(() =>
+        buildPlan(
+          'project.start',
+          { projectId: stopped.id },
+          { project: stopped, server: server(256) },
+        ),
+      ),
+    ).toBe('capacity_exceeded');
+  });
+
+  it('leaves the plan hash alone: capacity is checked, not planned', () => {
+    const project = makeProject();
+    const a = buildPlan(
+      'project.restart',
+      { projectId: project.id },
+      { project, server: server(900) },
+    );
+    const b = buildPlan(
+      'project.restart',
+      { projectId: project.id },
+      { project, server: server(800) },
+    );
+    expect(a.planHash).toBe(b.planHash);
+  });
+});
+
 describe('plan_hash', () => {
   it('is stable for the same intent against the same state', () => {
     const project = makeProject();

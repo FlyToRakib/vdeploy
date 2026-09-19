@@ -14,6 +14,7 @@ import {
 } from '@vdeploy/contracts';
 import { hashOf } from './canonical.js';
 import { diffSpecs, removedVolumes } from './diff.js';
+import { checkFits, footprint, type ServerBudget } from './governor.js';
 import { maxTier } from './risk.js';
 import { specAfter } from './spec-edit.js';
 
@@ -21,6 +22,8 @@ export interface ProjectState {
   id: Id<'project'>;
   spec: ApplicationSpec;
   currentReleaseId: Id<'release'> | null;
+  /** False while stopped: a stopped project holds no capacity. */
+  running?: boolean;
 }
 
 export interface PlanContext {
@@ -28,6 +31,8 @@ export interface PlanContext {
   project: ProjectState | null;
   /** The release a rollback returns to, loaded by the caller. */
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
+  /** The server the project runs (or will run) on, for the governor (§14). */
+  server?: ServerBudget | null;
 }
 
 interface Draft {
@@ -72,8 +77,18 @@ function validSpec(candidate: unknown): ApplicationSpec {
   return result.data;
 }
 
-/** A spec change deploys a new release; removing a permanent folder is destructive. */
-function specChange(project: ProjectState | null, next: ApplicationSpec, floor: RiskTier): Draft {
+/**
+ * A spec change deploys a new release; removing a permanent folder is
+ * destructive; and the governor refuses it here, at plan time, if the new
+ * requests would oversubscribe the server.
+ */
+function specChange(
+  project: ProjectState | null,
+  next: ApplicationSpec,
+  floor: RiskTier,
+  context: PlanContext,
+): Draft {
+  checkFits(context.server, footprint(next, project?.running ?? true));
   const before = project?.spec ?? null;
   const lost = removedVolumes(before, next);
   const steps: PlanStep[] = [];
@@ -116,19 +131,24 @@ function simple(
 const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'project.create': (args, context) => {
     if (context.project) throw new VDeployError('conflict', 'Project already exists');
-    return specChange(null, specAfter('project.create', args, null), 'sensitive');
+    return specChange(null, specAfter('project.create', args, null), 'sensitive', context);
   },
   'project.update_spec': (args, context) => {
     const project = requireProject(context);
-    return specChange(project, specAfter('project.update_spec', args, project.spec), 'sensitive');
+    return specChange(
+      project,
+      specAfter('project.update_spec', args, project.spec),
+      'sensitive',
+      context,
+    );
   },
   'env.set': (args, context) => {
     const project = requireProject(context);
-    return specChange(project, specAfter('env.set', args, project.spec), 'sensitive');
+    return specChange(project, specAfter('env.set', args, project.spec), 'sensitive', context);
   },
   'env.unset': (args, context) => {
     const project = requireProject(context);
-    return specChange(project, specAfter('env.unset', args, project.spec), 'sensitive');
+    return specChange(project, specAfter('env.unset', args, project.spec), 'sensitive', context);
   },
   'secret.rotate': (args, context) => {
     const project = requireProject(context);
@@ -156,7 +176,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     });
     const { min, max } = project.spec.scaling;
     const withinDeclared = args.replicas >= min && args.replicas <= max;
-    const draft = specChange(project, next, withinDeclared ? 'safe' : 'sensitive');
+    const draft = specChange(project, next, withinDeclared ? 'safe' : 'sensitive', context);
     // Replicas are live state, not part of a release: scaling changes no image and no release.
     return {
       ...draft,
@@ -183,8 +203,11 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     simple(requireProject(context), { kind: 'restart' }, 'safe', 'brief'),
   'project.stop': (_args, context) =>
     simple(requireProject(context), { kind: 'stop' }, 'sensitive', 'until_started'),
-  'project.start': (_args, context) =>
-    simple(requireProject(context), { kind: 'start' }, 'sensitive', 'none'),
+  'project.start': (_args, context) => {
+    const project = requireProject(context);
+    checkFits(context.server, footprint(project.spec));
+    return simple(project, { kind: 'start' }, 'sensitive', 'none');
+  },
   'project.delete': (args, context) => {
     const project = requireProject(context);
     const volumes = project.spec.runtime.volumes.map((v) => v.name);
@@ -211,7 +234,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     if (target.id === project.currentReleaseId) {
       throw new VDeployError('conflict', 'That release is already live');
     }
-    const draft = specChange(project, target.spec, 'sensitive');
+    const draft = specChange(project, target.spec, 'sensitive', context);
     return {
       ...draft,
       steps: [

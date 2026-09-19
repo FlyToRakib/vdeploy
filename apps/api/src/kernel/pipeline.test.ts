@@ -144,6 +144,36 @@ describe('administrative operations', () => {
     expect(domains.json<{ result: unknown[] }>().result).toEqual([]);
   });
 
+  it('explains capacity in plain words and refuses to oversubscribe at plan time', async () => {
+    const serverId = newId('server');
+    await t.database.db.insert(servers).values({
+      id: serverId,
+      orgId,
+      name: 'small-box',
+      capacity: { cpus: 1, memoryBytes: 1024 ** 3, diskBytes: 0 },
+    });
+    const resources = await op(owner, 'server.resources', { serverId });
+    expect(resources.json<{ result: { summary: string } }>().result.summary).toBe(
+      'small-box has 1 GB of 1 GB memory free — it fits about 4 more apps this size (256 MB, 0.25 CPU).',
+    );
+    const tooBig = await op(owner, 'project.create', {
+      serverId,
+      spec: {
+        ...spec,
+        metadata: { name: 'huge', labels: {} },
+        runtime: {
+          ...spec.runtime,
+          replicas: 1,
+          resources: { cpu: { request: 0.5, limit: 1 }, memory: { request: '2Gi', limit: '2Gi' } },
+        },
+      },
+    });
+    expect(tooBig.statusCode).toBe(409);
+    const { error } = tooBig.json<{ error: { code: string; message: string } }>();
+    expect(error.code).toBe('capacity_exceeded');
+    expect(error.message).toMatch(/small-box has 1 GB free/);
+  });
+
   it('takes a server address by hand, refusing private ones', async () => {
     const serverId = newId('server');
     await t.database.db.insert(servers).values({ id: serverId, orgId, name: 'natted' });
