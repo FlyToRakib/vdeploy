@@ -21,11 +21,14 @@
   },
   "dependencies": {
     "@vdeploy/contracts": "workspace:*",
+    "bullmq": "^6.3.8",
     "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0",
     "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^12.1.0",
+    "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10"
   }
 }

@@ -1,4 +1,4 @@
-import type { ApplicationSpec, BlastRadius, Plan } from '@vdeploy/contracts';
+import type { AiGrants, ApplicationSpec, BlastRadius, Plan } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -97,12 +98,52 @@ export const plans = pgTable(
       enum: ['pending_approval', 'approved', 'applying', 'applied', 'failed', 'rejected', 'stale'],
     }).notNull(),
     actor: jsonb('actor').$type<ActorRecord>().notNull(),
+    /** Why a person must approve, in plain words (§8 L5); empty when auto-applied. */
+    reasons: jsonb('reasons').$type<string[]>().notNull().default([]),
     tainted: boolean('tainted').notNull().default(false),
+    error: jsonb('error').$type<{ code: string; message: string }>(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('plans_project_created').on(t.projectId, t.createdAt)],
+  (t) => [
+    index('plans_project_created').on(t.projectId, t.createdAt),
+    index('plans_status').on(t.status),
+  ],
 );
+
+/** The org's AI grant matrix (§8 L1); absent means the defaults. */
+export const aiGrants = pgTable('ai_grants', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id, { onDelete: 'cascade' }),
+  grants: jsonb('grants').$type<AiGrants>().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Remembers each idempotent request's answer so a retry never applies twice (§8 L3). */
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    userId: text('user_id').notNull(),
+    key: text('key').notNull(),
+    operation: text('operation').notNull(),
+    response: jsonb('response').$type<unknown>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
+
+/** One-time server enrollment tokens (§25), stored only as a hash. */
+export const serverEnrollments = pgTable('server_enrollments', {
+  tokenHash: text('token_hash').primaryKey(),
+  serverId: text('server_id')
+    .notNull()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: createdAt(),
+});
 
 export const approvals = pgTable('approvals', {
   id: text('id').primaryKey(),

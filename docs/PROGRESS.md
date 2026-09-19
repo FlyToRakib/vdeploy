@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.22 — control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
+**Task:** 1.23 — control plane — agent gateway (wss) + worker applying plans + observed state
 **Status:** in progress
-**Updated:** 2026-09-19 13:38 UTC
+**Updated:** 2026-09-19 13:50 UTC
 
 ## Done
 
@@ -28,14 +28,14 @@
 - [x] 1.19 agent — stdlib Docker Engine client (ADR 0003; request types cannot express privileges/binds), reconciler (create/heal/stop/replace, new release starts before old stops, deleted projects keep volumes, only labelled containers touched, per-project failure isolation), loop (atomic persisted state, stale generations ignored, tampered disk state refused, pass never cut by shutdown), local config/policy, vd-agent binary. Verified in local dind: deploy, hardening, self-heal, restart convergence, bystander untouched
 - [x] 1.20 agent — enrollment (one-time token → local Ed25519 key, pinned control-plane key, https-only except loopback, idempotent), signed-frame protocol (ADR 0004: sig over exact body bytes, per-connection nonce, strict seq, clock skew), outbound wss client (challenge → hello → desired_state/ack/observed_state, backoff reconnect, strict decode, any bad frame closes the connection); tests incl. forged/replayed/cross-connection/impostor; race detector on
 - [x] 1.21 agent — preflight doctor (OS/desktop refusal, arch, root, Docker ≥25, memory/swap, disk, ports 80/443, clock sync via adjtimex, cgroup v2), plain-language messages with fixes, runs before enroll and refuses to continue on failure; vd-agent preflight
+- [x] 1.22 control plane — POST /api/v1/operations/:name runs every op through one pipeline (resolve target → evaluate gate → plan (re-gated at the plan's real tier) → persist → queue or hold for approval; reads → handlers; admin ops → handlers), audit of every decision, idempotency keys, approve (checkApprover + re-plan hash check → stale, HMAC-signed approval, single winner) / reject, plan listing; admin ops (invite, remove, set_role ends sessions, org.update, server.add + one-time hashed enrollment token, api_key create/revoke, audit.export with chain verification); BullMQ apply queue on Postgres (ADR 0005)
 
 ## Doing
 
-- [ ] 1.22 control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
+- [ ] 1.23 control plane — agent gateway (wss) + worker applying plans + observed state
 
 ## Next (M1)
 
-- [ ] 1.23 control plane — agent gateway (wss) + worker applying plans + observed state
 - [ ] 1.24 end-to-end deploy of a prebuilt image in the testbed (M1 exit)
 - [ ] 1.25 control-plane backup/restore drill
 
@@ -61,6 +61,7 @@
 
 - LICENSE is MIT; `docs/vdeploy.md` §1.1 recommends AGPL-3.0. Left as MIT — licensing is the owner's call.
 - Baseline note: `prompt-share-frontend` was already `unhealthy` when the first baseline was captured (2026-09-19). Not caused by this work.
+- ADR 0005: the apply queue is BullMQ on its **Postgres** backend, so the control plane runs without Redis (6 processes, not 7). Reversible in one place; say the word to put Redis back.
 
 ## Blocked / needs the user
 

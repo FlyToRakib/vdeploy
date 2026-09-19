@@ -20,22 +20,32 @@ export interface TestApp {
   app: FastifyInstance;
   database: TestDatabase;
   mail: Mail[];
+  /** Plan ids handed to the apply queue, in order. */
+  queued: string[];
   stop: () => Promise<void>;
 }
 
 export async function startTestApp(options: { authRateLimit?: boolean } = {}): Promise<TestApp> {
   const database = await startTestDatabase();
   const mailer = memoryMailer();
+  const queued: string[] = [];
   const app = await buildServer({
     config: TEST_CONFIG,
     db: database.db,
     mailer,
     authRateLimit: options.authRateLimit ?? false,
+    queue: {
+      enqueue: (planId) => {
+        queued.push(planId);
+        return Promise.resolve();
+      },
+    },
   });
   return {
     app,
     database,
     mail: mailer.sent,
+    queued,
     stop: async () => {
       await app.close();
       await database.stop();

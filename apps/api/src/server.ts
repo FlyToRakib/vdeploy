@@ -13,7 +13,9 @@ import type { ApiConfig } from './config.js';
 import { handleError } from './errors.js';
 import { accountRoutes } from './routes/account.js';
 import { authRoutes } from './routes/auth.js';
+import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
+import { operationRoutes } from './routes/operations.js';
 
 /** Log fields that may carry credentials or secret values; never written out. */
 export const REDACTED_PATHS = [
@@ -34,6 +36,9 @@ export interface ServerDeps {
   mailer?: Mailer;
   /** Better Auth's per-IP limits; only lockout tests turn them off. */
   authRateLimit?: boolean;
+  /** Where approved plans go to be applied. */
+  queue: ApplyQueue;
+  now?: () => Date;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -82,6 +87,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(authRoutes(auth, config.PUBLIC_URL));
   await app.register(
     accountRoutes({ auth, db, secret: config.AUTH_SECRET, publicUrl: config.PUBLIC_URL }),
+  );
+  await app.register(
+    operationRoutes({
+      db,
+      auth,
+      mailer,
+      queue: deps.queue,
+      approvalKey: config.APPROVAL_KEY,
+      publicUrl: config.PUBLIC_URL,
+      now: deps.now ?? (() => new Date()),
+    }),
   );
   return app;
 }

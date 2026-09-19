@@ -144,6 +144,8 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'user.remove': { userId: newId('user') },
   'user.set_role': { userId: newId('user'), role: 'viewer' },
   'audit.export': { from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z' },
+  'api_key.create': { name: 'ci', scope: 'read' },
+  'api_key.revoke': { keyId: 'key_01J9Z3Q8S7M2K4X6V1B5N0C9D8' },
 };
 
 /** A valid input for any operation, naming the given target. */

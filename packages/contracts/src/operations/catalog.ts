@@ -391,6 +391,33 @@ export const OPERATIONS = [
     'Export the audit log',
     obj({ from: z.iso.datetime(), to: z.iso.datetime() }),
   ),
+  operation(
+    'api_key.create',
+    'human_only',
+    'org',
+    'Create an API key; it is shown exactly once',
+    obj({
+      name: z.string().trim().min(1).max(100),
+      scope: z.enum(['read', 'deploy', 'admin']),
+      expiresInDays: z.number().int().min(1).max(365).default(90),
+    }),
+    { stepUp: true },
+  ),
+  operation(
+    'api_key.revoke',
+    'human_only',
+    'org',
+    'Revoke an API key immediately',
+    obj({ keyId: z.string().min(1).max(64) }),
+  ),
+  operation(
+    'server.enrollment_token',
+    'human_only',
+    'server',
+    'Create a one-time command that connects this server',
+    obj(S),
+    { stepUp: true },
+  ),
 ] as const satisfies readonly OperationDefinition[];
 
 export type Operation = (typeof OPERATIONS)[number];

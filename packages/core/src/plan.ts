@@ -195,6 +195,11 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   },
 };
 
+/** Whether an operation changes what runs, and so goes through planning and approval. */
+export function isPlannable(name: OperationName): boolean {
+  return Object.hasOwn(PLANNERS, name);
+}
+
 /**
  * The PLAN stage (§4): turns an intent into an ordered, hashed Plan. Pure —
  * the caller loads state, this computes. Every mutation from every origin
