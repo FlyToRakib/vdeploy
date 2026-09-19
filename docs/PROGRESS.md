@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.5b — env vars, secret delivery to the agent, build/runtime split
+**Task:** 2.6 — resource governor at plan time
 **Status:** in progress
-**Updated:** 2026-09-19 16:05 UTC
+**Updated:** 2026-09-19 16:15 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -21,14 +21,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.3 instant URLs: org URL settings (`urls.configure` / `urls.get`) — zero-domain fallback `{project}.{ip-dashed}.sslip.io` by default (nip.io selectable), or a wildcard base domain with a one-label `{project}` pattern, or off; each project stores its host (unique among live projects, numbered around collisions, stable), earlier hosts 301 to the new one; server public IPv4 from agent interface addresses or a public connection address; agent routes the instant host with HTTP-01 TLS, redirects old hosts, and refuses frames where two projects claim one hostname (+3 adversarial cases). Verified in local dind: `hello.apps.vdeploy.test` served over HTTPS, plain HTTP redirected (new e2e check). ADR 0006
 - [x] 2.4 DNS verified before any certificate: the worker checks every certificate host (Let's Encrypt domains, instant and redirecting hosts) — A/AAAA against the server's IPv4/IPv6, Cloudflare proxy ranges, CNAME on the apex, zone from SOA for registrar-ready "name" values — re-checking on a doubling countdown (15 s → 5 min), never a retry button; the agent attaches the ACME resolver only to verified hosts and serves the rest on plain HTTP; `domain.status` shows status, what DNS returned, and copy-paste records; `server.set_address` sets a NAT'd server's address by hand (detection never overwrites it); an address change re-verifies everything. Verified in local dind with a CoreDNS resolver: host verified, then HTTPS served (e2e check)
 - [x] 2.5a secret store: per-project data key wrapped by `SECRETS_KEY` (AES-256-GCM), values AES-256-GCM under it with the (secret, version) as associated data; versions immutable (DB trigger); `secret.set` (human only), `secret.generate` (server-made random value — usable by the AI, which never sees it), `secret.list` (names and versions only), `secret.read_value` (step-up, audited, answer never stored for idempotent replay); restore runbook lists `SECRETS_KEY`
+- [x] 2.5b `env.set`/`env.unset` (runtime env, or build args with `target: build`) as planned spec changes — planner and worker share `specAfter`, so the applied spec is the approved one; releases pin secret versions (entry version or current), references checked before the spec is written; each agent's X25519 key (sent in its signed hello) receives values sealed with ECDH + HKDF-SHA256 + AES-256-GCM bound to server/project/secret/version — frames and `desired.json` never hold a value; the agent opens them only to create a container (Go/TS cross-language vector test); `secret.rotate` = fresh value of the same shape → new release → health-gated deploy (generated secrets only). Verified in local dind: the value reaches the container, not the frame or disk; offline self-heal still works. ADR 0007
 
 ## Doing
 
-- [ ] 2.5b env vars (`env.set`/`env.unset`, runtime vs build), releases pin secret versions, values sealed to each agent's X25519 key for delivery, `secret.rotate`
+- [ ] 2.6 resource governor at plan time (capacity, requests, headroom) + capacity in plain words
 
 ## Next (M2)
 
-- [ ] 2.6 resource governor at plan time (capacity, requests, headroom) + capacity in plain words
 - [ ] 2.7 builds on the server: Dockerfile + Nixpacks via BuildKit, registry cache, build caps, detection preview
 - [ ] 2.8 direct upload deploy (folder/ZIP → archive source)
 - [ ] 2.9 release command (pre-start phase, gated on success)
@@ -49,6 +49,7 @@ verified unchanged before, after, and after testbed teardown.
 - The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.
 - Liveness/readiness probes after startup (§ health.liveness/readiness) are not run by the agent yet; startup probes gate traffic (2.2). Snapshots before destructive steps arrive with backups (M4); until then the agent never deletes volumes at all.
 - Instant URLs: settings are per org only (not per server); `{env}`/`{team}` patterns wait for environments and teams; no automatic sslip.io ↔ nip.io failover on Let's Encrypt rate limits (needs ACME outcomes from the agent, 2.12); a custom domain added later is not yet checked against other projects' instant hosts (2.4). The agent reads its interface addresses at start only.
+- Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); no bulk env import/export yet (2.16); build secrets are stored but used only once builds exist (2.7); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
 - DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale); `domain.add` does not yet refuse a host another project routes (the agent refuses such a frame).
 
 ## Decisions made
@@ -62,6 +63,7 @@ verified unchanged before, after, and after testbed teardown.
 - 2026-09-19 Agent speaks the Docker Engine API over stdlib HTTP — docs/adr/0003-agent-docker-api-over-stdlib.md
 - 2026-09-19 Agent identity = Ed25519 keys + signed frames, not mTLS — docs/adr/0004-agent-identity-signed-frames.md
 - 2026-09-19 Agent frames are validated against JSON Schema generated from contracts (drift-checked), so Go never hand-copies the spec shape.
+- 2026-09-19 Secrets: envelope at rest, sealed to each agent's X25519 key in transit and on its disk; rotation only for server-made values — docs/adr/0007-secret-delivery.md
 - 2026-09-19 DNS verification runs in the worker (system resolvers, or `DNS_SERVERS`); the desired state lists verified hosts and the agent requests certificates only for those.
 - 2026-09-19 Instant URLs: sslip.io default (neither it nor nip.io is on the PSL; both run on a raised LE limit), single-label patterns, stored hosts with redirects — docs/adr/0006-instant-urls.md
 

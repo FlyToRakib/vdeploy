@@ -23,6 +23,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
+	"github.com/FlyToRakib/vdeploy/agent/internal/sealed"
 	"github.com/FlyToRakib/vdeploy/agent/internal/transport"
 )
 
@@ -195,8 +196,14 @@ func serve(configPath string, log *slog.Logger) error {
 	id, key, cpKey, err := identity.Load(cfg.StateDir)
 	switch {
 	case err == nil:
+		box, err := sealed.LoadOrCreate(cfg.StateDir)
+		if err != nil {
+			return err //nolint:wrapcheck // names the file already
+		}
+		reconciler.Secrets = sealed.Opener{Key: box, ServerID: id.ServerID}
 		client := &transport.Client{
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
+			BoxKey:  sealed.PublicKey(box),
 			Updates: updates, Generation: loop.Generation, Reports: reports, Log: log,
 			HTTPClient: &http.Client{}, Now: time.Now,
 		}

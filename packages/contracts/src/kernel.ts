@@ -47,6 +47,7 @@ export const PlanStep = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('start') }),
   z.strictObject({ kind: z.literal('snapshot_volumes') }),
   z.strictObject({ kind: z.literal('delete_project'), keepData: z.boolean() }),
+  z.strictObject({ kind: z.literal('rotate_secret'), secretId: idSchema('secret') }),
 ]);
 export type PlanStep = z.infer<typeof PlanStep>;
 

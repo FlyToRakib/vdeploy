@@ -37,6 +37,8 @@ export interface GatewayDeps {
   db: Database;
   databaseUrl: string;
   key: KeyObject;
+  /** Opens stored secrets so they can be sealed to each agent. */
+  secretsKey: Buffer;
   now: () => Date;
   log: FastifyBaseLogger;
 }
@@ -78,7 +80,9 @@ export class Gateway {
   async push(serverId: string): Promise<void> {
     const connection = this.connections.get(serverId);
     if (!connection) return;
-    const state = await desiredStateFor(this.deps.db, serverId);
+    const state = await desiredStateFor(this.deps.db, serverId, {
+      secretsKey: this.deps.secretsKey,
+    });
     connection.socket.send(
       seal(this.deps.key, { ...connection.session.next('desired_state'), state }),
     );
@@ -163,6 +167,7 @@ export class Gateway {
           agentVersion: hello.agentVersion,
           arch: hello.arch,
           capacity: { cpus: hello.cpus, memoryBytes: hello.memoryBytes, diskBytes: 0 },
+          ...(hello.boxKey ? { agentBoxKey: hello.boxKey } : {}),
           ...(moved ? { publicIpv6: ipv6, ...(ipv4 ? { publicIpv4: ipv4 } : {}) } : {}),
         })
         .where(eq(servers.id, serverId));

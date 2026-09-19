@@ -16,6 +16,8 @@ export const SecretSummary = z.strictObject({
   id: z.string(),
   name: SecretName,
   version: z.number().int().positive(),
+  /** Made by the server, so it can be rotated without anyone typing a value. */
+  generated: z.boolean(),
   updatedAt: z.iso.datetime(),
 });
 export type SecretSummary = z.infer<typeof SecretSummary>;

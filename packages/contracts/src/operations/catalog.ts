@@ -137,12 +137,13 @@ export const OPERATIONS = [
     'env.set',
     'sensitive',
     'project',
-    'Set an environment variable (secrets by reference only)',
+    'Set an environment variable (secrets by reference only); build settings apply at build time',
     obj({
       ...P,
       key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,254}$/),
       value: z.string().max(32_768).optional(),
       secretRef: idSchema('secret').optional(),
+      target: z.enum(['runtime', 'build']).default('runtime'),
     }).refine((i) => (i.value === undefined) !== (i.secretRef === undefined), {
       message: 'exactly one of value or secretRef',
     }),
@@ -152,7 +153,11 @@ export const OPERATIONS = [
     'sensitive',
     'project',
     'Remove an environment variable',
-    obj({ ...P, key: z.string().min(1).max(255) }),
+    obj({
+      ...P,
+      key: z.string().min(1).max(255),
+      target: z.enum(['runtime', 'build']).default('runtime'),
+    }),
   ),
   operation(
     'domain.add',

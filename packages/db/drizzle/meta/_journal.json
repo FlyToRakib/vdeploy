@@ -57,6 +57,13 @@
       "when": 1789833127891,
       "tag": "0007_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789833618946,
+      "tag": "0008_secret_delivery",
+      "breakpoints": true
     }
   ]
 }

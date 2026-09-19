@@ -15,6 +15,10 @@ const config = parseEnv(
       .string()
       .regex(/^[0-9a-f]{64}$/, 'must be 32 bytes as 64 hex characters')
       .transform((hex) => Buffer.from(hex, 'hex')),
+    SECRETS_KEY: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/, 'must be 32 bytes as 64 hex characters')
+      .transform((hex) => Buffer.from(hex, 'hex')),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     /** Resolvers for domain checks (ip or ip:port, comma-separated); the system's when unset. */
     DNS_SERVERS: z
@@ -39,6 +43,7 @@ const { db, close } = connect(config.DATABASE_URL);
 const deps = {
   db,
   approvalKey: config.APPROVAL_KEY,
+  secretsKey: config.SECRETS_KEY,
   registry: publicRegistries,
   now: () => new Date(),
   pollMs: 1000,

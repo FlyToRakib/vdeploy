@@ -43,6 +43,15 @@ type DesiredProject struct {
 	Revision int `json:"revision"`
 	// Hosts the control plane assigned beyond the spec's own domains.
 	Hosts Hosts `json:"hosts"`
+	// Secrets are the values this release uses, each sealed to this agent's key.
+	Secrets []Secret `json:"secrets"`
+}
+
+// Secret is one secret value sealed to this agent (package sealed opens it).
+type Secret struct {
+	ID      string `json:"id"`
+	Version int    `json:"version"`
+	Sealed  string `json:"sealed"`
 }
 
 // Hosts are a project's instant URL (§13.1) and the earlier ones that
@@ -114,6 +123,7 @@ type EnvVar struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`
 	SecretRef string `json:"secretRef,omitempty"`
+	Version   int    `json:"version,omitempty"`
 }
 
 // Volume is a permanent folder: a named volume the agent owns.

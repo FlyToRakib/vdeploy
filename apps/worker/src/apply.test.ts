@@ -16,6 +16,8 @@ import {
   organization,
   plans,
   projects,
+  putSecret,
+  readSecret,
   releases,
   servers,
   user,
@@ -32,6 +34,7 @@ let orgId: string;
 let serverId: string;
 let userId: string;
 const KEY = Buffer.alloc(32, 7);
+const SECRETS = Buffer.alloc(32, 3);
 const digest = (c: string) => `sha256:${c.repeat(64)}`;
 
 const offline: RegistryAccess = {
@@ -137,6 +140,7 @@ beforeAll(async () => {
   deps = {
     db: t.db,
     approvalKey: KEY,
+    secretsKey: SECRETS,
     registry: offline,
     now: () => new Date(),
     pollMs: 50,
@@ -253,5 +257,70 @@ describe('applyPlan', () => {
     expect(await applyPlan(deps, row.id)).toBe('failed');
     const [failed] = await t.db.select().from(plans).where(eq(plans.id, row.id));
     expect(failed?.error?.message).toBe('Choose which server this project should run on');
+  });
+});
+
+describe('environment and secrets', () => {
+  const store = (projectId: string, name: string, value: string, generated: boolean) =>
+    t.db.transaction((tx) =>
+      putSecret(tx, SECRETS, {
+        orgId,
+        projectId,
+        name,
+        value,
+        actor: { userId, origin: 'dashboard' },
+        generated,
+      }),
+    );
+  const pinned = async (projectId: string) => {
+    const { currentReleaseId } = await project(projectId);
+    const [release] = await t.db.select().from(releases).where(eq(releases.id, currentReleaseId!));
+    return release!.secretVersions;
+  };
+
+  it('sets a variable through a new release that pins the secret version', async () => {
+    const created = await createProject();
+    const { secretId } = await store(created.id, 'db_password', 'a1b2c3d4e5f6a7b8c9d0', true);
+    const set = await plan('env.set', {
+      projectId: created.id,
+      key: 'DB_PASSWORD',
+      secretRef: secretId,
+    });
+    expect(await applyPlan(deps, set.id)).toBe('applied');
+    expect((await project(created.id)).spec.runtime.env).toContainEqual({
+      key: 'DB_PASSWORD',
+      secretRef: secretId,
+    });
+    expect(await pinned(created.id)).toEqual({ [secretId]: 1 });
+
+    // Rotation: a fresh value of the same shape, pinned by a new release and deployed.
+    const rotation = await plan('secret.rotate', { projectId: created.id, secretId });
+    expect(await applyPlan(deps, rotation.id)).toBe('applied');
+    expect(await pinned(created.id)).toEqual({ [secretId]: 2 });
+    const fresh = await readSecret(t.db, SECRETS, created.id, secretId);
+    expect(fresh.value).toMatch(/^[0-9a-f]{20}$/);
+    expect(fresh.value).not.toBe('a1b2c3d4e5f6a7b8c9d0');
+
+    const unset = await plan('env.unset', { projectId: created.id, key: 'DB_PASSWORD' });
+    expect(await applyPlan(deps, unset.id)).toBe('applied');
+    expect(await pinned(created.id)).toEqual({});
+  });
+
+  it("refuses another project's secret, and rotating a value a person typed", async () => {
+    const created = await createProject();
+    const typed = await store(created.id, 'stripe_key', 'sk_live_typed', false);
+    const rotation = await plan('secret.rotate', {
+      projectId: created.id,
+      secretId: typed.secretId,
+    });
+    expect(await applyPlan(deps, rotation.id)).toBe('failed');
+
+    const foreign = newId('secret');
+    const set = await plan('env.set', { projectId: created.id, key: 'X', secretRef: foreign });
+    expect(await applyPlan(deps, set.id)).toBe('failed');
+    const [failed] = await t.db.select().from(plans).where(eq(plans.id, set.id));
+    expect(failed?.error?.message).toMatch(/does not have/);
+    // The spec was never changed to point at it.
+    expect((await project(created.id)).spec.runtime.env).toEqual([]);
   });
 });

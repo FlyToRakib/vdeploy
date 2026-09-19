@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
@@ -59,6 +60,11 @@ type Report struct {
 	Settling bool `json:"settling"`
 }
 
+// SecretSource opens a secret value sealed to this server for one project.
+type SecretSource interface {
+	Open(projectID, secretID string, version int, sealed string) (string, error)
+}
+
 // Reconciler converges one server. Between passes it remembers which
 // replicas passed their startup check, and since when an old release has
 // been draining.
@@ -69,7 +75,9 @@ type Reconciler struct {
 	Routing Routing
 	// Prober checks new replicas before they take traffic; nil trusts "running".
 	Prober Prober
-	Now    func() time.Time
+	// Secrets opens sealed secret values; nil (not enrolled) cannot start projects using them.
+	Secrets SecretSource
+	Now     func() time.Time
 
 	ready    map[string]*readiness
 	draining map[string]time.Time
@@ -192,12 +200,13 @@ func (p *pass) converge(ctx context.Context, project spec.DesiredProject, contai
 	}
 	var errs []error
 	for _, c := range containers {
-		errs = append(errs, p.ensureRunning(ctx, project.ProjectID, c))
+		errs = append(errs, p.ensureRunning(ctx, project, c))
 	}
 	return errors.Join(errs...)
 }
 
-func (p *pass) ensureRunning(ctx context.Context, projectID string, c compose.Container) error {
+func (p *pass) ensureRunning(ctx context.Context, project spec.DesiredProject, c compose.Container) error {
+	projectID := project.ProjectID
 	engine := p.r.Engine
 	existing, ok := p.existing[c.Name]
 	if ok && existing.State == "running" {
@@ -216,6 +225,16 @@ func (p *pass) ensureRunning(ctx context.Context, projectID string, c compose.Co
 	if err := engine.EnsureImage(ctx, c.Image); err != nil {
 		return fmt.Errorf("image: %w", err)
 	}
+	secretEnv, err := compose.SecretEnv(project, func(id string, version int, sealed string) (string, error) {
+		if p.r.Secrets == nil {
+			return "", errors.New("this agent is not enrolled")
+		}
+		return p.r.Secrets.Open(projectID, id, version, sealed) //nolint:wrapcheck // wrapped by SecretEnv
+	})
+	if err != nil {
+		return err //nolint:wrapcheck // already names the variable, never the value
+	}
+	c.Env = append(slices.Clip(c.Env), secretEnv...)
 	id, err := engine.Create(ctx, c)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", c.Name, err)

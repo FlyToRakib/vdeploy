@@ -324,6 +324,7 @@ async function run() {
   const [hello] = (await op('project.list', {})).result;
   await blueGreen(hello.id, helloSpec);
   await instantUrl();
+  await secrets(hello.id);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
@@ -394,6 +395,33 @@ async function blueGreen(projectId, spec) {
     'blue/green switch, no request dropped',
     `${outcomes.length} requests, now nginx ${version}`,
   );
+}
+
+/**
+ * Secrets (§22, M2 2.5): a value made on the server reaches the container,
+ * while the frames and the agent's own copy of the desired state carry it
+ * only sealed to that agent.
+ */
+async function secrets(projectId) {
+  const { result: made } = await op('secret.generate', { projectId, name: 'session_key' });
+  const set = await op('env.set', { projectId, key: 'SESSION_KEY', secretRef: made.secretId });
+  await until('secret deployed', async () => {
+    const plan = await call('GET', `/api/v1/plans/${set.plan.id}`);
+    if (plan.status === 'failed' || plan.status === 'stale') throw new Error(JSON.stringify(plan));
+    return plan.status === 'applied';
+  });
+  await until('old release drained', async () => managedContainers().length === 2, 60_000);
+  const [[name]] = managedContainers();
+  const env = inTestbed(`docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' ${name}`);
+  const value = /^SESSION_KEY=([A-Za-z0-9]{40})$/m.exec(env)?.[1];
+  if (!value) throw new Error('the container did not get its secret');
+  const onDisk = inTestbed('cat /var/lib/vdeploy/desired.json');
+  if (onDisk.includes(value) || !onDisk.includes('"sealed":"x1.')) {
+    throw new Error("the agent's copy of the desired state holds the value in the clear");
+  }
+  const listed = JSON.stringify(await op('secret.list', { projectId }));
+  if (listed.includes(value)) throw new Error('secret.list returned a value');
+  pass('secret delivered sealed: in the container, never in frames or on disk', name);
 }
 
 const INSTANT_HOST = 'hello.apps.vdeploy.test';

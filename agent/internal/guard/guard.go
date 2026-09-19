@@ -119,9 +119,13 @@ func Check(p spec.DesiredProject, policy Policy) error {
 			refuse("mount path %q covers a system directory", v.MountPath)
 		}
 	}
+	delivered := map[string]bool{}
+	for _, s := range p.Secrets {
+		delivered[s.ID] = true
+	}
 	for _, e := range rt.Env {
-		if e.SecretRef != "" {
-			refuse("secret %s for %s cannot be delivered by this agent version", e.SecretRef, e.Key)
+		if e.SecretRef != "" && !delivered[e.SecretRef] {
+			refuse("secret %s for %s was not delivered to this server", e.SecretRef, e.Key)
 		}
 		if strings.ContainsRune(e.Value, 0) || strings.ContainsAny(e.Key, "=\x00") {
 			refuse("environment variable %q is malformed", e.Key)

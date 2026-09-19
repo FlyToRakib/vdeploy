@@ -1,6 +1,8 @@
 import { AGENT_PROTOCOL, DesiredState, readSpec } from '@vdeploy/contracts';
+import { deliveryContext, sealTo } from '@vdeploy/core';
 import type { Database } from './client.js';
 import { certificateHosts, verifiedHosts } from './domains.js';
+import { readSecret } from './secrets.js';
 import { projects, releases, servers } from './schema/index.js';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 
@@ -10,7 +12,11 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm';
  * replica count, running flag and revision taken live from the project, so
  * scaling, stopping and restarting never need a new release.
  */
-export async function desiredStateFor(db: Database, serverId: string): Promise<DesiredState> {
+export async function desiredStateFor(
+  db: Database,
+  serverId: string,
+  options: { secretsKey?: Buffer } = {},
+): Promise<DesiredState> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
   const verified = await verifiedHosts(db, serverId);
   const rows = await db
@@ -24,6 +30,27 @@ export async function desiredStateFor(db: Database, serverId: string): Promise<D
         isNotNull(projects.currentReleaseId),
       ),
     );
+  /**
+   * Each release's pinned secret versions, sealed to this agent. Without the
+   * agent's box key (an older agent) nothing is sent, and the agent refuses
+   * the project rather than start it with values missing.
+   */
+  async function sealed(projectId: string, versions: Record<string, number>) {
+    const boxKey = server?.agentBoxKey;
+    if (!boxKey || !options.secretsKey) return [];
+    const out = [];
+    for (const [secretId, version] of Object.entries(versions)) {
+      const { value } = await readSecret(db, options.secretsKey, projectId, secretId, version);
+      const context = deliveryContext(serverId, projectId, secretId, version);
+      out.push({ id: secretId, version, sealed: sealTo(boxKey, value, context) });
+    }
+    return out;
+  }
+  const secrets = new Map<string, Awaited<ReturnType<typeof sealed>>>();
+  for (const { project, release } of rows) {
+    secrets.set(project.id, await sealed(project.id, release.secretVersions));
+  }
+
   // Parsing here means a malformed state can never be sent to an agent.
   return DesiredState.parse({
     protocol: AGENT_PROTOCOL,
@@ -45,6 +72,7 @@ export async function desiredStateFor(db: Database, serverId: string): Promise<D
           redirects: project.instantHost ? project.previousHosts : [],
           verified: certificateHosts({ ...project, spec }).filter((h) => verified.has(h)),
         },
+        secrets: secrets.get(project.id) ?? [],
       };
     }),
   });

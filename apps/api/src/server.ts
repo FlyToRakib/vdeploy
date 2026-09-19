@@ -96,6 +96,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db,
     databaseUrl: config.DATABASE_URL,
     key: privateKeyFromSeed(config.CONTROL_PLANE_KEY),
+    secretsKey: config.SECRETS_KEY,
     now: deps.now ?? (() => new Date()),
     log: app.log,
   };

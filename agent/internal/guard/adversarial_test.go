@@ -118,10 +118,10 @@ func TestHostileFramesAreRefused(t *testing.T) {
 		{"replicas sharing a permanent folder", func(f map[string]any) { runtime(f)["replicas"] = 2 }, "permanent folder"},
 
 		// Payloads.
-		{"secret reference", func(f map[string]any) {
+		{"secret reference without a delivered value", func(f map[string]any) {
 			ref := "sec_01J9Z3Q8S7M2K4X6V1B5N0C9D8" // #nosec G101 -- an id, not a credential
 			runtime(f)["env"] = []any{map[string]any{"key": "DB", "secretRef": ref}}
-		}, "cannot be delivered"},
+		}, "not delivered"},
 		{"env key with equals", func(f map[string]any) {
 			runtime(f)["env"] = []any{map[string]any{"key": "A=B", "value": "x"}}
 		}, "contract"},

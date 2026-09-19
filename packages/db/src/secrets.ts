@@ -28,7 +28,14 @@ async function dataKey(tx: Executor, kek: Buffer, projectId: string): Promise<Bu
 export async function putSecret(
   tx: Executor,
   kek: Buffer,
-  input: { orgId: string; projectId: string; name: string; value: string; actor: ActorRecord },
+  input: {
+    orgId: string;
+    projectId: string;
+    name: string;
+    value: string;
+    actor: ActorRecord;
+    generated?: boolean;
+  },
 ): Promise<{ secretId: string; version: number }> {
   // One writer per project at a time: versions are numbered without gaps or races.
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 7))`);
@@ -42,7 +49,7 @@ export async function putSecret(
   if (existing) {
     await tx
       .update(secrets)
-      .set({ currentVersion: version, updatedAt: sql`now()` })
+      .set({ currentVersion: version, generated: input.generated ?? false, updatedAt: sql`now()` })
       .where(eq(secrets.id, secretId));
   } else {
     await tx.insert(secrets).values({
@@ -51,6 +58,7 @@ export async function putSecret(
       projectId: input.projectId,
       name: input.name,
       currentVersion: version,
+      generated: input.generated ?? false,
     });
   }
   await tx.insert(secretVersions).values({
@@ -60,6 +68,37 @@ export async function putSecret(
     createdBy: input.actor,
   });
   return { secretId, version };
+}
+
+/**
+ * Rotates a server-made secret: a fresh random value as its next version.
+ * A value a person supplied is never replaced by a random one.
+ */
+export async function rotateSecret(
+  tx: Executor,
+  kek: Buffer,
+  input: { projectId: string; secretId: string; actor: ActorRecord; value: string },
+): Promise<{ secretId: string; version: number; name: string }> {
+  const [secret] = await tx
+    .select()
+    .from(secrets)
+    .where(and(eq(secrets.id, input.secretId), eq(secrets.projectId, input.projectId)));
+  if (!secret) throw new VDeployError('not_found', 'Secret not found');
+  if (!secret.generated) {
+    throw new VDeployError(
+      'conflict',
+      `${secret.name} holds a value someone entered; set its new value instead of rotating it`,
+    );
+  }
+  const next = await putSecret(tx, kek, {
+    orgId: secret.orgId,
+    projectId: input.projectId,
+    name: secret.name,
+    value: input.value,
+    actor: input.actor,
+    generated: true,
+  });
+  return { ...next, name: secret.name };
 }
 
 /** Names and versions only: safe for anyone who may see the project, the AI included. */
@@ -73,6 +112,7 @@ export async function listSecrets(db: Executor, projectId: string): Promise<Secr
     id: r.id,
     name: r.name,
     version: r.currentVersion,
+    generated: r.generated,
     updatedAt: r.updatedAt.toISOString(),
   }));
 }

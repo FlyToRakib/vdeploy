@@ -7,13 +7,17 @@ import {
   type Id,
   type PlanStep,
 } from '@vdeploy/contracts';
-import { createRelease, hashOf } from '@vdeploy/core';
+import { createRelease, generateSecret, hashOf, specAfter } from '@vdeploy/core';
 import {
+  currentSecretVersions,
   deployments,
   projects,
+  readSecret,
   refreshInstantHosts,
+  rotateSecret,
   releases,
   servers,
+  type ActorRecord,
   type Database,
 } from '@vdeploy/db';
 import { and, desc, eq } from 'drizzle-orm';
@@ -24,6 +28,8 @@ import { pinImage } from './registry.js';
 export interface StepDeps {
   db: Database;
   registry: RegistryAccess;
+  /** Opens and writes secrets: rotation makes a new version. */
+  secretsKey: Buffer;
   now: () => Date;
   pollMs: number;
 }
@@ -32,6 +38,9 @@ export interface StepDeps {
 export interface ApplyState {
   planId: string;
   orgId: string;
+  operation: string;
+  /** Who asked for the plan: recorded on anything it creates. */
+  actor: ActorRecord;
   args: Record<string, unknown>;
   projectId: string | null;
   releaseId: string | null;
@@ -83,8 +92,27 @@ async function chooseServer(deps: StepDeps, state: ApplyState, spec: Application
   return server.id;
 }
 
+const SPEC_EDITS = new Set(['project.create', 'project.update_spec', 'env.set', 'env.unset']);
+
 async function updateSpec(deps: StepDeps, state: ApplyState) {
-  const spec = readSpec((state.args as { spec: unknown }).spec ?? null);
+  if (!SPEC_EDITS.has(state.operation)) {
+    throw new VDeployError('internal', `${state.operation} does not change the spec`);
+  }
+  const current = state.projectId === null ? null : (await project(deps, state)).spec;
+  const spec = specAfter(
+    state.operation as 'project.create' | 'project.update_spec' | 'env.set' | 'env.unset',
+    state.args,
+    current,
+  );
+  // Refuse a reference to a missing secret before the spec is written, not after.
+  if (state.projectId !== null) {
+    await pinSecrets(deps, state.projectId, spec);
+  } else if (spec.runtime.env.some((e) => 'secretRef' in e)) {
+    throw new VDeployError(
+      'invalid_input',
+      'A new project has no secrets yet; create it first, then add its secrets',
+    );
+  }
   if (state.projectId === null) {
     const id = newId('project');
     const serverId = await chooseServer(deps, state, spec);
@@ -127,6 +155,56 @@ async function scaleSpec(deps: StepDeps, state: ApplyState, replicas: number) {
   );
 }
 
+/**
+ * The exact secret versions a release runs with: an entry's own version if
+ * it names one, else the current one. Rollback re-applies them whole.
+ */
+async function pinSecrets(deps: StepDeps, projectId: string, spec: ApplicationSpec) {
+  const refs = spec.runtime.env.flatMap((e) =>
+    'secretRef' in e ? [{ key: e.key, id: e.secretRef, version: e.version }] : [],
+  );
+  const current = await currentSecretVersions(
+    deps.db,
+    projectId,
+    refs.map((r) => r.id),
+  );
+  const pinned: Record<Id<'secret'>, number> = {};
+  for (const ref of refs) {
+    const latest = current.get(ref.id);
+    if (latest === undefined) {
+      throw new VDeployError(
+        'invalid_input',
+        `${ref.key} refers to a secret this project does not have`,
+      );
+    }
+    if (ref.version !== undefined && ref.version > latest) {
+      throw new VDeployError(
+        'invalid_input',
+        `${ref.key} asks for a secret version that does not exist`,
+      );
+    }
+    pinned[ref.id] = ref.version ?? latest;
+  }
+  return pinned;
+}
+
+/** A new random value for a server-made secret, in the same shape as the old one. */
+async function rotate(deps: StepDeps, state: ApplyState, secretId: string) {
+  const row = await project(deps, state);
+  const old = await readSecret(deps.db, deps.secretsKey, row.id, secretId);
+  const alphabet = /^[0-9a-f]+$/.test(old.value) ? 'hex' : 'alphanumeric';
+  const value = generateSecret(Math.max(old.value.length, 16), alphabet);
+  const next = await deps.db.transaction((tx) =>
+    rotateSecret(tx, deps.secretsKey, {
+      projectId: row.id,
+      secretId,
+      value,
+      actor: state.actor,
+    }),
+  );
+  state.notes.push(`${next.name} is now at version ${next.version}.`);
+}
+
 async function newRelease(deps: StepDeps, state: ApplyState) {
   const row = await project(deps, state);
   if (row.spec.source.type !== 'image') {
@@ -147,6 +225,7 @@ async function newRelease(deps: StepDeps, state: ApplyState) {
     version: (latest?.version ?? 0) + 1,
     spec: row.spec,
     image,
+    secretVersions: await pinSecrets(deps, row.id, row.spec),
     now: deps.now(),
   });
   await deps.db.insert(releases).values({ ...release, createdAt: new Date(release.createdAt) });
@@ -293,5 +372,7 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return setRunning(deps, state, true);
     case 'delete_project':
       return deleteProject(deps, state, step.keepData);
+    case 'rotate_secret':
+      return rotate(deps, state, step.secretId);
   }
 }

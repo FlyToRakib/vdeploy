@@ -15,6 +15,7 @@ import {
 import { hashOf } from './canonical.js';
 import { diffSpecs, removedVolumes } from './diff.js';
 import { maxTier } from './risk.js';
+import { specAfter } from './spec-edit.js';
 
 export interface ProjectState {
   id: Id<'project'>;
@@ -115,10 +116,38 @@ function simple(
 const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'project.create': (args, context) => {
     if (context.project) throw new VDeployError('conflict', 'Project already exists');
-    return specChange(null, args.spec, 'sensitive');
+    return specChange(null, specAfter('project.create', args, null), 'sensitive');
   },
-  'project.update_spec': (args, context) =>
-    specChange(requireProject(context), args.spec, 'sensitive'),
+  'project.update_spec': (args, context) => {
+    const project = requireProject(context);
+    return specChange(project, specAfter('project.update_spec', args, project.spec), 'sensitive');
+  },
+  'env.set': (args, context) => {
+    const project = requireProject(context);
+    return specChange(project, specAfter('env.set', args, project.spec), 'sensitive');
+  },
+  'env.unset': (args, context) => {
+    const project = requireProject(context);
+    return specChange(project, specAfter('env.unset', args, project.spec), 'sensitive');
+  },
+  'secret.rotate': (args, context) => {
+    const project = requireProject(context);
+    if (!project.currentReleaseId) {
+      throw new VDeployError('conflict', 'Deploy the project once before rotating its secrets');
+    }
+    // A new value, a new release pinning it, and a health-gated deploy: never two manual steps.
+    return {
+      specHash: null,
+      changes: [],
+      steps: [
+        { kind: 'rotate_secret', secretId: args.secretId },
+        { kind: 'create_release' },
+        { kind: 'deploy', strategy: project.spec.deploy.strategy },
+      ],
+      tier: 'destructive',
+      blastRadius: radius(project.spec, { rollbackTo: project.currentReleaseId }),
+    };
+  },
   'project.scale': (args, context) => {
     const project = requireProject(context);
     const next = validSpec({

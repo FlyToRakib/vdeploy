@@ -26,7 +26,7 @@ import (
 )
 
 // maxFrameBytes bounds any frame the control plane may send.
-const maxFrameBytes = 4 << 20
+const maxFrameBytes = 16 << 20
 
 // Client is the agent's side of the connection.
 type Client struct {
@@ -34,6 +34,8 @@ type Client struct {
 	Key          ed25519.PrivateKey
 	ControlPlane ed25519.PublicKey
 	Facts        identity.Facts
+	// BoxKey is this agent's X25519 public key (base64): secrets are sealed to it.
+	BoxKey string
 	// Updates hands accepted frames to the reconcile loop, which answers each.
 	Updates chan<- reconcile.Update
 	// Generation reports the generation the loop holds.
@@ -77,6 +79,7 @@ type hello struct {
 	AgentVersion string `json:"agentVersion"`
 	Protocol     int    `json:"protocol"`
 	Generation   int64  `json:"generation"`
+	BoxKey       string `json:"boxKey,omitempty"`
 	identity.Facts
 }
 
@@ -189,6 +192,7 @@ func (c *Client) handshake(ctx context.Context, k *conn) error {
 			AgentVersion: c.Facts.AgentVersion,
 			Protocol:     protocol.Version,
 			Generation:   c.Generation(),
+			BoxKey:       c.BoxKey,
 			Facts:        c.Facts,
 		}
 	})

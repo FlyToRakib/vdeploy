@@ -90,6 +90,8 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
   const state: ApplyState = {
     planId: row.id,
     orgId: row.orgId,
+    operation: row.operation,
+    actor: row.actor,
     args: row.args,
     projectId: row.projectId,
     releaseId: null,

@@ -6,3 +6,5 @@ export * from './release.js';
 export * from './instant.js';
 export * from './dns.js';
 export * from './envelope.js';
+export * from './spec-edit.js';
+export * from './seal.js';

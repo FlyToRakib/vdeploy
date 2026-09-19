@@ -180,6 +180,7 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
         projectId: String(args.projectId),
         name: String(args.name),
         value: generateSecret(Number(args.length), args.alphabet as 'alphanumeric' | 'hex'),
+        generated: true,
         actor: { userId: actor.userId, origin: actor.origin },
       }),
     ),

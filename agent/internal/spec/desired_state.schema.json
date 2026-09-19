@@ -1124,6 +1124,34 @@
               "verified"
             ],
             "additionalProperties": false
+          },
+          "secrets": {
+            "maxItems": 128,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^sec_[0-9A-HJKMNP-TV-Z]{26}$"
+                },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sealed": {
+                  "type": "string",
+                  "maxLength": 50000
+                }
+              },
+              "required": [
+                "id",
+                "version",
+                "sealed"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -1134,7 +1162,8 @@
           "image",
           "running",
           "revision",
-          "hosts"
+          "hosts",
+          "secrets"
         ],
         "additionalProperties": false
       }

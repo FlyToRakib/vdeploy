@@ -36,6 +36,8 @@ export const servers = pgTable('servers', {
     .notNull()
     .default('pending'),
   agentPublicKey: text('agent_public_key'),
+  /** The agent's X25519 key (from its signed hello): secrets are sealed to it. */
+  agentBoxKey: text('agent_box_key'),
   agentVersion: text('agent_version'),
   arch: text('arch'),
   capacity: jsonb('capacity').$type<{ cpus: number; memoryBytes: number; diskBytes: number }>(),
@@ -201,6 +203,8 @@ export const secrets = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     currentVersion: integer('current_version').notNull(),
+    /** Made by the server (secret.generate): only these can be rotated without a person. */
+    generated: boolean('generated').notNull().default(false),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

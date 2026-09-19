@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,8 @@ type fakeEngine struct {
 	volumes    map[string]bool
 	images     map[string]bool
 	calls      []string
-	failCreate string // container name whose create fails
+	env        map[string][]string // by container name, as created
+	failCreate string              // container name whose create fails
 	nextID     int
 }
 
@@ -69,6 +71,10 @@ func (f *fakeEngine) Create(_ context.Context, c compose.Container) (string, err
 	}
 	f.nextID++
 	id := fmt.Sprintf("id%d", f.nextID)
+	if f.env == nil {
+		f.env = map[string][]string{}
+	}
+	f.env[c.Name] = c.Env
 	f.containers[id] = &docker.Container{ID: id, Name: c.Name, State: "created", Image: c.Image, Labels: c.Labels}
 	f.calls = append(f.calls, "create "+c.Name)
 	return id, nil
@@ -557,5 +563,68 @@ func TestNoCertificateIsRequestedBeforeDNSIsVerified(t *testing.T) {
 	file = routing.files[key]
 	if strings.Count(file, "certResolver") != 1 {
 		t.Fatalf("only the verified host may get a certificate:\n%s", file)
+	}
+}
+
+// fakeSecrets "opens" a sealed value by reversing a prefix, and records calls.
+type fakeSecrets struct{ opened []string }
+
+func (f *fakeSecrets) Open(projectID, secretID string, version int, sealed string) (string, error) {
+	f.opened = append(f.opened, fmt.Sprintf("%s/%s/%d", projectID, secretID, version))
+	value, ok := strings.CutPrefix(sealed, "sealed:")
+	if !ok {
+		return "", errors.New("not sealed for this server")
+	}
+	return value, nil
+}
+
+func secretProject() spec.DesiredProject {
+	p := testProject(idA, 1, 1)
+	p.Spec.Runtime.Env = []spec.EnvVar{
+		{Key: "MODE", Value: "production"},
+		{Key: "DB_PASSWORD", SecretRef: "sec_01J9Z3Q8S7M2K4X6V1B5N0C9D8"}, // #nosec G101 -- an id, not a credential
+	}
+	p.Secrets = []spec.Secret{{ID: "sec_01J9Z3Q8S7M2K4X6V1B5N0C9D8", Version: 3, Sealed: "sealed:hunter2"}}
+	return p
+}
+
+func TestSecretsAreOpenedOnlyToCreateAContainer(t *testing.T) {
+	engine := newFake()
+	secrets := &fakeSecrets{}
+	r := newReconciler(engine)
+	r.Secrets = secrets
+	report := reconcile(t, r, desired(1, secretProject()))
+	if report.Projects[0].Error != "" {
+		t.Fatalf("error = %s", report.Projects[0].Error)
+	}
+	for _, env := range engine.env {
+		if !slices.Equal(env, []string{"MODE=production", "DB_PASSWORD=hunter2"}) {
+			t.Fatalf("env = %v", env)
+		}
+	}
+	if !slices.Equal(secrets.opened, []string{"prj_" + idA + "/sec_01J9Z3Q8S7M2K4X6V1B5N0C9D8/3"}) {
+		t.Fatalf("opened = %v", secrets.opened)
+	}
+	// Nothing reported back carries the value.
+	raw, _ := json.Marshal(report)
+	if strings.Contains(string(raw), "hunter2") {
+		t.Fatal("a report leaked a secret value")
+	}
+}
+
+func TestAProjectWhoseSecretsCannotBeOpenedIsNotStarted(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine) // not enrolled: no secret source
+	report := reconcile(t, r, desired(1, secretProject()))
+	if len(engine.running()) != 0 || !strings.Contains(report.Projects[0].Error, "DB_PASSWORD could not be opened") {
+		t.Fatalf("running = %v, error = %q", engine.running(), report.Projects[0].Error)
+	}
+
+	tampered := secretProject()
+	tampered.Secrets[0].Sealed = "forged"
+	r.Secrets = &fakeSecrets{}
+	report = reconcile(t, r, desired(2, tampered))
+	if len(engine.running()) != 0 || strings.Contains(report.Projects[0].Error, "forged") {
+		t.Fatalf("running = %v, error = %q", engine.running(), report.Projects[0].Error)
 	}
 }

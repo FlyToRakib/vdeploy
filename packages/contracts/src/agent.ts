@@ -34,6 +34,19 @@ export const DesiredProject = z.strictObject({
      */
     verified: z.array(Hostname).max(64),
   }),
+  /**
+   * The secret values this release uses, each sealed to the agent's own
+   * X25519 key (§22) — never in the clear, not even inside a signed frame.
+   */
+  secrets: z
+    .array(
+      z.strictObject({
+        id: idSchema('secret'),
+        version: z.number().int().positive(),
+        sealed: z.string().max(50_000),
+      }),
+    )
+    .max(128),
 });
 export type DesiredProject = z.infer<typeof DesiredProject>;
 
@@ -111,6 +124,8 @@ export const AgentFrame = z.discriminatedUnion('type', [
     memoryBytes: z.number().int().min(0),
     /** Globally routable addresses on the server's interfaces. */
     addresses: z.array(z.string().max(45)).max(16).optional(),
+    /** The agent's X25519 public key: secrets are sealed to it. */
+    boxKey: z.base64().length(44).optional(),
   }),
   z.strictObject({
     ...FrameHeader,

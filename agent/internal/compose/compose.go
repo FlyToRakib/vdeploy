@@ -5,6 +5,7 @@ package compose
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +90,9 @@ func Plan(p spec.DesiredProject) ([]Container, error) {
 	}
 	env := make([]string, 0, len(rt.Env))
 	for _, e := range rt.Env {
-		env = append(env, e.Key+"="+e.Value)
+		if e.SecretRef == "" { // secrets are opened only at creation: see SecretEnv
+			env = append(env, e.Key+"="+e.Value)
+		}
 	}
 	mounts := make([]Mount, 0, len(rt.Volumes))
 	for _, v := range rt.Volumes {
@@ -124,4 +127,30 @@ func Plan(p spec.DesiredProject) ([]Container, error) {
 		})
 	}
 	return replicas, nil
+}
+
+// SecretEnv opens a project's secret variables for one container creation.
+// Values never go into a Container kept by the reconciler, and no error
+// carries any part of one.
+func SecretEnv(p spec.DesiredProject, open func(secretID string, version int, sealed string) (string, error)) ([]string, error) {
+	var env []string
+	for _, e := range p.Spec.Runtime.Env {
+		if e.SecretRef == "" {
+			continue
+		}
+		i := slices.IndexFunc(p.Secrets, func(s spec.Secret) bool { return s.ID == e.SecretRef })
+		if i < 0 {
+			return nil, fmt.Errorf("the value of %s was not delivered", e.Key)
+		}
+		s := p.Secrets[i]
+		value, err := open(s.ID, s.Version, s.Sealed)
+		if err != nil {
+			return nil, fmt.Errorf("the value of %s could not be opened: %w", e.Key, err)
+		}
+		if strings.ContainsRune(value, 0) {
+			return nil, fmt.Errorf("the value of %s contains a NUL byte", e.Key)
+		}
+		env = append(env, e.Key+"="+value)
+	}
+	return env, nil
 }
