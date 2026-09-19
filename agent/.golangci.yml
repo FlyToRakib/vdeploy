@@ -1,0 +1,19 @@
+version: '2'
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - gosec
+    - revive
+    - unconvert
+    - unparam
+    - wrapcheck
+  settings:
+    wrapcheck:
+      ignore-sigs:
+        - fmt.Errorf(
+        - errors.New(
+        - errors.Join(
+formatters:
+  enable:
+    - gofmt

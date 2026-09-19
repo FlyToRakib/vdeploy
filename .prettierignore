@@ -6,3 +6,5 @@ coverage
 drizzle
 docs/vps-baseline.json
 *.md
+agent/internal/spec/desired_state.schema.json
+agent/**/testdata

@@ -1,0 +1,15 @@
+{
+  "name": "@vdeploy/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "schema": "node ../scripts/export-agent-schema.mjs",
+    "typecheck": "node ../scripts/go.mjs vet ./...",
+    "test": "node ../scripts/export-agent-schema.mjs --check && node ../scripts/go.mjs test -race=false -count=1 ./...",
+    "lint": "node ../scripts/go.mjs lint"
+  },
+  "devDependencies": {
+    "@vdeploy/contracts": "workspace:*"
+  }
+}

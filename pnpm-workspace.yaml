@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - agent
 allowBuilds:
   cpu-features: false
   esbuild: true

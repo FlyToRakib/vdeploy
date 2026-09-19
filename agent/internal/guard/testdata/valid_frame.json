@@ -1,0 +1,116 @@
+{
+  "protocol": 1,
+  "serverId": "srv_01J9Z3Q8S7M2K4X6V1B5N0C9D8",
+  "generation": 7,
+  "projects": [
+    {
+      "projectId": "prj_01J9Z3Q8S7M2K4X6V1B5N0C9D8",
+      "releaseId": "rel_01J9Z3Q8S7M2K4X6V1B5N0C9D8",
+      "releaseVersion": 3,
+      "spec": {
+        "apiVersion": "vdeploy/v1",
+        "kind": "Application",
+        "metadata": {
+          "name": "blog",
+          "labels": {}
+        },
+        "source": {
+          "type": "image",
+          "image": "nginx:1.27"
+        },
+        "build": {
+          "strategy": "image",
+          "context": ".",
+          "args": {},
+          "secrets": [],
+          "cache": "registry"
+        },
+        "runtime": {
+          "replicas": 1,
+          "command": null,
+          "resources": {
+            "cpu": {
+              "request": 0.25,
+              "limit": 1
+            },
+            "memory": {
+              "request": "256Mi",
+              "limit": "512Mi"
+            }
+          },
+          "restartPolicy": "unless-stopped",
+          "stopGracePeriod": "30s",
+          "env": [
+            {
+              "key": "MODE",
+              "value": "production"
+            }
+          ],
+          "volumes": [
+            {
+              "name": "uploads",
+              "mountPath": "/app/uploads"
+            }
+          ],
+          "links": []
+        },
+        "network": {
+          "containerPort": 80,
+          "protocol": "http",
+          "domains": [
+            {
+              "host": "blog.example.com",
+              "tls": {
+                "provider": "letsencrypt",
+                "challenge": "http-01"
+              },
+              "paths": [
+                "/"
+              ]
+            }
+          ],
+          "middleware": {
+            "compression": true,
+            "ipAllowList": [],
+            "headers": {
+              "hsts": true,
+              "frameDeny": true
+            }
+          },
+          "loadBalancer": {
+            "algorithm": "wrr",
+            "sticky": {
+              "enabled": false,
+              "cookie": "vd-sticky"
+            }
+          }
+        },
+        "health": {},
+        "deploy": {
+          "strategy": "blueGreen",
+          "drainPeriod": "30s",
+          "timeout": "10m",
+          "autoRollback": true
+        },
+        "scaling": {
+          "mode": "manual",
+          "rules": [],
+          "min": 1,
+          "max": 1
+        },
+        "schedule": {
+          "crons": []
+        },
+        "placement": {},
+        "ai": {
+          "managed": true,
+          "autoApply": [
+            "safe"
+          ]
+        }
+      },
+      "image": "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "running": true
+    }
+  ]
+}

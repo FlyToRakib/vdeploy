@@ -10,3 +10,4 @@ export * from './kernel.js';
 export * from './grants.js';
 export * from './canonical.js';
 export * from './account.js';
+export * from './agent.js';
