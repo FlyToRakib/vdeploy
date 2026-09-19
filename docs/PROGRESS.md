@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.20 — agent — enrollment, Ed25519-signed frames, wss transport
+**Task:** 1.21 — agent — preflight doctor
 **Status:** in progress
-**Updated:** 2026-09-19 13:28 UTC
+**Updated:** 2026-09-19 13:35 UTC
 
 ## Done
 
@@ -26,14 +26,14 @@
 - [x] 1.17 apps/web — Next 16 shell: sidebar (collapsible, org, theme, account), deep-linked sections + breadcrumbs, docked AI panel (honest AI-off state), ⌘K palette, semantic tokens contrast-tested in both themes, no-flash theming under nonce CSP, error/loading boundaries, phone layout; sign-in (password/2FA/passkey), first-run setup (shared Zod schema), forgot/reset, security settings (sessions, passkeys, TOTP + recovery codes). Verified live in the browser.
 - [x] 1.18 agent — Go module; frames validated against JSON Schema generated from contracts (drift-checked); L6 guard (digest-pinned + allowlisted registry, memory/CPU bounds, mount paths, stateful replicas, secrets refused until delivery exists); compose plans hardened replicas (own labels, project network, pids/log limits, no privilege fields at all); adversarial suite: 38 hostile frames all refused; golangci-lint clean
 - [x] 1.19 agent — stdlib Docker Engine client (ADR 0003; request types cannot express privileges/binds), reconciler (create/heal/stop/replace, new release starts before old stops, deleted projects keep volumes, only labelled containers touched, per-project failure isolation), loop (atomic persisted state, stale generations ignored, tampered disk state refused, pass never cut by shutdown), local config/policy, vd-agent binary. Verified in local dind: deploy, hardening, self-heal, restart convergence, bystander untouched
+- [x] 1.20 agent — enrollment (one-time token → local Ed25519 key, pinned control-plane key, https-only except loopback, idempotent), signed-frame protocol (ADR 0004: sig over exact body bytes, per-connection nonce, strict seq, clock skew), outbound wss client (challenge → hello → desired_state/ack/observed_state, backoff reconnect, strict decode, any bad frame closes the connection); tests incl. forged/replayed/cross-connection/impostor; race detector on
 
 ## Doing
 
-- [ ] 1.20 agent — enrollment, Ed25519-signed frames, wss transport
+- [ ] 1.21 agent — preflight doctor
 
 ## Next (M1)
 
-- [ ] 1.21 agent — preflight doctor
 - [ ] 1.22 control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
 - [ ] 1.23 control plane — agent gateway (wss) + worker applying plans + observed state
 - [ ] 1.24 end-to-end deploy of a prebuilt image in the testbed (M1 exit)

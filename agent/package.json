@@ -6,7 +6,7 @@
   "scripts": {
     "schema": "node ../scripts/export-agent-schema.mjs",
     "typecheck": "node ../scripts/go.mjs vet ./...",
-    "test": "node ../scripts/export-agent-schema.mjs --check && node ../scripts/go.mjs test -race=false -count=1 ./...",
+    "test": "node ../scripts/export-agent-schema.mjs --check && node ../scripts/go.mjs test -race -count=1 ./...",
     "lint": "node ../scripts/go.mjs lint"
   },
   "devDependencies": {

@@ -95,7 +95,7 @@ func TestTamperedStateOnDiskIsRefusedAtStart(t *testing.T) {
 
 func TestRunConvergesOnUpdates(t *testing.T) {
 	engine := newFake()
-	updates := make(chan []byte, 1)
+	updates := make(chan Update, 1)
 	reports := make(chan Report, 8)
 	loop := newLoop(t, engine, t.TempDir())
 	loop.Updates = updates
@@ -104,7 +104,11 @@ func TestRunConvergesOnUpdates(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- loop.Run(ctx) }()
 
-	updates <- frameFile(t)
+	result := make(chan error, 1)
+	updates <- Update{Frame: frameFile(t), Result: result}
+	if err := <-result; err != nil {
+		t.Fatalf("frame not accepted: %v", err)
+	}
 	select {
 	case report := <-reports:
 		if len(report.Events) != 1 || report.Events[0].Kind != "created" {

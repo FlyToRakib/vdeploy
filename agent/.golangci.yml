@@ -17,6 +17,12 @@ linters:
       # Errors from our own packages already carry context.
       ignore-package-globs:
         - github.com/FlyToRakib/vdeploy/agent/*
+  exclusions:
+    rules:
+      # Tests assert on errors directly; wrapping them would only add noise.
+      - path: _test\.go
+        linters:
+          - wrapcheck
 formatters:
   enable:
     - gofmt

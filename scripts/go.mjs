@@ -10,7 +10,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const GO_IMAGE = 'golang:1.27-alpine';
+const GO_IMAGE = 'golang:1.27';
 const LINT_IMAGE = 'golangci/golangci-lint:v2.13.2';
 const agent = fileURLToPath(new URL('../agent', import.meta.url));
 const args = process.argv.slice(2);
@@ -39,7 +39,7 @@ run('docker', [
   '-v',
   'vdeploy-test-gocache:/root/.cache',
   '-e',
-  'CGO_ENABLED=0',
+  `CGO_ENABLED=${args.includes('-race') ? 1 : 0}`,
   lint ? LINT_IMAGE : GO_IMAGE,
   ...(lint ? ['golangci-lint', 'run', './...'] : ['go', ...args]),
 ]);

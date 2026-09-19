@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/guard"
@@ -25,12 +26,36 @@ type Loop struct {
 	// StateDir holds desired.json, the last accepted frame.
 	StateDir string
 	Interval time.Duration
-	// Updates delivers raw desired-state frames from the transport.
-	Updates <-chan []byte
+	// Updates delivers desired-state frames from the transport; each is answered on Result.
+	Updates <-chan Update
 	// Reports receives the outcome of every pass; it must not block for long.
 	Reports chan<- Report
 
 	current *spec.DesiredState
+	// held mirrors current's generation for other goroutines (the transport).
+	held    atomic.Int64
+	holding atomic.Bool
+}
+
+// Update is one desired-state frame and where to answer whether it was accepted.
+type Update struct {
+	Frame  []byte
+	Result chan<- error
+}
+
+// Generation is the generation currently held, or -1 before any state.
+// Safe to call from any goroutine.
+func (l *Loop) Generation() int64 {
+	if !l.holding.Load() {
+		return -1
+	}
+	return l.held.Load()
+}
+
+func (l *Loop) hold(state *spec.DesiredState) {
+	l.current = state
+	l.held.Store(state.Generation)
+	l.holding.Store(true)
 }
 
 func (l *Loop) statePath() string { return filepath.Join(l.StateDir, "desired.json") }
@@ -48,7 +73,7 @@ func (l *Loop) load() error {
 	if err != nil {
 		return fmt.Errorf("persisted state refused: %w", err)
 	}
-	l.current = state
+	l.hold(state)
 	return nil
 }
 
@@ -89,7 +114,7 @@ func (l *Loop) accept(frame []byte) error {
 	if err := l.save(frame); err != nil {
 		return err
 	}
-	l.current = state
+	l.hold(state)
 	return nil
 }
 
@@ -123,8 +148,10 @@ func (l *Loop) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case frame := <-l.Updates:
-			if err := l.accept(frame); err != nil {
+		case update := <-l.Updates:
+			err := l.accept(update.Frame)
+			update.Result <- err
+			if err != nil {
 				l.Reconciler.Log.Warn("desired state not accepted", "err", err)
 				continue
 			}
