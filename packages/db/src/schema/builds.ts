@@ -53,6 +53,8 @@ export const builds = pgTable(
         context: string;
         target?: string;
         args: Record<string, string>;
+        /** Leading folders to drop: 1 for a GitHub tarball. */
+        strip?: number;
       }>()
       .notNull(),
     /** Build-time secrets, by name and pinned version: sealed only when sent. */

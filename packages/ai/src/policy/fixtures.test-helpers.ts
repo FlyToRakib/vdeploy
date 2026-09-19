@@ -153,6 +153,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'source.upload': { sha256: 'a'.repeat(64), size: 1024 },
   'source.detect': { serverId: newId('server'), uploadId: newId('upload') },
   'build.get': { buildId: newId('build') },
+  'project.deploy_upload': { uploadId: newId('upload') },
 };
 
 /** A valid input for any operation, naming the given target. */

@@ -60,7 +60,8 @@ function unsetEnv(spec: ApplicationSpec, args: OperationArgs<'env.unset'>): Appl
  * the worker writes exactly the spec whose hash the plan was approved with.
  */
 export function specAfter(
-  name: 'project.create' | 'project.update_spec' | 'env.set' | 'env.unset',
+  name:
+    'project.create' | 'project.update_spec' | 'env.set' | 'env.unset' | 'project.deploy_upload',
   args: Record<string, unknown>,
   current: ApplicationSpec | null,
 ): ApplicationSpec {
@@ -68,6 +69,14 @@ export function specAfter(
     return valid(args.spec);
   }
   if (!current) throw new VDeployError('not_found', 'Project not found');
+  if (name === 'project.deploy_upload') {
+    // An image project that gets source now needs building: auto-detect it.
+    const build =
+      current.build.strategy === 'image'
+        ? { ...current.build, strategy: 'railpack' }
+        : current.build;
+    return valid({ ...current, source: { type: 'archive', uploadId: args.uploadId }, build });
+  }
   return name === 'env.set'
     ? setEnv(current, args as OperationArgs<'env.set'>)
     : unsetEnv(current, args as OperationArgs<'env.unset'>);

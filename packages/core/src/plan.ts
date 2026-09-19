@@ -142,6 +142,15 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       context,
     );
   },
+  'project.deploy_upload': (args, context) => {
+    const project = requireProject(context);
+    return specChange(
+      project,
+      specAfter('project.deploy_upload', args, project.spec),
+      'sensitive',
+      context,
+    );
+  },
   'env.set': (args, context) => {
     const project = requireProject(context);
     return specChange(project, specAfter('env.set', args, project.spec), 'sensitive', context);

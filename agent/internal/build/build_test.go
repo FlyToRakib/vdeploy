@@ -2,6 +2,7 @@ package build
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -58,7 +59,7 @@ func TestExtractWritesOnlyInsideTheSource(t *testing.T) {
 		entry{name: "app/index.js", body: "ok"},
 		entry{name: "./Dockerfile", body: "FROM scratch"},
 		entry{name: "app/link", link: "index.js", kind: tar.TypeSymlink},
-	)), dir)
+	)), dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestExtractRefusesEscapes(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			err := Extract(bytes.NewReader(archive(t, e)), dir)
+			err := Extract(bytes.NewReader(archive(t, e)), dir, 0)
 			if !errors.Is(err, ErrUnsafeArchive) {
 				t.Fatalf("err = %v", err)
 			}
@@ -93,14 +94,14 @@ func TestExtractRefusesEscapes(t *testing.T) {
 		entry{name: "target", body: "inside"},
 		entry{name: "via", link: "target", kind: tar.TypeSymlink},
 		entry{name: "via", body: "overwrite"},
-	)), dir)
+	)), dir, 0)
 	if !errors.Is(err, ErrUnsafeArchive) {
 		t.Fatalf("write through link: err = %v", err)
 	}
 }
 
 func TestExtractRefusesSomethingThatIsNotAnArchive(t *testing.T) {
-	if err := Extract(strings.NewReader("not gzip"), t.TempDir()); err == nil {
+	if err := Extract(strings.NewReader("not gzip"), t.TempDir(), 0); err == nil {
 		t.Fatal("accepted a non-archive")
 	}
 }
@@ -325,5 +326,61 @@ func TestANetworkHiccupIsRetriedOnceButAnAppErrorIsNot(t *testing.T) {
 	}
 	if result := builder.Run(context.Background(), req); result.OK || runs != 1 {
 		t.Fatalf("an app error was retried: %+v after %d runs", result, runs)
+	}
+}
+
+func zipArchive(t *testing.T, files map[string]string, links ...string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	for name, body := range files {
+		f, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = f.Write([]byte(body))
+	}
+	for _, name := range links {
+		h := &zip.FileHeader{Name: name}
+		h.SetMode(os.ModeSymlink | 0o777)
+		f, _ := w.CreateHeader(h)
+		_, _ = f.Write([]byte("/etc/passwd"))
+	}
+	_ = w.Close()
+	return buf.Bytes()
+}
+
+func TestZipSourcesUnpackWithTheSameRules(t *testing.T) {
+	dir := t.TempDir()
+	raw := zipArchive(t, map[string]string{"site/index.html": "hi", "Dockerfile": "FROM nginx"})
+	if err := Unpack(bytes.NewReader(raw), int64(len(raw)), dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "site", "index.html")) // #nosec G304 -- test temp dir
+	if string(got) != "hi" {
+		t.Fatalf("index.html = %q", got)
+	}
+	for name, raw := range map[string][]byte{
+		"parent path":      zipArchive(t, map[string]string{"../evil": "x"}),
+		"backslash parent": zipArchive(t, map[string]string{"..\\evil": "x"}),
+		"symlink":          zipArchive(t, nil, "link"),
+	} {
+		if err := Unpack(bytes.NewReader(raw), int64(len(raw)), t.TempDir(), 0); !errors.Is(err, ErrUnsafeArchive) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestAGitHubTarballLosesItsWrappingFolder(t *testing.T) {
+	dir := t.TempDir()
+	raw := archive(t,
+		entry{name: "repo-main/", kind: tar.TypeDir},
+		entry{name: "repo-main/package.json", body: "{}"},
+	)
+	if err := Unpack(bytes.NewReader(raw), int64(len(raw)), dir, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
+		t.Fatalf("package.json not at the top: %v", err)
 	}
 }

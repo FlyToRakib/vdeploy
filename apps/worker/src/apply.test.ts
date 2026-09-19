@@ -27,7 +27,7 @@ import {
   user,
 } from '@vdeploy/db';
 import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { applyPlan, type WorkerDeps } from './apply.js';
 import type { RegistryAccess } from './registry.js';
@@ -399,6 +399,59 @@ describe('building from uploaded source', () => {
     expect(await applyPlan(deps, row.id)).toBe('failed');
     const [failed] = await t.db.select().from(plans).where(eq(plans.id, row.id));
     expect(failed?.error?.message).toBe('The build failed: npm install failed');
+  });
+
+  it('deploys an upload onto an image project, auto-detecting how to build it', async () => {
+    const created = await createProject();
+    const uploadId = await upload();
+    const deploy = await plan('project.deploy_upload', { projectId: created.id, uploadId });
+    expect(await applyPlan(deps, deploy.id)).toBe('applied');
+    const after = await project(created.id);
+    expect(after.spec.source).toEqual({ type: 'archive', uploadId });
+    expect(after.spec.build.strategy).toBe('railpack');
+    const [release] = await t.db
+      .select()
+      .from(releases)
+      .where(eq(releases.id, after.currentReleaseId!));
+    expect(release?.image).toBe(BUILT);
+  });
+
+  it('builds a public GitHub branch, without its wrapping folder', async () => {
+    const asked: string[] = [];
+    deps.fetch = (input) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      asked.push(url);
+      return Promise.resolve(
+        url.includes('missing')
+          ? new Response('no', { status: 404 })
+          : new Response(new Uint8Array([0x1f, 0x8b, 1, 2]), { status: 200 }),
+      );
+    };
+    try {
+      const git = (repo: string) =>
+        spec({
+          source: { type: 'git', provider: 'github', repo, branch: 'feature/x' },
+          build: { strategy: 'dockerfile' },
+        });
+      const ok = await plan('project.create', { spec: git('acme/site'), serverId });
+      expect(await applyPlan(deps, ok.id)).toBe('applied');
+      expect(asked).toEqual(['https://codeload.github.com/acme/site/tar.gz/refs/heads/feature/x']);
+      const [build] = await t.db
+        .select()
+        .from(builds)
+        .where(eq(builds.status, 'succeeded'))
+        .orderBy(desc(builds.createdAt))
+        .limit(1);
+      expect(build?.options.strip).toBe(1);
+
+      await t.db.update(projects).set({ deletedAt: new Date() });
+      const missing = await plan('project.create', { spec: git('acme/missing'), serverId });
+      expect(await applyPlan(deps, missing.id)).toBe('failed');
+      const [failed] = await t.db.select().from(plans).where(eq(plans.id, missing.id));
+      expect(failed?.error?.message).toMatch(/no public repository acme\/missing/);
+    } finally {
+      delete deps.fetch;
+    }
   });
 
   it('needs the build secrets it names', async () => {

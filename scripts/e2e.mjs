@@ -14,9 +14,11 @@
 // any change. Nothing outside the testbed is ever created or touched.
 
 import { execFileSync, spawn } from 'node:child_process';
+import { Buffer } from 'node:buffer';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { crc32 } from 'node:zlib';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -444,17 +446,58 @@ async function uploadArchive(archive) {
   return JSON.parse(text);
 }
 
+/** A ZIP with stored (uncompressed) entries, as any zip tool would read it. */
+function zipOf(files) {
+  const local = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const data = Buffer.from(text);
+    const nameBytes = Buffer.from(name);
+    const crc = crc32(data);
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0);
+    head.writeUInt16LE(20, 4);
+    head.writeUInt32LE(crc, 14);
+    head.writeUInt32LE(data.length, 18);
+    head.writeUInt32LE(data.length, 22);
+    head.writeUInt16LE(nameBytes.length, 26);
+    local.push(head, nameBytes, data);
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0);
+    entry.writeUInt16LE(20, 4);
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt32LE(crc, 16);
+    entry.writeUInt32LE(data.length, 20);
+    entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(nameBytes.length, 28);
+    entry.writeUInt32LE(offset, 42);
+    central.push(entry, nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(Object.keys(files).length, 8);
+  end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, directory, end]);
+}
+
 /** A tiny Node app with no Dockerfile: auto-detect has to work out how to build it. */
-function nodeAppArchive() {
+function nodeAppArchive(message = 'railpack ok', format = 'tar.gz') {
+  const files = {
+    'package.json': JSON.stringify({
+      name: 'node-app',
+      version: '1.0.0',
+      scripts: { start: 'node index.js' },
+    }),
+    'index.js': `require('http').createServer((q, s) => s.end('${message}\\n')).listen(process.env.PORT || 3000);\n`,
+  };
+  if (format === 'zip') return zipOf(files);
   const dir = mkdtempSync(join(tmpdir(), 'vdeploy-e2e-app-'));
-  writeFileSync(
-    join(dir, 'package.json'),
-    JSON.stringify({ name: 'node-app', version: '1.0.0', scripts: { start: 'node index.js' } }),
-  );
-  writeFileSync(
-    join(dir, 'index.js'),
-    "require('http').createServer((q, s) => s.end('railpack ok\\n')).listen(process.env.PORT || 3000);\n",
-  );
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   const archive = execFileSync('tar', ['-czf', '-', '-C', dir, '.'], { maxBuffer: 64 << 20 });
   rmSync(dir, { recursive: true, force: true });
   return archive;
@@ -523,6 +566,30 @@ async function buildFromSource(serverId) {
     60_000,
   );
   pass('built from uploaded source on the server and served', body.trim());
+
+  // A new version as a .zip, deployed in one step (M2 2.8).
+  const [nodeApp] = (await op('project.list', {})).result.filter((p) => p.name === 'node-app');
+  const { uploadId: zipId } = await uploadArchive(nodeAppArchive('zip v2 ok', 'zip'));
+  const deploy = await op('project.deploy_upload', { projectId: nodeApp.id, uploadId: zipId });
+  await until(
+    'zip deployed',
+    async () => {
+      const plan = await call('GET', `/api/v1/plans/${deploy.plan.id}`);
+      if (plan.status === 'failed' || plan.status === 'stale')
+        throw new Error(JSON.stringify(plan));
+      return plan.status === 'applied';
+    },
+    1_200_000,
+  );
+  await until(
+    'new version served',
+    async () =>
+      inTestbed(
+        `wget -q -O - -T 3 --header 'Host: ${NODE_HOST}' http://127.0.0.1/ 2>/dev/null || true`,
+      ).includes('zip v2 ok'),
+    60_000,
+  );
+  pass('a .zip upload deployed as the next version in one step', 'zip v2 ok');
 }
 
 const INSTANT_HOST = 'hello.apps.vdeploy.test';

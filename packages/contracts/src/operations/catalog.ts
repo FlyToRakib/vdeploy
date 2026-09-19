@@ -147,6 +147,13 @@ export const OPERATIONS = [
     obj({ spec: ApplicationSpec, serverId: serverId.optional() }),
   ),
   operation(
+    'project.deploy_upload',
+    'sensitive',
+    'project',
+    'Build and deploy an uploaded folder or archive as the new version of this project',
+    obj({ ...P, uploadId: idSchema('upload') }),
+  ),
+  operation(
     'project.update_spec',
     'sensitive',
     'project',

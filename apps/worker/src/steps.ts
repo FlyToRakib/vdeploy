@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import {
   durationMs,
+  MAX_UPLOAD_BYTES,
   newId,
   readSpec,
   VDeployError,
@@ -34,6 +36,8 @@ export interface StepDeps {
   db: Database;
   /** How long a build may take before it is given up (default one hour). */
   buildTimeoutMs?: number;
+  /** Outbound HTTP for public source (GitHub); the global fetch when unset. */
+  fetch?: typeof fetch;
   registry: RegistryAccess;
   /** Opens and writes secrets: rotation makes a new version. */
   secretsKey: Buffer;
@@ -99,7 +103,13 @@ async function chooseServer(deps: StepDeps, state: ApplyState, spec: Application
   return server.id;
 }
 
-const SPEC_EDITS = new Set(['project.create', 'project.update_spec', 'env.set', 'env.unset']);
+const SPEC_EDITS = new Set([
+  'project.create',
+  'project.update_spec',
+  'env.set',
+  'env.unset',
+  'project.deploy_upload',
+]);
 
 async function updateSpec(deps: StepDeps, state: ApplyState) {
   if (!SPEC_EDITS.has(state.operation)) {
@@ -107,7 +117,8 @@ async function updateSpec(deps: StepDeps, state: ApplyState) {
   }
   const current = state.projectId === null ? null : (await project(deps, state)).spec;
   const spec = specAfter(
-    state.operation as 'project.create' | 'project.update_spec' | 'env.set' | 'env.unset',
+    state.operation as
+      'project.create' | 'project.update_spec' | 'env.set' | 'env.unset' | 'project.deploy_upload',
     state.args,
     current,
   );
@@ -212,6 +223,47 @@ async function rotate(deps: StepDeps, state: ApplyState, secretId: string) {
   state.notes.push(`${next.name} is now at version ${next.version}.`);
 }
 
+/**
+ * A public GitHub repository's branch as a tarball, stored like an upload.
+ * Private repositories need the GitHub App (M2 2.15).
+ */
+async function fetchPublicRepo(
+  deps: StepDeps,
+  state: ApplyState,
+  repo: string,
+  branch: string,
+): Promise<string> {
+  const ref = branch.split('/').map(encodeURIComponent).join('/');
+  const url = `https://codeload.github.com/${repo}/tar.gz/refs/heads/${ref}`;
+  const res = await (deps.fetch ?? fetch)(url, { redirect: 'follow' });
+  if (res.status === 404) {
+    throw new VDeployError(
+      'not_found',
+      `GitHub has no public repository ${repo} with a branch ${branch}; private repositories need the GitHub App`,
+    );
+  }
+  if (!res.ok) throw new VDeployError('unavailable', `GitHub answered ${res.status}; try again`);
+  const declared = Number(res.headers.get('content-length') ?? 0);
+  if (declared > MAX_UPLOAD_BYTES) {
+    throw new VDeployError('invalid_input', 'The repository is larger than 200 MB compressed');
+  }
+  const data = Buffer.from(await res.arrayBuffer());
+  if (data.length > MAX_UPLOAD_BYTES) {
+    throw new VDeployError('invalid_input', 'The repository is larger than 200 MB compressed');
+  }
+  const id = newId('upload');
+  await deps.db.insert(uploads).values({
+    id,
+    orgId: state.orgId,
+    sha256: createHash('sha256').update(data).digest('hex'),
+    size: data.length,
+    data,
+    createdBy: state.actor,
+  });
+  state.notes.push(`Fetched ${repo}@${branch} from GitHub.`);
+  return id;
+}
+
 /** How the agent builds each spec strategy (ADR 0008); the rest are not built yet. */
 const AGENT_STRATEGY = {
   dockerfile: 'dockerfile',
@@ -233,6 +285,7 @@ async function buildImage(
   state: ApplyState,
   row: Awaited<ReturnType<typeof project>>,
   uploadId: string,
+  strip = 0,
 ): Promise<string> {
   const { spec } = row;
   const strategy =
@@ -277,6 +330,7 @@ async function buildImage(
         context: spec.build.context,
         ...(spec.build.target ? { target: spec.build.target } : {}),
         args: spec.build.args,
+        ...(strip ? { strip } : {}),
       },
       secrets: buildSecrets,
     }),
@@ -305,6 +359,9 @@ async function newRelease(deps: StepDeps, state: ApplyState) {
     image = await pinImage(source.image, deps.registry);
   } else if (source.type === 'archive') {
     image = await buildImage(deps, state, row, source.uploadId);
+  } else if (source.type === 'git') {
+    const uploadId = await fetchPublicRepo(deps, state, source.repo, source.branch);
+    image = await buildImage(deps, state, row, uploadId, 1);
   } else {
     throw new VDeployError(
       'unavailable',

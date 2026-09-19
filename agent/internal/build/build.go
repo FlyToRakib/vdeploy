@@ -41,6 +41,8 @@ type Request struct {
 	Target     string            `json:"target,omitempty"`
 	Args       map[string]string `json:"args"`
 	Source     Source            `json:"source"`
+	// Strip removes leading folders from every path (1 for a GitHub tarball).
+	Strip int `json:"strip,omitempty"`
 	// DetectOnly runs Railpack's detection and reports it, building nothing.
 	DetectOnly bool `json:"detectOnly"`
 	// Secrets are build-time secrets, each sealed to this agent (ADR 0007).
@@ -157,6 +159,9 @@ func (r Request) validate() error {
 			return fail("the build secret name %q is malformed", secret.Name)
 		}
 	}
+	if r.Strip < 0 || r.Strip > 1 {
+		return fail("the source layout is malformed")
+	}
 	if r.DetectOnly && r.Strategy != "railpack" {
 		return fail("only auto-detect can preview a build")
 	}
@@ -212,7 +217,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	_ = os.Chown(plan, 1000, 1000)
 	_ = os.Chown(out, 1000, 1000)
 
-	if err := b.fetch(ctx, req.Source, src); err != nil {
+	if err := b.fetch(ctx, req.Source, src, req.Strip); err != nil {
 		return "", nil, "", err
 	}
 	buildDir := filepath.Join(src, filepath.FromSlash(folder))
@@ -402,7 +407,7 @@ func (b *Builder) watermarks(ctx context.Context) error {
 }
 
 // fetch downloads the archive, checks its size and hash, and unpacks it.
-func (b *Builder) fetch(ctx context.Context, s Source, dir string) error {
+func (b *Builder) fetch(ctx context.Context, s Source, dir string, strip int) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.URL, nil)
@@ -431,10 +436,7 @@ func (b *Builder) fetch(ctx context.Context, s Source, dir string) error {
 	if n != s.Size || hex.EncodeToString(hash.Sum(nil)) != s.SHA256 {
 		return fail("the downloaded source does not match what was uploaded")
 	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("read the source: %w", err)
-	}
-	if err := Extract(tmp, dir); err != nil {
+	if err := Unpack(tmp, n, dir, strip); err != nil {
 		if errors.Is(err, ErrUnsafeArchive) {
 			return fail("%s", err.Error())
 		}

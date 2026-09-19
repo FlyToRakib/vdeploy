@@ -7,7 +7,19 @@ import { resolveActor } from '../http/actor.js';
 import type { KernelDeps } from '../kernel/context.js';
 import { runOperation } from '../kernel/pipeline.js';
 
-const ARCHIVE_TYPES = ['application/gzip', 'application/x-gzip', 'application/octet-stream'];
+const ARCHIVE_TYPES = [
+  'application/gzip',
+  'application/x-gzip',
+  'application/zip',
+  'application/octet-stream',
+];
+
+/** A .tar.gz starts 1f 8b, a .zip starts "PK\x03\x04"; nothing else is stored. */
+function isArchive(body: Buffer): boolean {
+  const gzip = body[0] === 0x1f && body[1] === 0x8b;
+  const zip = body.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  return gzip || zip;
+}
 
 /**
  * Source uploads (§15, M2 2.8): the archive is the request body. The
@@ -29,11 +41,10 @@ export const uploadRoutes =
     app.post('/api/v1/uploads', { bodyLimit: MAX_UPLOAD_BYTES }, async (req, reply) => {
       const body = req.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {
-        throw new VDeployError('invalid_input', 'Send the source as a .tar.gz file');
+        throw new VDeployError('invalid_input', 'Send the source as a .zip or .tar.gz file');
       }
-      // gzip magic: anything else is refused before it is stored.
-      if (body[0] !== 0x1f || body[1] !== 0x8b) {
-        throw new VDeployError('invalid_input', 'The upload is not a .tar.gz archive');
+      if (!isArchive(body)) {
+        throw new VDeployError('invalid_input', 'The upload is not a .zip or .tar.gz archive');
       }
       const { actor } = await resolveActor(req, deps.auth, deps.db, origin);
       const sha256 = createHash('sha256').update(body).digest('hex');

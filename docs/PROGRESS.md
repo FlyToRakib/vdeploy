@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.8 — direct upload deploy (folder/ZIP)
+**Task:** 2.9 — release command
 **Status:** in progress
-**Updated:** 2026-09-19 17:30 UTC
+**Updated:** 2026-09-19 17:40 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -25,14 +25,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.6 resource governor: the planner refuses (`capacity_exceeded`, 409) any create, spec edit, env change, scale, start or rollback whose memory or CPU requests would oversubscribe the server — capacity is what the agent reports net of its reserve for the OS, itself and Traefik; committed is every other running project's requests × replicas; stopped projects hold nothing. Checked when planning and again when the worker re-plans at apply time; capacity stays out of the plan hash. The refusal says what is short, by how much, and what to do. `server.resources` answers in plain words: "server-01 has 768 MB of 1.8 GB memory free — it fits about 3 more apps this size"
 - [x] 2.7a agent build executor (ADR 0008): `build` frames (sources only from the agent's own control plane, one-time bearer token, sha256 + size checked, deduped by build id across reconnects); safe extraction (no absolute/`..`/escaping links/hard links/devices, 2 GB and 100k-file caps); free-disk and free-memory watermarks; Railpack `prepare` (non-root, source read-only) for auto-detect with its detection report; rootless BuildKit v0.33.0 one-shot container capped by local build limits (default half the memory up to 2 GB, half the CPUs), OOM-killed before any app, layer cache in a volume; docker-format output loaded through the Engine API; built image IDs recorded, and a local image ID runs only for the project this agent built it for. Prototype verified in dind: Dockerfile and Railpack (Node) builds, image loaded, app started
 - [x] 2.7b source uploads (`POST /api/v1/uploads`, .tar.gz up to 200 MB, through the `source.upload` gate and audit; bytes stored only once allowed); builds queued by the worker and sent by the gateway to the project's server with a one-time download token (only its hash stored) and build secrets sealed to the agent; releases from built images (local image IDs); `railpack` strategy, `nixpacks` built by Railpack; `source.detect` detection preview; `build.get`/`build.list` with the end of the log; one automatic retry when a build fails on a network error. Verified in local dind: a Node app with no Dockerfile — detection preview (node), built by Railpack in capped rootless BuildKit on the server, deployed and served through Traefik (e2e)
+- [x] 2.8 direct upload deploy: .zip as well as .tar.gz uploads (sniffed by content, unpacked by the agent under the same rules; links in ZIPs refused; entries never larger than they claim); `project.deploy_upload` builds and deploys an upload as the next version in one step (an image project switches to auto-detect); public GitHub branches (`source.type: git`) fetched as tarballs by the worker, stored like uploads and built with their wrapping folder stripped — private repositories wait for the GitHub App (2.15). Verified in local dind: a .zip deployed as v2 of the built Node app (e2e)
 
 ## Doing
 
-- [ ] 2.8 direct upload deploy: folder and ZIP uploads (CLI/dashboard), converted to the same archive source; git sources via public tarball until the GitHub App (2.15)
+- [ ] 2.9 release command (pre-start phase, gated on success)
 
 ## Next (M2)
 
-- [ ] 2.9 release command (pre-start phase, gated on success)
 - [ ] 2.10 live logs (agent ring buffer → gateway → SSE) and deploy history
 - [ ] 2.11 persistent-folder detection at build time + deploy-time guard
 - [ ] 2.12 deterministic plain-language diagnostic layer

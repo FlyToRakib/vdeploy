@@ -284,6 +284,14 @@ describe('source uploads and builds', () => {
     });
     expect(notGzip.statusCode).toBe(400);
 
+    const zip = await owner.request(
+      'POST',
+      '/api/v1/uploads',
+      Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(40)]),
+      { 'content-type': 'application/zip' },
+    );
+    expect(zip.statusCode).toBe(201);
+
     const uploaded = await owner.request('POST', '/api/v1/uploads', archive, {
       'content-type': 'application/gzip',
     });
