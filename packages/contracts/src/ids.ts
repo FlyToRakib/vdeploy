@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 
 /**
@@ -45,7 +44,7 @@ export function ulid(now: number = Date.now()): string {
     time = CROCKFORD.charAt(remaining % 32) + time;
     remaining = Math.floor(remaining / 32);
   }
-  const bytes = randomBytes(16);
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
   let random = '';
   for (let i = 0; i < 16; i++) {
     random += CROCKFORD.charAt((bytes[i] ?? 0) % 32);
