@@ -293,3 +293,61 @@ func TestRefusedProjectIsNeverStarted(t *testing.T) {
 		t.Fatalf("containers=%v events=%v", engine.containers, report.Events)
 	}
 }
+
+// fakeRouting records what the reconciler published.
+type fakeRouting struct {
+	files  map[string]string
+	joined map[string]bool
+}
+
+func (f *fakeRouting) EnsureRouter(context.Context) error { return nil }
+func (f *fakeRouting) Join(_ context.Context, network string) error {
+	f.joined[network] = true
+	return nil
+}
+func (f *fakeRouting) Write(key string, content []byte) error {
+	f.files[key] = string(content)
+	return nil
+}
+func (f *fakeRouting) Prune(keep map[string]bool) error {
+	for key := range f.files {
+		if !keep[key] {
+			delete(f.files, key)
+		}
+	}
+	return nil
+}
+
+func routedProject(version int) spec.DesiredProject {
+	p := testProject(idA, version, 2)
+	p.Spec.Network = &spec.Network{ContainerPort: 8080}
+	d := spec.Domain{Host: "blog.example.com", Paths: []string{"/"}}
+	d.TLS.Provider = "letsencrypt"
+	p.Spec.Network.Domains = []spec.Domain{d}
+	return p
+}
+
+func TestRoutesFollowTheRunningReplicas(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+
+	reconcile(t, r, desired(1, routedProject(1)))
+	key := compose.ProjectKey("prj_" + idA)
+	if !strings.Contains(routing.files[key], "-v1-r0-0:8080") || !routing.joined[compose.NetworkName("prj_"+idA)] {
+		t.Fatalf("routing = %v joined = %v", routing.files, routing.joined)
+	}
+
+	reconcile(t, r, desired(2, routedProject(2)))
+	if strings.Contains(routing.files[key], "-v1-") || !strings.Contains(routing.files[key], "-v2-") {
+		t.Fatalf("routes still point at the old release: %s", routing.files[key])
+	}
+
+	stopped := routedProject(2)
+	stopped.Running = false
+	reconcile(t, r, desired(3, stopped))
+	if _, ok := routing.files[key]; ok {
+		t.Fatal("a stopped project is still routed")
+	}
+}

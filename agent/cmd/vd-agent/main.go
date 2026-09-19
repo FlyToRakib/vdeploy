@@ -21,6 +21,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
+	"github.com/FlyToRakib/vdeploy/agent/internal/router"
 	"github.com/FlyToRakib/vdeploy/agent/internal/transport"
 )
 
@@ -146,8 +147,19 @@ func serve(configPath string, log *slog.Logger) error {
 	}
 	updates := make(chan reconcile.Update)
 	reports := make(chan reconcile.Report, 16)
+	reconciler := &reconcile.Reconciler{Engine: engine, Policy: policy, Log: log}
+	if cfg.Routing {
+		if err := os.MkdirAll(cfg.RoutingDir, 0o755); err != nil { // #nosec G301 -- Traefik reads it
+			return fmt.Errorf("routing dir: %w", err)
+		}
+		reconciler.Routing = reconcile.TraefikRouting{
+			Engine:  engine,
+			Options: docker.TraefikOptions{DynamicDir: cfg.RoutingDir, ACMEEmail: cfg.ACMEEmail, ACMEServer: cfg.ACMEServer},
+			Dir:     router.Dir(cfg.RoutingDir),
+		}
+	}
 	loop := &reconcile.Loop{
-		Reconciler: &reconcile.Reconciler{Engine: engine, Policy: policy, Log: log},
+		Reconciler: reconciler,
 		StateDir:   cfg.StateDir,
 		Interval:   cfg.Interval(),
 		Updates:    updates,

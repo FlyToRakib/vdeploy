@@ -58,9 +58,10 @@ type Report struct {
 
 // Reconciler converges one server.
 type Reconciler struct {
-	Engine Engine
-	Policy guard.Policy
-	Log    *slog.Logger
+	Engine  Engine
+	Policy  guard.Policy
+	Log     *slog.Logger
+	Routing Routing
 }
 
 type pass struct {
@@ -88,6 +89,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	for _, project := range state.Projects {
 		p.report.Projects = append(p.report.Projects, p.project(ctx, project))
 	}
+	// Traffic moves to the new replicas before the old ones are removed.
+	p.route(ctx, state)
 	p.removeUnwanted(ctx)
 	return p.report, nil
 }

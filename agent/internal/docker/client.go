@@ -1,7 +1,8 @@
 // Package docker is the agent's client for the Docker Engine API (ADR 0003).
-// Its request types can only express what the agent is allowed to ask for:
-// there is no field for privileges, capabilities, devices, host namespaces
-// or host-path binds anywhere in this package.
+// The request type for application containers can only express what an app
+// may have: there is no field for privileges, added capabilities, devices,
+// host namespaces, host ports or host-path binds. The single exception is
+// the agent's own Traefik (traefik.go), built from constants alone.
 package docker
 
 import (

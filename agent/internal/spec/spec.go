@@ -93,7 +93,46 @@ type Volume struct {
 
 // Network is how traffic reaches the application.
 type Network struct {
-	ContainerPort int `json:"containerPort"`
+	ContainerPort int          `json:"containerPort"`
+	Domains       []Domain     `json:"domains"`
+	Middleware    Middleware   `json:"middleware"`
+	LoadBalancer  LoadBalancer `json:"loadBalancer"`
+}
+
+// Domain is one hostname routed to the application.
+type Domain struct {
+	Host string `json:"host"`
+	TLS  struct {
+		Provider string `json:"provider"`
+	} `json:"tls"`
+	Paths []string `json:"paths"`
+}
+
+// Middleware shapes traffic on its way in.
+type Middleware struct {
+	RateLimit *struct {
+		Average int `json:"average"`
+		Burst   int `json:"burst"`
+	} `json:"rateLimit,omitempty"`
+	Compression bool     `json:"compression"`
+	IPAllowList []string `json:"ipAllowList"`
+	Headers     struct {
+		HSTS      bool `json:"hsts"`
+		FrameDeny bool `json:"frameDeny"`
+	} `json:"headers"`
+}
+
+// LoadBalancer spreads traffic across replicas.
+type LoadBalancer struct {
+	Sticky struct {
+		Enabled bool   `json:"enabled"`
+		Cookie  string `json:"cookie"`
+	} `json:"sticky"`
+	HealthCheck *struct {
+		Path     string `json:"path"`
+		Interval string `json:"interval"`
+		Timeout  string `json:"timeout"`
+	} `json:"healthCheck,omitempty"`
 }
 
 var (

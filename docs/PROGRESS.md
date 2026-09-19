@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.1 — agent-managed Traefik with the file provider, atomic routing files
+**Task:** 2.2 — health-gated blue/green through Traefik: HTTP startup probe, switch, drain, auto-rollback
 **Status:** in progress
-**Updated:** 2026-09-19 14:52 UTC
+**Updated:** 2026-09-19 14:57 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -40,14 +40,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 1.23 control plane — agent enrollment + signed wss gateway (NOTIFY-driven desired-state push, validated acks/observed state, refusals audited); apps/worker applies queued plans: approval signature + re-plan hash re-checked at apply time, steps (create/update spec, digest-pinned releases via registry token flow, deploy with convergence wait + auto-rollback, restart via revision, scale, stop/start, delete), state change + generation bump + NOTIFY in one tx, exactly-once
 - [x] 1.24 M1 exit — scripts/e2e.mjs runs Postgres + API + worker + agent inside an isolated dind testbed and drives the real API: setup, server.add, preflight+enroll, signed channel, deploy from spec (digest-pinned, 2 replicas), agent restart (no duplicates), self-heal of a killed container, audit chain verified. PASSED locally and on the VPS testbed (2026-09-19), baseline verified unchanged before/after. control-plane image (deploy/control-plane.Dockerfile); PlanView carries the failure reason; worker logs unexpected errors
 - [x] 1.25 control-plane backup/restore drill — automated in scripts/e2e.mjs (pg_dump verified by header → control plane destroyed → apps keep running and heal offline (N6) → restore to fresh Postgres → same session, agent re-attached, same containers, audit chain intact); runbook docs/runbooks/control-plane-restore.md. PASSED on the VPS testbed, baseline unchanged. Registry calls retry with backoff and fail in plain words; Node connect window widened for slow networks
+- [x] 2.1 agent-managed Traefik v3.7.13 (digest-pinned, built from constants, only container with host ports/bind, OOM-protected), routing files per project (write-temp + rename, pruned), Traefik joins only routed project networks, traffic moves to new replicas before old ones are removed; verified in local dind (Host routing → nginx, unknown host → 404)
 
 ## Doing
 
-- [ ] 2.1 agent-managed Traefik (file provider, atomic write-temp + rename per project, joins project networks)
+- [ ] 2.2 health-gated blue/green through Traefik: HTTP startup probe, switch, drain, auto-rollback
 
 ## Next (M2)
 
-- [ ] 2.2 health-gated blue/green through Traefik: HTTP startup probe, switch, drain, auto-rollback
 - [ ] 2.3 instant URLs — wildcard base domain + zero-domain fallback (sslip.io style), HTTP-01 via Traefik
 - [ ] 2.4 DNS verification before any ACME request (A/AAAA vs server IP, Cloudflare proxy detection, registrar guidance)
 - [ ] 2.5 env vars + versioned secrets (AES-256-GCM envelope, per-project DEK), delivery to the agent, build-time vs runtime split

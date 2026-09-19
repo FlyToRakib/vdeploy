@@ -27,6 +27,14 @@ type Config struct {
 	ReserveMemoryMB int64 `json:"reserveMemoryMB"`
 	// ReconcileSeconds is how often the agent re-checks the server with no news.
 	ReconcileSeconds int `json:"reconcileSeconds"`
+	// Routing runs Traefik on ports 80/443 (off on build-only servers).
+	Routing bool `json:"routing"`
+	// RoutingDir holds the routing files Traefik watches.
+	RoutingDir string `json:"routingDir"`
+	// ACMEEmail is optional; Let's Encrypt uses it for expiry notices.
+	ACMEEmail string `json:"acmeEmail"`
+	// ACMEServer overrides Let's Encrypt (staging, or a test CA).
+	ACMEServer string `json:"acmeServer"`
 }
 
 // Defaults are safe for a fresh server.
@@ -37,6 +45,8 @@ func Defaults() Config {
 		AllowedRegistries: []string{"docker.io", "ghcr.io", "quay.io"},
 		ReserveMemoryMB:   256,
 		ReconcileSeconds:  15,
+		Routing:           true,
+		RoutingDir:        "/etc/vdeploy/traefik/dynamic",
 	}
 }
 
