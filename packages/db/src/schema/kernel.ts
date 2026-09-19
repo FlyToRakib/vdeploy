@@ -6,6 +6,7 @@ import type {
   DomainStatus,
   ObservedReport,
   Plan,
+  Reachability,
   UrlSettings,
 } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
@@ -50,6 +51,10 @@ export const servers = pgTable('servers', {
   publicIpv6: text('public_ipv6'),
   /** Set by a person: detection never overwrites it. */
   addressManual: boolean('address_manual').notNull().default(false),
+  /** The hosting provider the agent recognised; advice is written for it. */
+  provider: text('provider'),
+  /** The last check, from the control plane, that visitors can reach ports 80 and 443. */
+  reachability: jsonb('reachability').$type<Reachability>(),
   createdAt: createdAt(),
 });
 

@@ -3,6 +3,7 @@ package preflight
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,97 @@ func TestCompareVersions(t *testing.T) {
 		if got := compareVersions(tc.a, tc.b); got != tc.want {
 			t.Errorf("compare(%s,%s) = %d", tc.a, tc.b, got)
 		}
+	}
+}
+
+type fakeMachine struct {
+	id, version     string
+	panels          []string
+	laptop, desktop bool
+	v4, v6          bool
+	foreign         int
+}
+
+func (f *fakeMachine) OSRelease() (string, string) { return f.id, f.version }
+func (f *fakeMachine) Panels() []string            { return f.panels }
+func (f *fakeMachine) PortOwner(int) string        { return "" }
+func (f *fakeMachine) ForeignContainers(context.Context) (int, error) {
+	return f.foreign, nil
+}
+func (f *fakeMachine) PublicAddresses() (bool, bool) { return f.v4, f.v6 }
+func (f *fakeMachine) Chassis() (bool, bool)         { return f.laptop, f.desktop }
+
+func cleanServer() *fakeMachine {
+	return &fakeMachine{id: "ubuntu", version: "24.04", v4: true}
+}
+
+func TestACleanServerPassesTheServerChecks(t *testing.T) {
+	for _, r := range RunServer(context.Background(), cleanServer()) {
+		if r.Status != Pass {
+			t.Errorf("%s: %s %s", r.ID, r.Status, r.Message)
+		}
+	}
+}
+
+func TestServerProblemsAreNamed(t *testing.T) {
+	cases := []struct {
+		name   string
+		spoil  func(m *fakeMachine)
+		id     string
+		status Status
+		says   string
+	}{
+		{"old ubuntu", func(m *fakeMachine) { m.version = "20.04" }, "distro", Warn, "Ubuntu 20.04 is too old"},
+		{"centos", func(m *fakeMachine) { m.id, m.version = "centos", "7" }, "distro", Warn, "CentOS"},
+		{"alpine", func(m *fakeMachine) { m.id, m.version = "alpine", "3.20" }, "distro", Warn, "Alpine"},
+		{"untested distro", func(m *fakeMachine) { m.id, m.version = "arch", "" }, "distro", Warn, "not been tested"},
+		{"cpanel", func(m *fakeMachine) { m.panels = []string{"cPanel"} }, "panel", Fail, "already runs cPanel"},
+		{"a laptop", func(m *fakeMachine) { m.laptop = true }, "machine", Fail, "laptop"},
+		{"a desktop session", func(m *fakeMachine) { m.desktop = true }, "machine", Warn, "desktop"},
+		{"ipv6 only", func(m *fakeMachine) { m.v4, m.v6 = false, true }, "network", Warn, "only an IPv6"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := cleanServer()
+			tc.spoil(m)
+			for _, r := range RunServer(context.Background(), m) {
+				if r.ID != tc.id {
+					continue
+				}
+				if r.Status != tc.status || !strings.Contains(r.Message, tc.says) {
+					t.Fatalf("%s = %s %q", r.ID, r.Status, r.Message)
+				}
+				return
+			}
+			t.Fatalf("no %s check", tc.id)
+		})
+	}
+}
+
+func TestExistingContainersAreNotAProblem(t *testing.T) {
+	m := cleanServer()
+	m.foreign = 13
+	for _, r := range RunServer(context.Background(), m) {
+		if r.ID == "containers" && (r.Status != Pass || !strings.Contains(r.Message, "never touches")) {
+			t.Fatalf("%+v", r)
+		}
+	}
+}
+
+type namingHost struct{ *fakeHost }
+
+func (namingHost) PortOwner(port int) string {
+	if port == 80 {
+		return "nginx"
+	}
+	return ""
+}
+
+func TestPortConflictNamesTheProgram(t *testing.T) {
+	h := healthy()
+	h.busy[80] = true
+	r := checkPorts(namingHost{h})
+	if r.Status != Fail || !strings.Contains(r.Message, "used by nginx") || !strings.Contains(r.Fix, "systemctl disable --now nginx") {
+		t.Fatalf("%+v", r)
 	}
 }

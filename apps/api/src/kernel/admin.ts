@@ -22,6 +22,7 @@ import {
 } from '@vdeploy/db';
 import { generateSecret, isPublicIpv4 } from '@vdeploy/core';
 import { and, asc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
+import { checkReachability } from '../agents/reachability.js';
 import type { Handler, HandlerContext } from './context.js';
 
 /** Enrollment tokens work once, within an hour (§25). */
@@ -139,6 +140,8 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
       return { settings, projects: hosts };
     });
   },
+  'server.check_reachability': async ({ deps, args }) =>
+    checkReachability(deps.db, String(args.serverId), deps.probe, deps.now),
   'server.set_address': async ({ deps, actor, args }) => {
     const serverId = String(args.serverId);
     const ipv4 = (args.ipv4 as string | null) ?? null;

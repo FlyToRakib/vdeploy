@@ -2,6 +2,7 @@ import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { memoryMailer, type Mail } from './auth/mailer.js';
 import { ApiConfig } from './config.js';
+import type { PortReach } from '@vdeploy/contracts';
 import { buildServer } from './server.js';
 
 export const ORIGIN = 'https://dashboard.example.com';
@@ -17,6 +18,7 @@ export function testConfig(databaseUrl: string) {
     CONTROL_PLANE_KEY: 'cd'.repeat(32),
     AUTH_SECRET: 'test-secret-that-is-at-least-32-characters-long',
     BREACHED_PASSWORD_CHECK: 'false',
+    REACHABILITY_CHECK: 'false',
   });
 }
 
@@ -26,6 +28,8 @@ export interface TestApp {
   mail: Mail[];
   /** Plan ids handed to the apply queue, in order. */
   queued: string[];
+  /** What each "ip:port" answers from outside; unlisted ports never answer. */
+  ports: Map<string, PortReach>;
   stop: () => Promise<void>;
 }
 
@@ -33,7 +37,9 @@ export async function startTestApp(options: { authRateLimit?: boolean } = {}): P
   const database = await startTestDatabase();
   const mailer = memoryMailer();
   const queued: string[] = [];
+  const ports = new Map<string, PortReach>();
   const app = await buildServer({
+    probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
     config: testConfig(database.url),
     db: database.db,
     mailer,
@@ -50,6 +56,7 @@ export async function startTestApp(options: { authRateLimit?: boolean } = {}): P
     database,
     mail: mailer.sent,
     queued,
+    ports,
     stop: async () => {
       await app.close();
       await database.stop();

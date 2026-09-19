@@ -30,6 +30,7 @@ import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { WebSocket } from 'ws';
 import { hashToken } from '../kernel/admin.js';
+import { checkReachability, type PortProbe } from './reachability.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
@@ -55,6 +56,8 @@ export interface GatewayDeps {
   publicUrl: string;
   now: () => Date;
   log: FastifyBaseLogger;
+  /** When set, each server's web ports are checked from here after it connects (§30 ③). */
+  probe?: PortProbe;
 }
 
 interface Connection {
@@ -93,6 +96,9 @@ export class Gateway implements LogSource {
   private readonly logRequests = new Map<string, LogRequest>();
   private stopListening: (() => Promise<void>) | null = null;
   private stopBuildListening: (() => Promise<void>) | null = null;
+
+  /** When each server's ports were last checked from here (ms). */
+  private readonly reachChecked = new Map<string, number>();
 
   constructor(private readonly deps: GatewayDeps) {}
 
@@ -308,6 +314,7 @@ export class Gateway implements LogSource {
           arch: hello.arch,
           capacity: { cpus: hello.cpus, memoryBytes: hello.memoryBytes, diskBytes: 0 },
           ...(hello.boxKey ? { agentBoxKey: hello.boxKey } : {}),
+          provider: hello.provider ?? null,
           ...(moved ? { publicIpv6: ipv6, ...(ipv4 ? { publicIpv4: ipv4 } : {}) } : {}),
         })
         .where(eq(servers.id, serverId));
@@ -318,6 +325,32 @@ export class Gateway implements LogSource {
         await resetDomainChecks(tx, serverId, this.deps.now());
       }
     });
+    this.scheduleReachability(serverId);
+  }
+
+  /**
+   * Checks the web ports from outside once the agent has had a moment to start
+   * its router; at most once every ten minutes per server, however often it
+   * reconnects.
+   */
+  private scheduleReachability(serverId: string) {
+    const { probe, db, now, log } = this.deps;
+    if (!probe) return;
+    const last = this.reachChecked.get(serverId) ?? 0;
+    if (now().getTime() - last < 10 * 60_000) return;
+    this.reachChecked.set(serverId, now().getTime());
+    const timer = setTimeout(() => {
+      checkReachability(db, serverId, probe, now)
+        .then((result) => {
+          if (result.status === 'blocked' || result.status === 'partly') {
+            log.warn({ serverId, ports: result.ports }, 'server web ports are not reachable');
+          }
+        })
+        .catch((err: unknown) => {
+          log.error({ err, serverId }, 'could not check reachability');
+        });
+    }, 15_000);
+    timer.unref();
   }
 
   private async receive(serverId: string, orgId: string, frame: AgentFrame) {

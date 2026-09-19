@@ -2,6 +2,7 @@ import type { HumanActor } from '@vdeploy/ai';
 import type { Database } from '@vdeploy/db';
 import type { Auth } from '../auth/auth.js';
 import type { LogSource } from '../agents/gateway.js';
+import type { PortProbe } from '../agents/reachability.js';
 import type { Mailer } from '../auth/mailer.js';
 
 /** Hands an approved plan to the worker that applies it. */
@@ -22,6 +23,8 @@ export interface KernelDeps {
   now: () => Date;
   /** Live container output, through the agent channel; absent in tests without agents. */
   logs?: LogSource;
+  /** Connects to a server's web ports from here; tests replace it. */
+  probe: PortProbe;
 }
 
 /** What an operation handler receives once the gate has let the request through. */

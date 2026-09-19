@@ -138,6 +138,8 @@ const controlPlaneEnv = [
   `-e AUTH_SECRET=${secret()}`,
   `-e PUBLIC_URL=${PUBLIC_URL}`,
   '-e BREACHED_PASSWORD_CHECK=false',
+  // The test address belongs to someone else: never probe it.
+  '-e REACHABILITY_CHECK=false',
   '-e LOG_LEVEL=warn',
   `-e DNS_SERVERS=${DNS_IP}`,
 ].join(' ');
@@ -274,9 +276,20 @@ async function run() {
   inTestbed(
     `mkdir -p /etc/vdeploy && echo '${JSON.stringify(agentConfig)}' > /etc/vdeploy/agent.json`,
   );
+  // The testbed is Alpine (docker:dind): preflight warns, says why, and goes on.
+  const doctor = inTestbed('vd-agent preflight 2>&1 || true');
+  for (const expected of [
+    /Alpine Linux is not a tested server system/,
+    /hosting control panel/,
+    /containers/,
+  ]) {
+    if (!expected.test(doctor)) throw new Error(`preflight did not report ${expected}: ${doctor}`);
+  }
+  pass('preflight names what it checked', 'warns about Alpine, with what to use instead');
   const enrolled = inTestbed(
     `vd-agent enroll --url ${PUBLIC_URL} --token ${server.token} 2>&1 | tail -3`,
   );
+  if (!enrolled.includes('"msg":"enrolled"')) throw new Error(`enrollment failed: ${enrolled}`);
   pass('agent enrolled after preflight', enrolled.split('\n').at(-1));
   inTestbed('nohup vd-agent run > /var/log/vd-agent.log 2>&1 &');
   await until('server online', async () => {

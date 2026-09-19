@@ -157,9 +157,23 @@ func checkPorts(h Host) Result {
 		}
 	}
 	if len(busy) > 0 {
+		// Name the program when it can be found: "nginx", not "another program".
+		owner := "another program (often a web server like nginx or Apache, or a hosting panel)"
+		if namer, ok := h.(interface{ PortOwner(int) string }); ok {
+			for _, port := range []int{80, 443} {
+				if name := namer.PortOwner(port); name != "" {
+					owner = name
+					break
+				}
+			}
+		}
+		fix := "VDeploy needs ports 80 and 443 to serve your sites. Use a clean server, or stop the other web server first."
+		if owner == "nginx" || owner == "apache2" || owner == "httpd" {
+			fix = "VDeploy needs ports 80 and 443. If " + owner + " serves nothing you need, stop and disable it: systemctl disable --now " + owner
+		}
 		return Result{ID: "ports", Status: Fail,
-			Message: "Port " + strings.Join(busy, " and ") + " is already used by another program (often a web server like nginx or Apache, or a hosting panel).",
-			Fix:     "VDeploy needs ports 80 and 443 to serve your sites. Use a clean server, or stop the other web server first."}
+			Message: "Port " + strings.Join(busy, " and ") + " is already used by " + owner + ".",
+			Fix:     fix}
 	}
 	return pass("ports", "Ports 80 and 443 are free")
 }

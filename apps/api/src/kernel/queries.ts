@@ -114,6 +114,8 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         publicIpv4: servers.publicIpv4,
         publicIpv6: servers.publicIpv6,
         addressManual: servers.addressManual,
+        provider: servers.provider,
+        reachability: servers.reachability,
       })
       .from(servers)
       .where(eq(servers.id, id(args, 'serverId')));

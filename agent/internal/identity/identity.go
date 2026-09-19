@@ -39,6 +39,8 @@ type Facts struct {
 	MemoryBytes  int64  `json:"memoryBytes"`
 	// Addresses are the globally routable IPs on this machine's interfaces.
 	Addresses []string `json:"addresses,omitempty"`
+	// Provider is the hosting provider, guessed from firmware ("" if unknown).
+	Provider string `json:"provider,omitempty"`
 }
 
 var serverID = regexp.MustCompile(`^srv_[0-9A-HJKMNP-TV-Z]{26}$`)

@@ -20,6 +20,7 @@ import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
 import { operationRoutes } from './routes/operations.js';
 import { logRoutes } from './routes/logs.js';
+import { tcpProbe, type PortProbe } from './agents/reachability.js';
 import { uploadRoutes } from './routes/uploads.js';
 
 /** Log fields that may carry credentials or secret values; never written out. */
@@ -44,6 +45,8 @@ export interface ServerDeps {
   /** Where approved plans go to be applied. */
   queue: ApplyQueue;
   now?: () => Date;
+  /** Connects to servers' web ports; tests replace it. */
+  probe?: PortProbe;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -94,6 +97,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     accountRoutes({ auth, db, secret: config.AUTH_SECRET, publicUrl: config.PUBLIC_URL }),
   );
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });
+  const probe = deps.probe ?? tcpProbe;
   const gatewayDeps = {
     db,
     databaseUrl: config.DATABASE_URL,
@@ -102,6 +106,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     publicUrl: config.PUBLIC_URL,
     now: deps.now ?? (() => new Date()),
     log: app.log,
+    ...(config.REACHABILITY_CHECK ? { probe } : {}),
   };
   const gateway = new Gateway(gatewayDeps);
   await gateway.start();
@@ -118,6 +123,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     publicUrl: config.PUBLIC_URL,
     now: deps.now ?? (() => new Date()),
     logs: gateway,
+    probe,
   };
   await app.register(operationRoutes(kernel));
   await app.register(logRoutes(kernel));

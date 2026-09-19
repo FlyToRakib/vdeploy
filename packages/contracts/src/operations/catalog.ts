@@ -122,6 +122,13 @@ export const OPERATIONS = [
     obj({ ...P, replicas: z.number().int().min(0).max(64) }),
   ),
   operation(
+    'server.check_reachability',
+    'safe',
+    'server',
+    'Check from outside that visitors can reach the server on ports 80 and 443, and what to open if not',
+    obj(S),
+  ),
+  operation(
     'server.reclaim_safe',
     'safe',
     'server',

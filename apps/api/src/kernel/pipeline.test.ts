@@ -187,6 +187,33 @@ describe('administrative operations', () => {
     expect(row).toMatchObject({ publicIpv4: '8.8.4.4', addressManual: true });
     expect(row?.desiredGeneration).toBeGreaterThan(0);
   });
+
+  it('checks from outside whether visitors reach a server, with advice for its provider', async () => {
+    const serverId = newId('server');
+    await t.database.db.insert(servers).values({
+      id: serverId,
+      orgId,
+      name: 'oracle-box',
+      publicIpv4: '8.8.8.8',
+      provider: 'Oracle Cloud',
+    });
+    const blocked = await op(owner, 'server.check_reachability', { serverId });
+    expect(blocked.statusCode).toBe(200);
+    const verdict = blocked.json<{ result: { status: string; plain: string; fix: string[] } }>()
+      .result;
+    expect(verdict.status).toBe('blocked');
+    expect(verdict.plain).toMatch(/firewall at Oracle Cloud/);
+    expect(verdict.fix.join('\n')).toMatch(/Security Lists[\s\S]*iptables/);
+
+    t.ports.set('8.8.8.8:80', 'open');
+    t.ports.set('8.8.8.8:443', 'open');
+    const open = await op(owner, 'server.check_reachability', { serverId });
+    expect(open.json<{ result: { status: string } }>().result.status).toBe('reachable');
+    const status = await op(owner, 'server.status', { serverId });
+    expect(
+      status.json<{ result: { reachability: { status: string } } }>().result.reachability.status,
+    ).toBe('reachable');
+  });
 });
 
 describe('planned changes', () => {

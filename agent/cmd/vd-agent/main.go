@@ -82,6 +82,7 @@ func facts(memoryBytes int64) identity.Facts {
 		Hostname: hostname, Arch: runtime.GOARCH, OS: runtime.GOOS,
 		AgentVersion: version, CPUs: runtime.NumCPU(), MemoryBytes: memoryBytes,
 		Addresses: publicAddresses(),
+		Provider:  preflight.Provider(),
 	}
 }
 
@@ -115,7 +116,7 @@ func doctor(configPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	host := preflight.LinuxHost{Docker: docker.New(cfg.DockerSocket)}
-	results := preflight.Run(ctx, host, cfg.StateDir)
+	results := append(preflight.Run(ctx, host, cfg.StateDir), preflight.RunServer(ctx, host)...)
 	marks := map[preflight.Status]string{preflight.Pass: "✓", preflight.Warn: "!", preflight.Fail: "✗"}
 	for _, r := range results {
 		fmt.Printf("%s %s\n", marks[r.Status], r.Message)

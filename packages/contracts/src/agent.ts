@@ -134,6 +134,8 @@ export const AgentFrame = z.discriminatedUnion('type', [
     memoryBytes: z.number().int().min(0),
     /** Globally routable addresses on the server's interfaces. */
     addresses: z.array(z.string().max(45)).max(16).optional(),
+    /** The hosting provider, recognised from the server's firmware. */
+    provider: z.string().max(64).optional(),
     /** The agent's X25519 public key: secrets are sealed to it. */
     boxKey: z.base64().length(44).optional(),
   }),
@@ -172,6 +174,7 @@ export const EnrollRequest = z.strictObject({
   cpus: z.number().int().min(0).max(4096),
   memoryBytes: z.number().int().min(0),
   addresses: z.array(z.string().max(45)).max(16).optional(),
+  provider: z.string().max(64).optional(),
 });
 export type EnrollRequest = z.infer<typeof EnrollRequest>;
 

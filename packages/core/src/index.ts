@@ -10,3 +10,4 @@ export * from './spec-edit.js';
 export * from './seal.js';
 export * from './governor.js';
 export * from './diagnose.js';
+export * from './reachability.js';

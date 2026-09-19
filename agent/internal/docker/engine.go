@@ -61,6 +61,24 @@ func (c *Client) EnsureNetwork(ctx context.Context, name, projectID string) erro
 	return c.do(ctx, http.MethodPost, "/networks/create", nil, body, &struct{}{})
 }
 
+// CountUnmanaged counts containers the agent did not create, for preflight:
+// VDeploy never touches them, and says so.
+func (c *Client) CountUnmanaged(ctx context.Context) (int, error) {
+	var raw []struct {
+		Labels map[string]string `json:"Labels"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/containers/json", url.Values{"all": {"1"}}, nil, &raw); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range raw {
+		if r.Labels[compose.ManagedLabel] != "true" && r.Labels[InfraLabel] == "" {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // ManagedNetworks lists the project networks the agent created: name → project.
 func (c *Client) ManagedNetworks(ctx context.Context) (map[string]string, error) {
 	var raw []struct {

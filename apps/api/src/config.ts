@@ -27,6 +27,8 @@ export const ApiConfig = z.object({
   MAIL_FROM: z.string().min(3).default('VDeploy <no-reply@localhost>'),
   /** Reject passwords found in breaches (k-anonymity range query to HaveIBeenPwned). */
   BREACHED_PASSWORD_CHECK: z.stringbool().default(true),
+  /** Check from here that visitors can reach each server's ports 80 and 443, when it connects. */
+  REACHABILITY_CHECK: z.stringbool().default(true),
 });
 export type ApiConfig = z.output<typeof ApiConfig>;
 
