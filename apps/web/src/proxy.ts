@@ -8,6 +8,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 export function proxy(request: NextRequest): NextResponse {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const dev = process.env.NODE_ENV === 'development';
+  // Served over HTTPS (directly, or behind a proxy that says so): only then
+  // may the browser be told to upgrade requests and remember HTTPS.
+  const https =
+    request.nextUrl.protocol === 'https:' || request.headers.get('x-forwarded-proto') === 'https';
   const csp = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,
@@ -19,7 +23,7 @@ export function proxy(request: NextRequest): NextResponse {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    ...(dev ? [] : ['upgrade-insecure-requests']),
+    ...(https ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
 
   const requestHeaders = new Headers(request.headers);
@@ -27,7 +31,12 @@ export function proxy(request: NextRequest): NextResponse {
   requestHeaders.set('Content-Security-Policy', csp);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('Content-Security-Policy', csp);
-  response.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  if (https) {
+    response.headers.set(
+      'Strict-Transport-Security',
+      'max-age=63072000; includeSubDomains; preload',
+    );
+  }
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   response.headers.set('X-Frame-Options', 'DENY');

@@ -499,7 +499,9 @@ async function deploy(deps: StepDeps, state: ApplyState) {
         tx.update(projects).set({ currentReleaseId: previous }).where(eq(projects.id, row.id)),
       );
       await finish('rolled_back', reason);
-      throw new VDeployError('unavailable', `${reason}. The previous release was restored.`);
+      // One full stop between sentences, whether or not the reason ends with one.
+      const said = /[.!?]$/.test(reason) ? reason : `${reason}.`;
+      throw new VDeployError('unavailable', `${said} The previous release was restored.`);
     }
     await finish('failed', reason);
     throw error;

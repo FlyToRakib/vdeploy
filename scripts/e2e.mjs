@@ -8,6 +8,8 @@
 //   node scripts/e2e.mjs --local   testbed = local container vdeploy-test-dind
 //   node scripts/e2e.mjs --vps     testbed = vdeploy-test-testbed on the test VPS
 //   add --teardown to remove the testbed afterwards
+//   add --walkthrough for the M2 non-coder walkthrough instead (Playwright,
+//   driving the testbed's dashboard in an installed Edge or Chrome)
 //
 // Build first: the vdeploy-test/control-plane:e2e image, which carries the
 // agent the one-command installer puts on the testbed —
@@ -26,10 +28,16 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const vps = process.argv.includes('--vps');
+const walkthrough = process.argv.includes('--walkthrough');
 const TESTBED = vps ? 'vdeploy-test-testbed' : 'vdeploy-test-dind';
 const API = 'http://127.0.0.1:18090';
-const PUBLIC_URL = 'http://127.0.0.1:8080';
+// One origin for the dashboard, the API and the agents, as in production: the
+// same address from this machine (through the testbed's port) and from inside
+// the testbed (the proxy listens on it there too).
+const PUBLIC_URL = API;
 const IMAGE = 'vdeploy-test/control-plane:e2e';
+const WEB_IMAGE = 'vdeploy-test/web:e2e';
+const CADDY = 'caddy:2.10.2-alpine';
 const COREDNS = 'coredns/coredns:1.14.7';
 
 const env = vps
@@ -90,8 +98,8 @@ function ensureTestbed() {
 }
 
 function loadImages() {
-  log('loading the control-plane image into the testbed');
-  const image = execFileSync('docker', ['save', IMAGE], { maxBuffer: 2 ** 31 });
+  log('loading the control-plane and dashboard images into the testbed');
+  const image = execFileSync('docker', ['save', IMAGE, WEB_IMAGE], { maxBuffer: 2 ** 31 });
   inTestbed('docker load -q', image);
 }
 
@@ -156,10 +164,32 @@ function startDatabase() {
 function startApiAndWorker() {
   inTestbed(
     [
-      `docker run -d --name cp-api --network cp -p 8080:8080 ${controlPlaneEnv} ${IMAGE} >/dev/null`,
-      'until wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1; do sleep 1; done',
+      `docker run -d --name cp-api --network cp ${controlPlaneEnv} ${IMAGE} >/dev/null`,
+      'until docker exec cp-api wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1; do sleep 1; done',
       `docker run -d --name cp-worker --network cp ${controlPlaneEnv} ${IMAGE} node /app/worker/dist/main.js >/dev/null`,
     ].join(' && '),
+  );
+}
+
+// The one origin: /api/* to the API (websockets and streams included), the rest to the dashboard.
+const CADDYFILE = `:8080 {
+  handle /api/* {
+    reverse_proxy cp-api:8080
+  }
+  handle {
+    reverse_proxy cp-web:3100
+  }
+}`;
+
+function startFront() {
+  inTestbed(
+    [
+      'cat > /opt/cp/Caddyfile',
+      `docker run -d --name cp-web --network cp -e API_URL=http://cp-api:8080 ${WEB_IMAGE} >/dev/null`,
+      `docker run -d --name cp-proxy --network cp -p 8080:8080 -p 18090:8080 -v /opt/cp/Caddyfile:/etc/caddy/Caddyfile:ro ${CADDY} >/dev/null`,
+      'until wget -qO- http://127.0.0.1:18090/api/v1/setup >/dev/null 2>&1; do sleep 1; done',
+    ].join(' && '),
+    CADDYFILE,
   );
 }
 
@@ -177,7 +207,7 @@ function startControlPlane() {
   log('starting Postgres, the API and the worker inside the testbed');
   inTestbed(
     [
-      'docker rm -f cp-db cp-api cp-worker cp-dns cp-hook >/dev/null 2>&1',
+      'docker rm -f cp-db cp-api cp-worker cp-dns cp-hook cp-web cp-proxy >/dev/null 2>&1',
       'docker network rm cp >/dev/null 2>&1',
       'docker network create --subnet 10.203.0.0/24 cp >/dev/null',
       'mkdir -p /opt/cp && cat > /opt/cp/Corefile',
@@ -191,6 +221,7 @@ function startControlPlane() {
   );
   startDatabase();
   startApiAndWorker();
+  startFront();
 }
 
 /** The tunnel's local port must be free, or requests would silently reach another API. */
@@ -276,6 +307,16 @@ async function run() {
     organization: 'E2E',
   });
   pass('first-run setup', setup.organizationId);
+  const signIn = await fetch(`${API}/sign-in`);
+  const page = await signIn.text();
+  if (
+    !signIn.ok ||
+    !/<html/i.test(page) ||
+    !/content-security-policy/i.test([...signIn.headers.keys()].join(' '))
+  ) {
+    throw new Error(`the dashboard is not served on the API's origin: ${String(signIn.status)}`);
+  }
+  pass('dashboard and API on one origin, as in production', API);
 
   await call('POST', '/api/v1/auth/step-up', { password });
   const { result: server } = await op('server.add', { name: 'testbed' });
@@ -386,6 +427,7 @@ async function run() {
   await secrets(hello.id);
   await releaseCommand(hello.id);
   await buildFromSource(server.serverId);
+  await fromGithub(server.serverId);
   await explainsFailure(server.serverId);
   await logsAndHistory(hello.id);
 
@@ -795,6 +837,51 @@ ${files['index.js']}`,
 }
 
 const NODE_HOST = 'node.vdeploy.test';
+const GITHUB_HOST = 'github-app.vdeploy.test';
+
+/**
+ * M2 exit: a real app from GitHub (a public sample that reads PORT and
+ * defaults elsewhere, so the port VDeploy sets must reach it), built by
+ * Railpack on the server and served.
+ */
+async function fromGithub(serverId) {
+  const created = await op('project.create', {
+    serverId,
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'from-github' },
+      source: {
+        type: 'git',
+        provider: 'github',
+        repo: 'heroku/node-js-getting-started',
+        branch: 'main',
+      },
+      build: { strategy: 'railpack' },
+      runtime: { replicas: 1, resources: { memory: { request: '64Mi', limit: '256Mi' } } },
+      network: { containerPort: 3000, domains: [{ host: GITHUB_HOST, tls: { provider: 'none' } }] },
+      health: { startup: { type: 'http', path: '/' } },
+    },
+  });
+  const plan = await settled(created.plan.id, 1_200_000);
+  if (plan.status !== 'applied') {
+    throw new Error(`the GitHub app did not deploy: ${JSON.stringify(plan)}`);
+  }
+  const page = await until(
+    'GitHub app served',
+    async () => {
+      const out = inTestbed(
+        `wget -q -O - -T 3 --header 'Host: ${GITHUB_HOST}' http://127.0.0.1/ 2>/dev/null || true`,
+      );
+      return out.includes('Getting Started on Heroku') ? out : null;
+    },
+    60_000,
+  );
+  pass(
+    'a real app from GitHub: fetched, built on the server, served',
+    `${String(page.length)} bytes`,
+  );
+}
 
 /**
  * Builds on the server (§15, M2 2.7): upload a source with no Dockerfile,
@@ -995,6 +1082,33 @@ async function drill() {
   pass('restored: same session, agent re-attached, same containers, audit chain intact');
 }
 
+/**
+ * M2 exit: the dashboard alone, as a person who does not code would use it
+ * (scripts/walkthrough/walkthrough.spec.mjs). The server gets what a VPS has:
+ * curl, and — the testbed being Alpine — permission to run there.
+ */
+function nonCoderWalkthrough() {
+  inTestbed(
+    [
+      'command -v curl >/dev/null || apk add --no-cache -q curl',
+      `mkdir -p /etc/vdeploy && echo '${JSON.stringify({ reconcileSeconds: 5, allowUnsupportedOS: true, acmeServer: 'https://127.0.0.1:14000/dir' })}' > /etc/vdeploy/agent.json`,
+    ].join(' && '),
+  );
+  log('non-coder walkthrough: the dashboard in a real browser');
+  execFileSync(
+    process.platform === 'win32' ? 'npx.cmd' : 'npx',
+    ['playwright', 'test', '--config', `${root}scripts/walkthrough/playwright.config.mjs`],
+    {
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+      env: { ...process.env, BASE_URL: API, TESTBED, TESTBED_SSH: sshTarget },
+    },
+  );
+  pass(
+    'non-coder walkthrough: setup, one-command server, folder online, live logs, broken version survived',
+  );
+}
+
 try {
   verifyBaseline();
   ensureTestbed();
@@ -1002,9 +1116,13 @@ try {
   loadImages();
   startControlPlane();
   await openTunnel();
-  await run();
-  await drill();
-  log(`M1 exit criteria and restore drill: ${results.length} checks passed`);
+  if (walkthrough) {
+    nonCoderWalkthrough();
+  } else {
+    await run();
+    await drill();
+    log(`M1 exit criteria and restore drill: ${results.length} checks passed`);
+  }
 } catch (error) {
   console.error(`[e2e] FAILED: ${error instanceof Error ? error.message : error}`);
   try {

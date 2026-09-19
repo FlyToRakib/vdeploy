@@ -1,6 +1,6 @@
 'use client';
 
-import { ExternalLink, Play, RefreshCw, RotateCcw, Square } from 'lucide-react';
+import { ExternalLink, Play, RefreshCw, RotateCcw, Square, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -21,6 +21,7 @@ import { Status } from '@/components/ui/status';
 import { cn } from '@/lib/cn';
 import { followPlan, OperationError, query, runOperation } from '@/lib/operations';
 import { PROJECT_STATUS, type ProjectSummary } from '@/lib/projects';
+import { NewVersionDialog } from './new-version-dialog';
 
 export interface ProjectRow {
   id: string;
@@ -68,6 +69,7 @@ export function ProjectShell({ projectId, children }: { projectId: string; child
   const [missing, setMissing] = useState(false);
   const [version, setVersion] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   useCrumbName(projectId, row?.name);
 
   const reload = useCallback(() => {
@@ -173,6 +175,18 @@ export function ProjectShell({ projectId, children }: { projectId: string; child
             </a>
           )}
           <div className="flex flex-wrap gap-2">
+            {row.spec.source.type === 'archive' && row.serverId && (
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  setUploading(true);
+                }}
+              >
+                <Upload aria-hidden className="size-4" />
+                Upload a new version
+              </Button>
+            )}
             {git ? (
               <Button
                 size="sm"
@@ -251,6 +265,20 @@ export function ProjectShell({ projectId, children }: { projectId: string; child
           })}
         </nav>
         {children}
+        {row.serverId && (
+          <NewVersionDialog
+            open={uploading}
+            onOpenChange={setUploading}
+            serverId={row.serverId}
+            onDeploy={(uploadId) =>
+              void act(
+                'project.deploy_upload',
+                { projectId, uploadId },
+                'Deploying the new version',
+              )
+            }
+          />
+        )}
       </div>
     </ProjectContext.Provider>
   );

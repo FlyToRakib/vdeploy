@@ -266,6 +266,7 @@ describe('applyPlan', () => {
     expect((await project(created.id)).currentReleaseId).toBe(created.currentReleaseId);
     const [failed] = await t.db.select().from(plans).where(eq(plans.id, update.id));
     expect(failed?.error?.message).toMatch(/previous release was restored/);
+    expect(failed?.error?.message).not.toContain('..');
     const [deployment] = await t.db
       .select()
       .from(deployments)
