@@ -9,6 +9,7 @@ export const ErrorCode = z.enum([
   'invalid_config',
   'unauthenticated',
   'forbidden',
+  'step_up_required',
   'not_found',
   'conflict',
   'rate_limited',

@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.8 — policy engine L0 identity / RBAC ceiling
+**Task:** 1.9 — policy engine L1 grants (grant matrix, defaults)
 **Status:** in progress
-**Updated:** 2026-09-19 12:22 UTC
+**Updated:** 2026-09-19 12:24 UTC
 
 ## Done
 
@@ -14,14 +14,14 @@
 - [x] 1.5 operation catalog — every §24 op with tier, scope, min role, step-up, strict input
 - [x] 1.6 packages/core — canonical hashing, spec diff, buildPlan (steps, tier escalation, blast radius, plan_hash), createRelease (digest-pinned)
 - [x] 1.7 packages/db — kernel schema (org/user, servers, projects, releases, plans, approvals, deployments, audit_log) + DB-enforced immutability; Testcontainers harness
+- [x] 1.8 policy L0 identity — RBAC ceiling, AI never human_only, step-up freshness; exhaustive op×role×actor tests; 100% branch threshold enforced
 
 ## Doing
 
-- [ ] 1.8 policy engine L0 identity / RBAC ceiling
+- [ ] 1.9 policy engine L1 grants (grant matrix, defaults)
 
 ## Next (M1)
 
-- [ ] 1.9 policy engine L1 grants (grant matrix, defaults)
 - [ ] 1.10 policy engine L2 tool binding
 - [ ] 1.11 policy engine L3 validation — scope, rate, idempotency
 - [ ] 1.12 policy engine L4 taint tracking
