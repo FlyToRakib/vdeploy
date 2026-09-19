@@ -39,6 +39,8 @@ export const ApiConfig = z.object({
   GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
   GITHUB_API_URL: z.url().default('https://api.github.com'),
   GITHUB_WEB_URL: z.url().default('https://github.com'),
+  /** Where the agent binaries for the one-command installer are (vd-agent-linux-amd64, -arm64). */
+  AGENT_BINARIES_DIR: z.string().default('/app/agent'),
 });
 export type ApiConfig = z.output<typeof ApiConfig>;
 

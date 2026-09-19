@@ -9,8 +9,8 @@
 //   node scripts/e2e.mjs --vps     testbed = vdeploy-test-testbed on the test VPS
 //   add --teardown to remove the testbed afterwards
 //
-// Build first: the vdeploy-test/control-plane:e2e image and agent/bin/vd-agent —
-//   (cd agent && node ../scripts/go.mjs build -trimpath -o bin/vd-agent ./cmd/vd-agent)
+// Build first: the vdeploy-test/control-plane:e2e image, which carries the
+// agent the one-command installer puts on the testbed —
 //   docker build -f deploy/control-plane.Dockerfile -t vdeploy-test/control-plane:e2e .
 // VPS mode verifies the production baseline before and after, and aborts on
 // any change. Nothing outside the testbed is ever created or touched.
@@ -93,11 +93,6 @@ function loadImages() {
   log('loading the control-plane image into the testbed');
   const image = execFileSync('docker', ['save', IMAGE], { maxBuffer: 2 ** 31 });
   inTestbed('docker load -q', image);
-  log('installing the agent binary');
-  inTestbed(
-    'cat > /tmp/vd-agent.new && chmod 755 /tmp/vd-agent.new && mv /tmp/vd-agent.new /usr/local/bin/vd-agent',
-    readFileSync(`${root}agent/bin/vd-agent`),
-  );
 }
 
 /** A rerun starts clean: everything here lives inside the testbed's own daemon. */
@@ -105,7 +100,8 @@ function resetTestbed() {
   inTestbed(
     [
       'pkill vd-agent; sleep 1',
-      'rm -rf /var/lib/vdeploy /etc/vdeploy /var/log/vd-agent.log',
+      // The agent comes back through the installer, as on a new server.
+      'rm -rf /var/lib/vdeploy /etc/vdeploy /var/log/vd-agent.log /usr/local/bin/vd-agent',
       'docker ps -aq --filter label=io.vdeploy.managed=true | xargs -r docker rm -f >/dev/null',
       'docker rm -f vd-traefik >/dev/null 2>&1',
       'docker network ls -q --filter label=io.vdeploy.managed=true | xargs -r docker network rm >/dev/null 2>&1',
@@ -296,21 +292,32 @@ async function run() {
   inTestbed(
     `mkdir -p /etc/vdeploy && echo '${JSON.stringify(agentConfig)}' > /etc/vdeploy/agent.json`,
   );
-  // Preflight refuses Alpine on a real server; the testbed's config allows it, with a warning.
-  const doctor = inTestbed('vd-agent preflight 2>&1 || true');
+  // The one-command installer, as the dashboard shows it (the testbed has no systemd).
+  const installer = `wget -qO- ${PUBLIC_URL}/api/v1/agent/install.sh | sh -s --`;
+  // A dry run checks and changes nothing. Preflight refuses Alpine on a real
+  // server; the testbed's config allows it, with a warning.
+  const dry = inTestbed(
+    `${installer} --dry-run 2>&1; test ! -e /usr/local/bin/vd-agent && echo untouched`,
+  );
   for (const expected of [
     /Alpine Linux is not supported.*allowed by allowUnsupportedOS/,
     /hosting control panel/,
     /containers/,
+    /Dry run: this server is ready/,
+    /untouched/,
   ]) {
-    if (!expected.test(doctor)) throw new Error(`preflight did not report ${expected}: ${doctor}`);
+    if (!expected.test(dry)) throw new Error(`the dry run did not show ${expected}: ${dry}`);
   }
-  pass('preflight names what it checked', 'Alpine refused unless the config allows it');
-  const enrolled = inTestbed(
-    `vd-agent enroll --url ${PUBLIC_URL} --token ${server.token} 2>&1 | tail -3`,
-  );
-  if (!enrolled.includes('"msg":"enrolled"')) throw new Error(`enrollment failed: ${enrolled}`);
-  pass('agent enrolled after preflight', enrolled.split('\n').at(-1));
+  pass('installer dry run checks the server and changes nothing', 'Alpine allowed only by config');
+  const installed = inTestbed(`${installer} --token ${server.token} --no-service 2>&1`);
+  if (!installed.includes('"msg":"enrolled"') || !/Installed/.test(installed)) {
+    throw new Error(`the installer failed: ${installed}`);
+  }
+  const again = inTestbed(`${installer} --no-service 2>&1`);
+  if (!/already connected; updating the agent/.test(again)) {
+    throw new Error(`running the installer again was not harmless: ${again}`);
+  }
+  pass('one-command installer: checksummed agent, enrolled, safe to run again');
   inTestbed('nohup vd-agent run > /var/log/vd-agent.log 2>&1 &');
   await until('server online', async () => {
     const { result } = await op('server.status', { serverId: server.serverId });

@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.16f — one-command bootstrap
+**Task:** 2.17 — M2 exit
 **Status:** in progress
-**Updated:** 2026-09-20 20:00 UTC
+**Updated:** 2026-09-20 22:00 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -39,14 +39,15 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.16c dashboard: project page — header with status, address and actions (deploy latest for GitHub projects or redeploy, restart, stop/start), each run through the gate and followed to the end with a plain-language toast, waiting for approval when a change needs it; tabs that are real URLs. Overview: when something is wrong, the last failed deploy's reason and the diagnosis rules' causes with what to do (amber when the old version still serves), running copies, version, where the code comes from, port, and a timeline of what the agent did, in words. Deployments: every deploy with its version, outcome and reason, its build log on demand, and "go back to this version". Logs: live over server-sent events with search, pause and download, scrolling only its own box. Also: the gate reads stored specs through readSpec, so a spec written before a field existed gets its default instead of failing. Verified in the browser preview against seeded history (desktop and phone); the live stream through the dashboard is checked end to end in the 2.17 walkthrough
 - [x] 2.16d dashboard: config tab with Simple/Advanced (remembered per device). Settings: environment variables, with "keep it secret" on by default — the value is stored encrypted and referenced, never shown again; plain ones listed with their values; removal. Domains: each with whether its DNS points here and the exact records to add at the registrar. Size: memory from a short list (the request lowered with it) and copies. Files: permanent folders, and folders whose files the next deploy would delete, with "keep these files" or "they are temporary". Advanced adds the whole spec as YAML, parsed with the line of any mistake. Every change goes through the gate like any other. Also: project.get returns the spec with its defaults filled in. Verified in the browser preview
 - [x] 2.16e dashboard: Approvals — every plan waiting for a person, in words ("Restart the app"), why it waits, what it risks one sentence each (data first: "Deletes files in /app/uploads."), its changes field by field, when it expires; a plan that can lose data needs the project's name typed and a fresh password before Approve works; approve follows it to the end, reject changes nothing. Notifications — channels with what each is told about, send a test, pause, remove, and the last deliveries with why one failed; adding an email list or a webhook (URL checked), the webhook's signing secret shown once. GitHub — connected accounts (suspended ones marked), connect another, disconnect, what GitHub's return means in words (an owner must approve, expired, someone else's link, cannot see it, already connected elsewhere), and a plain note when this VDeploy has no GitHub App. All three in the sidebar and the command palette. Verified in the browser preview; the local e2e still passes
+- [x] 2.16f one-command bootstrap (§25): the connect command is now `curl -fsSL <control plane>/api/v1/agent/install.sh | sh -s -- --token <token>`. The control-plane image builds the agent for x86-64 and ARM64; the API serves the binaries by exact name and a POSIX-sh installer with this control plane's address and the binaries' SHA-256 baked in (quoted so nothing can break out). The installer needs root, picks the processor, downloads with curl or wget, refuses a download whose checksum does not match, runs preflight before changing anything (`--dry-run` stops there), enrolls unless already connected, and sets up a systemd unit that restarts the agent and starts it at boot (`--no-service` for containers). Running it again updates the agent and nothing else, skipping the first-install checks that the server's own router would fail. Verified in local dind: dry run changes nothing, install enrolls, a second run is harmless (e2e)
 
 ## Doing
 
-- [ ] 2.16f one-command bootstrap (§25): the connect command installs the agent binary (served by the control plane, checksummed), runs preflight, enrolls and sets up the systemd unit — idempotent, with --dry-run
+- [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright, including live logs through the dashboard)
 
 ## Next (M2)
 
-- [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright, including live logs through the dashboard)
+- (none left before the M2 exit)
 
 ## Known gaps (tracked, not forgotten)
 

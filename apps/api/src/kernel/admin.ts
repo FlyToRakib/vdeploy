@@ -44,7 +44,8 @@ async function enrollmentToken({ deps }: HandlerContext, serverId: string) {
     serverId,
     token,
     expiresAt: expiresAt.toISOString(),
-    command: `vd-agent enroll --url ${deps.publicUrl} --token ${token}`,
+    // One command, pasted as root: it checks the server, installs the agent and connects it.
+    command: `curl -fsSL ${new URL(deps.publicUrl).origin}/api/v1/agent/install.sh | sh -s -- --token ${token}`,
   };
 }
 

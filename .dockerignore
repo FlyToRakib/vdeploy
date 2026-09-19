@@ -6,7 +6,7 @@
 .git
 .vdeploy-local
 .claude
-agent
+agent/bin
 apps/web
 **/.env
 **/.env.*

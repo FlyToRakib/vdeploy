@@ -24,6 +24,8 @@ import { tcpProbe, type PortProbe } from './agents/reachability.js';
 import { githubFromConfig } from './github-config.js';
 import type { GithubDeps } from './kernel/context.js';
 import { githubRoutes } from './routes/github.js';
+import { AgentBinaries } from './agents/installer.js';
+import { agentInstallRoutes } from './routes/agent-install.js';
 import { uploadRoutes } from './routes/uploads.js';
 
 /** Log fields that may carry credentials or secret values; never written out. */
@@ -136,5 +138,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(logRoutes(kernel));
   await app.register(uploadRoutes(kernel));
   await app.register(githubRoutes(kernel));
+  await app.register(
+    agentInstallRoutes({
+      publicUrl: config.PUBLIC_URL,
+      binaries: new AgentBinaries(config.AGENT_BINARIES_DIR),
+    }),
+  );
   return app;
 }
