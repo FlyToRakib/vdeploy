@@ -8,3 +8,4 @@ export * from './operations/define.js';
 export * from './operations/catalog.js';
 export * from './kernel.js';
 export * from './grants.js';
+export * from './canonical.js';

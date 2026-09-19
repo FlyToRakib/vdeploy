@@ -1,5 +1,4 @@
-import type { ApplicationSpec, SpecChange } from '@vdeploy/contracts';
-import { canonicalJson } from './canonical.js';
+import { canonicalJson, type ApplicationSpec, type SpecChange } from '@vdeploy/contracts';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

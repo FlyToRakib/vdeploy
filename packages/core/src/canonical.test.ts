@@ -1,6 +1,6 @@
-import { newId } from '@vdeploy/contracts';
 import { describe, expect, it } from 'vitest';
-import { canonicalJson, hashOf } from './canonical.js';
+import { canonicalJson, newId } from '@vdeploy/contracts';
+import { hashOf } from './canonical.js';
 import { diffSpecs } from './diff.js';
 import { makeSpec } from './fixtures.test-helpers.js';
 import { createRelease } from './release.js';
