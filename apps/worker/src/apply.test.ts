@@ -102,20 +102,37 @@ async function agentTick() {
   const report = {
     generation: state.generation,
     projects: state.projects.map((p) =>
-      p.spec.deploy.releaseCommand?.includes('fail')
+      p.spec.metadata.name === 'bound-local'
         ? {
+            // An app listening on localhost: up, never reachable.
             projectId: p.projectId,
-            replicas: [],
-            error: 'the release command failed (exit 1): relation "users" already exists',
+            replicas: [{ name: 'vd-x', state: 'unhealthy', release: p.releaseId }],
+            evidence: [
+              {
+                container: 'vd-x',
+                state: 'unhealthy',
+                exitCode: null,
+                oomKilled: false,
+                restarts: 0,
+                listening: ['127.0.0.1:3000'],
+                lastOutput: 'listening on http://localhost:3000',
+              },
+            ],
           }
-        : {
-            projectId: p.projectId,
-            replicas: Array.from({ length: p.spec.runtime.replicas }, (_, i) => ({
-              name: `vd-${p.projectId}-v${p.releaseVersion}-r${p.revision}-${i}`,
-              state: !p.running ? 'exited' : p.releaseVersion < crashFrom ? 'ready' : 'unhealthy',
-              release: p.releaseId,
-            })),
-          },
+        : p.spec.deploy.releaseCommand?.includes('fail')
+          ? {
+              projectId: p.projectId,
+              replicas: [],
+              error: 'the release command failed (exit 1): relation "users" already exists',
+            }
+          : {
+              projectId: p.projectId,
+              replicas: Array.from({ length: p.spec.runtime.replicas }, (_, i) => ({
+                name: `vd-${p.projectId}-v${p.releaseVersion}-r${p.revision}-${i}`,
+                state: !p.running ? 'exited' : p.releaseVersion < crashFrom ? 'ready' : 'unhealthy',
+                release: p.releaseId,
+              })),
+            },
     ),
     events: null,
   };
@@ -253,6 +270,18 @@ describe('applyPlan', () => {
     const [failed] = await t.db.select().from(plans).where(eq(plans.id, update.id));
     expect(failed?.error?.message).toBe(
       'the release command failed (exit 1): relation "users" already exists. The previous release was restored.',
+    );
+  });
+
+  it('says why a deploy failed in plain words, not "unhealthy"', async () => {
+    const row = await plan('project.create', {
+      spec: spec({ metadata: { name: 'bound-local' }, network: { containerPort: 3000 } }),
+      serverId,
+    });
+    expect(await applyPlan(deps, row.id)).toBe('failed');
+    const [failed] = await t.db.select().from(plans).where(eq(plans.id, row.id));
+    expect(failed?.error?.message).toMatch(
+      /only accepting connections from inside its own container.*change the server host from localhost/s,
     );
   });
 

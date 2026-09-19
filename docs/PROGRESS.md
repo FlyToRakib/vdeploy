@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.12 — plain-language diagnostic layer
+**Task:** 2.13 — extended preflight and reachability probe
 **Status:** in progress
-**Updated:** 2026-09-20 02:00 UTC
+**Updated:** 2026-09-20 04:00 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -30,14 +30,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.10 live logs and deploy history: the agent streams a project's own containers' output on request (tail ≤ 1000 per container, then follow up to 30 min; lines capped at 8 KB; batched every 300 ms; at most 8 streams per connection; a slow viewer gets a "lines skipped" marker instead of unbounded buffering); the gateway multiplexes requests by id, accepts answers only from the server asked, and strips terminal control codes; `project.logs` (recent lines, through the gate) and `GET /api/v1/projects/:id/logs/stream` (SSE: recent, then live, with heartbeats); agent events stored as a per-project timeline (`project.events`, only for projects on the reporting server, repeats collapsed, 30-day retention); releases remember their build, so `deployment.logs` shows the build log and outcome; gateway handles each agent's frames strictly in order. Verified in local dind (e2e)
 - [x] 2.11a persistent folders at build time (§17.2): every build and detection preview scans the source — WordPress, Laravel, Django, Rails, Strapi, Ghost, n8n, SQLite files anywhere, generic uploads/media/attachments/data/files — and places findings in the container under the image's working directory; `storage.status` shows each flagged folder as permanent, temporary (a person said so, `storage.ignore_path`) or unprotected; `storage.make_persistent` adds a permanent folder as a planned spec change (readable volume names, refused for multi-replica apps). Verified in local dind: a .zip with an uploads folder is flagged unprotected (e2e)
 - [x] 2.11b persistent folders at runtime and deploy time (§17.2): the agent checks each running replica's writable layer (every `storageScanSeconds`, default 300) and reports folders holding files outside permanent folders, leaving out caches, temp and system paths; `storage.status` shows them; any plan that would replace those containers (spec change, restart, rotation, scale-down, delete) names "files in <folder>" as data at risk and becomes destructive, so it is held for explicit confirmation — unless the folder is marked temporary, or the plan makes it permanent; making a folder permanent copies the files already there from the newest earlier replica into the new volume before the new replica starts (recreate deploys only stop the old one until then). Also: agent event kinds are free text, so a new kind never costs a report or the connection. Verified in local dind: a restart that would delete an uploaded file is held with the loss named; after making /app/uploads permanent the same file is there (e2e)
+- [x] 2.12 plain-language diagnostic layer (§32): for replicas that are not serving, the agent reports evidence — running or how it exited, OOM kill, restart count, listening sockets (read from the host's /proc, nothing executed inside the container), last output — refreshed when the replica's state changes; a deterministic rule table in core (no model) names the cause with detected / plain / fix / confidence / risk: listening on localhost, wrong port (with the port to use), not listening, out of memory, missing env var, unreachable database, port in use, case-sensitive module paths, runtime version, and build-log failures (missing script, unresolved import, build out of memory, dependency install); failed deploys and builds now say the cause and the fix; `project.diagnose` on request. Also: the agent removes a deleted project's network once its last container is gone (networks were leaking and eventually exhausted Docker's address pools). Verified in local dind: an app bound to 127.0.0.1 fails with "listen on 0.0.0.0 instead of localhost" (e2e)
 
 ## Doing
 
-- [ ] 2.12 deterministic plain-language diagnostic layer
+- [ ] 2.13 extended preflight (IPv6, panel, port-conflict process, existing Docker) + external reachability probe
 
 ## Next (M2)
 
-- [ ] 2.13 extended preflight (IPv6, panel, port-conflict process, existing Docker) + external reachability probe
 - [ ] 2.14 notifications (email, webhook)
 - [ ] 2.15 GitHub App + webhooks (needs credentials — see Blocked)
 - [ ] 2.16 dashboard: servers + enrollment, projects, deploys, logs, config (Simple/Advanced), approvals

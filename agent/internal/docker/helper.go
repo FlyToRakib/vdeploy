@@ -178,6 +178,51 @@ func (c *Client) StreamLogs(ctx context.Context, id string, tail int, follow boo
 // maxStreamLine is where an unterminated line is cut and sent anyway.
 const maxStreamLine = 16 << 10
 
+// ContainerFacts is a container's runtime state, as the Engine reports it.
+type ContainerFacts struct {
+	Pid       int
+	Running   bool
+	Status    string
+	ExitCode  int
+	OOMKilled bool
+	Restarts  int
+}
+
+// Facts is a container's runtime state, for the plain-language layer (§32).
+func (c *Client) Facts(ctx context.Context, id string) (ContainerFacts, error) {
+	var state struct {
+		RestartCount int `json:"RestartCount"`
+		State        struct {
+			Status    string `json:"Status"`
+			Running   bool   `json:"Running"`
+			Pid       int    `json:"Pid"`
+			ExitCode  int    `json:"ExitCode"`
+			OOMKilled bool   `json:"OOMKilled"`
+		} `json:"State"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(id)+"/json", nil, nil, &state); err != nil {
+		return ContainerFacts{}, err
+	}
+	return ContainerFacts{
+		Pid: state.State.Pid, Running: state.State.Running, Status: state.State.Status,
+		ExitCode: state.State.ExitCode, OOMKilled: state.State.OOMKilled, Restarts: state.RestartCount,
+	}, nil
+}
+
+// LastOutput is a container's last lines of output, oldest first.
+func (c *Client) LastOutput(ctx context.Context, id string, lines int) (string, error) {
+	var out strings.Builder
+	err := c.StreamLogs(ctx, id, lines, false, func(_ byte, line []byte) {
+		// Drop Docker's timestamp: people read the words.
+		if space := bytes.IndexByte(line, ' '); space > 0 && space <= 40 {
+			line = line[space+1:]
+		}
+		out.Write(line)
+		out.WriteByte('\n')
+	})
+	return out.String(), err
+}
+
 // Finished is a stopped container's exit code and the end of its output.
 func (c *Client) Finished(ctx context.Context, id string) (int, string, error) {
 	var state struct {

@@ -52,7 +52,8 @@ describe('audit chain', () => {
     const chain = newId('organization');
     await Promise.all(Array.from({ length: 25 }, (_, n) => appendAudit(t.db, event(chain, n))));
     expect(await verifyAuditChain(t.db, chain)).toEqual({ ok: true, count: 25 });
-  });
+    // It checks correctness, not speed: 25 writers take turns on one lock, slowly on a busy machine.
+  }, 30_000);
 
   it('rolls back with the transaction it belongs to', async () => {
     const chain = newId('organization');

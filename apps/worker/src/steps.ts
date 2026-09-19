@@ -9,10 +9,11 @@ import {
   type Id,
   type PlanStep,
 } from '@vdeploy/contracts';
-import { createRelease, generateSecret, hashOf, specAfter } from '@vdeploy/core';
+import { createRelease, diagnoseBuild, generateSecret, hashOf, specAfter } from '@vdeploy/core';
 import {
   abandonBuild,
   currentSecretVersions,
+  diagnoseProject,
   deployments,
   getBuild,
   projects,
@@ -85,7 +86,11 @@ async function converge(deps: StepDeps, spec: ApplicationSpec, expected: Expecta
     durationMs(spec.deploy.timeout),
     deps.pollMs,
   );
-  if (!outcome.ok) throw new VDeployError('unavailable', outcome.reason);
+  if (!outcome.ok) {
+    // Say the cause, not the symptom (§32): what the agent saw, run through the rules.
+    const [cause] = await diagnoseProject(deps.db, expected.serverId, expected.projectId, spec);
+    throw new VDeployError('unavailable', cause ? `${cause.plain} ${cause.fix}` : outcome.reason);
+  }
 }
 
 async function chooseServer(deps: StepDeps, state: ApplyState, spec: ApplicationSpec) {
@@ -337,7 +342,13 @@ async function buildImage(
     const build = await getBuild(deps.db, state.orgId, buildId);
     if (build?.status === 'succeeded' && build.image) return { image: build.image, buildId };
     if (build?.status === 'failed') {
-      throw new VDeployError('unavailable', `The build failed: ${build.error ?? 'see its log'}`);
+      const cause = diagnoseBuild(build.log);
+      throw new VDeployError(
+        'unavailable',
+        cause
+          ? `The build failed. ${cause.plain} ${cause.fix}`
+          : `The build failed: ${build.error ?? 'see its log'}`,
+      );
     }
     if (Date.now() > deadline) {
       await abandonBuild(deps.db, buildId, deps.now());

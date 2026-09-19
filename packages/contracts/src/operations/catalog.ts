@@ -41,6 +41,13 @@ export const OPERATIONS = [
     obj({ ...P, tail: z.number().int().min(1).max(2000).default(200) }),
   ),
   query('project.metrics', 'project', 'metrics', 'Read CPU, memory and network usage', obj(P)),
+  query(
+    'project.diagnose',
+    'project',
+    'logs',
+    'Explain in plain words why the app is not working, and what would fix it',
+    obj(P),
+  ),
   query('project.events', 'project', 'deployHistory', 'Read the project event timeline', obj(P)),
   query('deployment.list', 'project', 'deployHistory', 'List deployments of a project', obj(P)),
   query(

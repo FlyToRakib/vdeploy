@@ -20,16 +20,17 @@ import (
 
 // fakeEngine is an in-memory Docker holding only managed containers.
 type fakeEngine struct {
-	containers map[string]*docker.Container // by id
-	networks   map[string]bool
-	volumes    map[string]bool
-	images     map[string]bool
-	calls      []string
-	env        map[string][]string // by container name, as created
-	exitCodes  map[string]int      // by id, once a container has exited
-	outputs    map[string]string
-	failCreate string // container name whose create fails
-	nextID     int
+	containers   map[string]*docker.Container // by id
+	networks     map[string]bool
+	volumes      map[string]bool
+	images       map[string]bool
+	calls        []string
+	env          map[string][]string // by container name, as created
+	exitCodes    map[string]int      // by id, once a container has exited
+	networkOwner map[string]string   // network name → project
+	outputs      map[string]string
+	failCreate   string // container name whose create fails
+	nextID       int
 }
 
 func newFake() *fakeEngine {
@@ -49,8 +50,27 @@ func (f *fakeEngine) ListManaged(context.Context) ([]docker.Container, error) {
 	return out, nil
 }
 
-func (f *fakeEngine) EnsureNetwork(_ context.Context, name, _ string) error {
+func (f *fakeEngine) EnsureNetwork(_ context.Context, name, projectID string) error {
 	f.networks[name] = true
+	if f.networkOwner == nil {
+		f.networkOwner = map[string]string{}
+	}
+	f.networkOwner[name] = projectID
+	return nil
+}
+
+func (f *fakeEngine) ManagedNetworks(context.Context) (map[string]string, error) {
+	out := map[string]string{}
+	for name, owner := range f.networkOwner {
+		out[name] = owner
+	}
+	return out, nil
+}
+
+func (f *fakeEngine) RemoveNetwork(_ context.Context, name string) error {
+	f.calls = append(f.calls, "remove network "+name)
+	delete(f.networks, name)
+	delete(f.networkOwner, name)
 	return nil
 }
 
@@ -871,5 +891,19 @@ func TestFilesAreKeptFromTheNewestEarlierReleaseNotAnOlderOneStillDraining(t *te
 	reconcile(t, r, desired(3, v3))
 	if !slices.ContainsFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "copy "+v2+":") }) {
 		t.Fatalf("calls = %v, want a copy from %s", engine.calls, v2)
+	}
+}
+
+func TestANetworkGoesWithTheLastContainerOfItsProject(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	settle(t, r, desired(1, testProject(idA, 1, 1), testProject(idB, 1, 1)))
+	if len(engine.networks) != 2 {
+		t.Fatalf("networks = %v", engine.networks)
+	}
+	// Project B is deleted: its containers go, then its network; A's stays.
+	settle(t, r, desired(2, testProject(idA, 1, 1)))
+	if len(engine.networks) != 1 || !engine.networks[compose.NetworkName("prj_"+idA)] {
+		t.Fatalf("networks = %v", engine.networks)
 	}
 }

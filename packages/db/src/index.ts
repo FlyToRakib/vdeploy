@@ -10,3 +10,4 @@ export * from './domains.js';
 export * from './secrets.js';
 export * from './builds.js';
 export * from './events.js';
+export * from './diagnose.js';

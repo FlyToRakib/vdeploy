@@ -33,6 +33,9 @@ type Engine interface {
 	Remove(ctx context.Context, id string) error
 	// Finished is a stopped container's exit code and the end of its output.
 	Finished(ctx context.Context, id string) (int, string, error)
+	// ManagedNetworks lists project networks the agent created, by name → project.
+	ManagedNetworks(ctx context.Context) (map[string]string, error)
+	RemoveNetwork(ctx context.Context, name string) error
 }
 
 // Event is one thing the reconciler did, reported to the control plane.
@@ -57,6 +60,8 @@ type ProjectState struct {
 	Error     string    `json:"error,omitempty"`
 	// Unsaved are folders holding files the next deploy would delete (§17.2).
 	Unsaved []UnsavedFolder `json:"unsaved,omitempty"`
+	// Evidence is what the agent saw of replicas that are not serving (§32).
+	Evidence []ReplicaEvidence `json:"evidence,omitempty"`
 }
 
 // Report is the outcome of one reconciliation pass.
@@ -93,7 +98,9 @@ type Reconciler struct {
 	Storage Storage
 	// StorageScan paces that look (default unsavedEvery).
 	StorageScan time.Duration
-	Now         func() time.Time
+	// Inspector gathers evidence on replicas that are not serving; nil gathers none.
+	Inspector Inspector
+	Now       func() time.Time
 
 	ready         map[string]*readiness
 	draining      map[string]time.Time
@@ -101,7 +108,8 @@ type Reconciler struct {
 	unsaved       map[string][]UnsavedFolder
 	unsavedAt     time.Time
 	// moving: new permanent folders (by volume) whose files still have to be copied in.
-	moving map[string]bool
+	moving   map[string]bool
+	evidence map[string]evidenceCache
 }
 
 func (r *Reconciler) now() time.Time {
@@ -187,6 +195,7 @@ func (p *pass) project(ctx context.Context, project spec.DesiredProject) Project
 		result.Replicas = append(result.Replicas, Replica{Name: c.Name, State: state, Release: project.ReleaseID})
 	}
 	p.settled[project.ProjectID] = settled
+	p.gatherEvidence(ctx, project, &result)
 	return result
 }
 
@@ -355,6 +364,30 @@ func (p *pass) retire(ctx context.Context) {
 	for projectID := range p.r.draining {
 		if len(p.old(projectID)) == 0 {
 			delete(p.r.draining, projectID)
+		}
+	}
+	p.pruneNetworks(ctx)
+}
+
+// pruneNetworks removes the networks of projects no longer here once none
+// of their containers is left. A network holds no data, but each takes an
+// address range, and a server that deploys and deletes many projects would
+// otherwise run out of them.
+func (p *pass) pruneNetworks(ctx context.Context) {
+	networks, err := p.r.Engine.ManagedNetworks(ctx)
+	if err != nil {
+		return
+	}
+	busy := map[string]bool{}
+	for _, c := range p.existing {
+		busy[c.Labels[compose.ProjectLabel]] = true
+	}
+	for name, projectID := range networks {
+		if _, desired := p.desired[projectID]; desired || busy[projectID] {
+			continue
+		}
+		if err := p.r.Engine.RemoveNetwork(ctx, name); err != nil {
+			p.event("failed", projectID, "", "remove network: "+err.Error())
 		}
 	}
 }

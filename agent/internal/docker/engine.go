@@ -61,6 +61,38 @@ func (c *Client) EnsureNetwork(ctx context.Context, name, projectID string) erro
 	return c.do(ctx, http.MethodPost, "/networks/create", nil, body, &struct{}{})
 }
 
+// ManagedNetworks lists the project networks the agent created: name → project.
+func (c *Client) ManagedNetworks(ctx context.Context) (map[string]string, error) {
+	var raw []struct {
+		Name   string            `json:"Name"`
+		Labels map[string]string `json:"Labels"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/networks", labelFilter(compose.ManagedLabel+"=true"), nil, &raw); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, n := range raw {
+		// Defense in depth: never trust the filter alone.
+		if n.Labels[compose.ManagedLabel] == "true" && n.Labels[compose.ProjectLabel] != "" {
+			out[n.Name] = n.Labels[compose.ProjectLabel]
+		}
+	}
+	return out, nil
+}
+
+// RemoveNetwork removes a project network the agent created, first letting
+// Traefik go of it. A network holds no data: this is only tidying up.
+func (c *Client) RemoveNetwork(ctx context.Context, name string) error {
+	body := map[string]any{"Container": TraefikName, "Force": true}
+	// Traefik may not have joined it: that is fine.
+	_ = c.do(ctx, http.MethodPost, "/networks/"+url.PathEscape(name)+"/disconnect", nil, body, nil)
+	err := c.do(ctx, http.MethodDelete, "/networks/"+url.PathEscape(name), nil, nil, nil)
+	if IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 // EnsureVolume creates a permanent folder's volume if it does not exist.
 // Volumes are never removed by the agent: deleting data is a separate,
 // explicit, snapshotted operation (§17.2).

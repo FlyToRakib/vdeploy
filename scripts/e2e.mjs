@@ -106,6 +106,8 @@ function resetTestbed() {
       'rm -rf /var/lib/vdeploy /etc/vdeploy /var/log/vd-agent.log',
       'docker ps -aq --filter label=io.vdeploy.managed=true | xargs -r docker rm -f >/dev/null',
       'docker rm -f vd-traefik >/dev/null 2>&1',
+      'docker network ls -q --filter label=io.vdeploy.managed=true | xargs -r docker network rm >/dev/null 2>&1',
+      'docker volume ls -q --filter label=io.vdeploy.managed=true | xargs -r docker volume rm >/dev/null 2>&1',
       'true',
     ].join('; '),
   );
@@ -247,8 +249,10 @@ function managedContainers() {
   return out ? out.split('\n').map((l) => l.split(' ')) : [];
 }
 
+/** The owner's password, for step-up before destructive actions. */
+const password = `e2e ${randomBytes(12).toString('hex')}`;
+
 async function run() {
-  const password = `e2e ${randomBytes(12).toString('hex')}`;
   const setup = await call('POST', '/api/v1/setup', {
     name: 'E2E Owner',
     email: 'owner@e2e.invalid',
@@ -335,6 +339,7 @@ async function run() {
   await secrets(hello.id);
   await releaseCommand(hello.id);
   await buildFromSource(server.serverId);
+  await explainsFailure(server.serverId);
   await logsAndHistory(hello.id);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
@@ -520,6 +525,64 @@ async function keepUploads(projectId) {
   const after = firstFile(replica());
   if (after !== before) throw new Error(`the file changed: ${before} → ${after}`);
   pass('made permanent in place: the same file kept', before);
+}
+
+/**
+ * The plain-language layer (M2 2.12, §32): an app that listens only on
+ * localhost fails its deploy with that cause named, not "unhealthy".
+ */
+async function explainsFailure(serverId) {
+  const { uploadId } = await uploadArchive(
+    zipOf({
+      'package.json': JSON.stringify({
+        name: 'local-app',
+        version: '1.0.0',
+        scripts: { start: 'node index.js' },
+      }),
+      'index.js':
+        "require('http').createServer((q, s) => s.end('hi')).listen(3000, '127.0.0.1');\n",
+    }),
+  );
+  const created = await op('project.create', {
+    serverId,
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'local-app' },
+      source: { type: 'archive', uploadId },
+      build: { strategy: 'railpack' },
+      runtime: { replicas: 1, resources: { memory: { request: '64Mi', limit: '256Mi' } } },
+      network: { containerPort: 3000 },
+      health: { startup: { type: 'tcp', timeout: '20s' } },
+    },
+  });
+  const failed = await settled(created.plan.id, 1_200_000);
+  if (
+    failed.status !== 'failed' ||
+    !/listen on 0\.0\.0\.0 instead of localhost/.test(failed.error?.message)
+  ) {
+    throw new Error(`the failure was not explained: ${JSON.stringify(failed.error)}`);
+  }
+  const [project] = (await op('project.list', {})).result.filter((p) => p.name === 'local-app');
+  const { result } = await op('project.diagnose', { projectId: project.id });
+  if (result.diagnoses[0]?.condition !== 'listening_on_localhost')
+    throw new Error(JSON.stringify(result));
+  pass('a failed deploy says the cause in plain words', 'listening on localhost');
+
+  // Out of the way of what follows: delete it, which is destructive and so confirmed.
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const removal = await op('project.delete', { projectId: project.id, keepData: false });
+  await call('POST', `/api/v1/plans/${removal.plan.id}/approve`);
+  const removed = await settled(removal.plan.id);
+  if (removed.status !== 'applied') throw new Error(JSON.stringify(removed));
+  await until(
+    'its containers gone',
+    async () =>
+      !inTestbed(
+        `docker ps -a --filter label=io.vdeploy.project=${project.id} --format '{{.Names}}'`,
+      ),
+    120_000,
+  );
 }
 
 /** Waits for a plan to finish and returns it. */

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
 import { BuildResult } from './builds.js';
+import { ReplicaEvidence } from './diagnosis.js';
 import { LogLine } from './logs.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
@@ -103,6 +104,8 @@ export const ObservedReport = z.strictObject({
           .array(z.strictObject({ path: z.string().max(1024), files: z.number().int().min(0) }))
           .max(20)
           .optional(),
+        /** What the agent saw of replicas that are not serving (§32). */
+        evidence: z.array(ReplicaEvidence).max(64).optional(),
       }),
     )
     .max(200)

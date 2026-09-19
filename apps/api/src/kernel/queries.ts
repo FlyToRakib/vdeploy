@@ -1,9 +1,10 @@
 import { readSpec, VDeployError, type LogLine, type OperationName } from '@vdeploy/contracts';
-import { describeCapacity, footprint } from '@vdeploy/core';
+import { describeCapacity, diagnoseBuild, footprint } from '@vdeploy/core';
 import {
   builds,
   buildView,
   deployments,
+  diagnoseProject,
   eventsFor,
   getBuild,
   listBuilds,
@@ -151,6 +152,24 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
   'domain.status': async ({ deps, args }) => domainChecksFor(deps.db, [id(args, 'projectId')]),
   'secret.list': async ({ deps, args }) => listSecrets(deps.db, id(args, 'projectId')),
   'build.list': async ({ deps, args }) => listBuilds(deps.db, id(args, 'projectId')),
+  'project.diagnose': async ({ deps, args }) => {
+    const [row] = await deps.db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, id(args, 'projectId')));
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    const spec = readSpec(row.spec);
+    const running = row.serverId ? await diagnoseProject(deps.db, row.serverId, row.id, spec) : [];
+    // The latest build too, if it failed: a build error is a cause as well.
+    const [latest] = await deps.db
+      .select()
+      .from(builds)
+      .where(eq(builds.projectId, row.id))
+      .orderBy(desc(builds.createdAt))
+      .limit(1);
+    const build = latest?.status === 'failed' ? diagnoseBuild(latest.log) : null;
+    return { diagnoses: build ? [build, ...running] : running };
+  },
   'storage.status': async ({ deps, args }) => {
     const [row] = await deps.db
       .select()
