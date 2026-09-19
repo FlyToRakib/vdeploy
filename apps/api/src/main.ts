@@ -1,6 +1,11 @@
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { connect, createApplyQueue, enqueuePlan, migrateToLatest } from '@vdeploy/db';
 import { loadConfig } from './config.js';
 import { buildServer } from './server.js';
+
+// Outbound calls (breached-password check, SMTP) must survive slow networks:
+// Node's default 250 ms per address makes every attempt time out there.
+setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 const config = loadConfig();
 const { db, close } = connect(config.DATABASE_URL);

@@ -66,6 +66,17 @@ describe('pinImage', () => {
     expect(calls).toEqual([]);
   });
 
+  it('retries a flaky network before succeeding', async () => {
+    const { access } = fakeRegistry();
+    let failures = 1;
+    const flaky: RegistryAccess = {
+      ...access,
+      fetch: (url, init) =>
+        failures-- > 0 ? Promise.reject(new TypeError('fetch failed')) : access.fetch(url, init),
+    };
+    expect(await pinImage('nginx:1.27', flaky)).toBe(`nginx@${DIGEST}`);
+  });
+
   it('explains a missing image in plain words', async () => {
     await expect(pinImage('nginx:no-such-tag', fakeRegistry(404).access)).rejects.toThrow(
       /does not exist, or its tag is misspelled/,

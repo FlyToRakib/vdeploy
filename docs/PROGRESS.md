@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.25 — control-plane backup/restore drill
+**Task:** none — 
 **Status:** in progress
-**Updated:** 2026-09-19 14:27 UTC
+**Updated:** 2026-09-19 14:50 UTC
 
 ## Done
 
@@ -31,10 +31,11 @@
 - [x] 1.22 control plane — POST /api/v1/operations/:name runs every op through one pipeline (resolve target → evaluate gate → plan (re-gated at the plan's real tier) → persist → queue or hold for approval; reads → handlers; admin ops → handlers), audit of every decision, idempotency keys, approve (checkApprover + re-plan hash check → stale, HMAC-signed approval, single winner) / reject, plan listing; admin ops (invite, remove, set_role ends sessions, org.update, server.add + one-time hashed enrollment token, api_key create/revoke, audit.export with chain verification); BullMQ apply queue on Postgres (ADR 0005)
 - [x] 1.23 control plane — agent enrollment + signed wss gateway (NOTIFY-driven desired-state push, validated acks/observed state, refusals audited); apps/worker applies queued plans: approval signature + re-plan hash re-checked at apply time, steps (create/update spec, digest-pinned releases via registry token flow, deploy with convergence wait + auto-rollback, restart via revision, scale, stop/start, delete), state change + generation bump + NOTIFY in one tx, exactly-once
 - [x] 1.24 M1 exit — scripts/e2e.mjs runs Postgres + API + worker + agent inside an isolated dind testbed and drives the real API: setup, server.add, preflight+enroll, signed channel, deploy from spec (digest-pinned, 2 replicas), agent restart (no duplicates), self-heal of a killed container, audit chain verified. PASSED locally and on the VPS testbed (2026-09-19), baseline verified unchanged before/after. control-plane image (deploy/control-plane.Dockerfile); PlanView carries the failure reason; worker logs unexpected errors
+- [x] 1.25 control-plane backup/restore drill — automated in scripts/e2e.mjs (pg_dump verified by header → control plane destroyed → apps keep running and heal offline (N6) → restore to fresh Postgres → same session, agent re-attached, same containers, audit chain intact); runbook docs/runbooks/control-plane-restore.md. PASSED on the VPS testbed, baseline unchanged. Registry calls retry with backoff and fail in plain words; Node connect window widened for slow networks
 
 ## Doing
 
-- [ ] 1.25 control-plane backup/restore drill
+
 
 ## Next (M1)
 

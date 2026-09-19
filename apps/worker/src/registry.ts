@@ -45,6 +45,30 @@ export const publicRegistries: RegistryAccess = {
   baseUrl: (registry) => `https://${registry === 'docker.io' ? 'registry-1.docker.io' : registry}`,
 };
 
+const RETRY_DELAYS_MS = [1000, 3000, 9000];
+
+/**
+ * Registries and networks fail transiently; a timeout is retried with backoff
+ * before the plan fails — and then in words that say what to check.
+ */
+async function reach(access: RegistryAccess, image: string, url: string, init?: RequestInit) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await access.fetch(url, init);
+    } catch (error) {
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        throw new VDeployError(
+          'unavailable',
+          `Could not reach the registry for ${image}. Check that the server can reach the internet, then try again.`,
+          { cause: error instanceof Error ? error.message : String(error) },
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 function challenge(header: string | null): { realm: string; params: URLSearchParams } | null {
   if (!header?.startsWith('Bearer ')) return null;
   const params = new URLSearchParams();
@@ -71,15 +95,15 @@ export async function pinImage(
   if (ref.reference.startsWith('sha256:')) return `${ref.name}@${ref.reference}`;
   const url = `${access.baseUrl(ref.registry)}/v2/${ref.repository}/manifests/${ref.reference}`;
   const headers: Record<string, string> = { accept: MANIFEST_TYPES };
-  let res = await access.fetch(url, { method: 'HEAD', headers });
+  let res = await reach(access, image, url, { method: 'HEAD', headers });
   if (res.status === 401) {
     const auth = challenge(res.headers.get('www-authenticate'));
     if (!auth) throw new VDeployError('unavailable', `The registry for ${image} refused access`);
-    const token = await access.fetch(`${auth.realm}?${auth.params.toString()}`);
+    const token = await reach(access, image, `${auth.realm}?${auth.params.toString()}`);
     const body = (await token.json()) as { token?: string; access_token?: string };
     const bearer = body.token ?? body.access_token;
     if (!token.ok || !bearer) throw new VDeployError('unavailable', `No access to ${image}`);
-    res = await access.fetch(url, {
+    res = await reach(access, image, url, {
       method: 'HEAD',
       headers: { ...headers, authorization: `Bearer ${bearer}` },
     });

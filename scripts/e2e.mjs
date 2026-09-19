@@ -104,35 +104,64 @@ function resetTestbed() {
   );
 }
 
-function startControlPlane() {
-  const secret = () => randomBytes(32).toString('hex');
-  const dbPassword = secret();
-  const common = [
-    `-e DATABASE_URL=postgres://vdeploy:${dbPassword}@db:5432/vdeploy`,
-    `-e APPROVAL_KEY=${secret()}`,
-    `-e CONTROL_PLANE_KEY=${secret()}`,
-    `-e AUTH_SECRET=${secret()}`,
-    `-e PUBLIC_URL=${PUBLIC_URL}`,
-    '-e BREACHED_PASSWORD_CHECK=false',
-    '-e LOG_LEVEL=warn',
-  ].join(' ');
-  log('starting Postgres, the API and the worker inside the testbed');
+// The control plane's secrets for this run. A real install keeps them outside
+// the database backup, and a restore needs both (docs/runbooks/control-plane-restore.md).
+const secret = () => randomBytes(32).toString('hex');
+const dbPassword = secret();
+const controlPlaneEnv = [
+  `-e DATABASE_URL=postgres://vdeploy:${dbPassword}@db:5432/vdeploy`,
+  `-e APPROVAL_KEY=${secret()}`,
+  `-e CONTROL_PLANE_KEY=${secret()}`,
+  `-e AUTH_SECRET=${secret()}`,
+  `-e PUBLIC_URL=${PUBLIC_URL}`,
+  '-e BREACHED_PASSWORD_CHECK=false',
+  '-e LOG_LEVEL=warn',
+].join(' ');
+
+function startDatabase() {
   inTestbed(
     [
-      'docker rm -f cp-db cp-api cp-worker >/dev/null 2>&1; docker network rm cp >/dev/null 2>&1; true',
-      'docker network create cp >/dev/null',
       `docker run -d --name cp-db --network cp --network-alias db -e POSTGRES_USER=vdeploy -e POSTGRES_PASSWORD=${dbPassword} -e POSTGRES_DB=vdeploy postgres:16-alpine >/dev/null`,
       'until docker exec cp-db pg_isready -U vdeploy >/dev/null 2>&1; do sleep 1; done; sleep 2',
-      `docker run -d --name cp-api --network cp -p 8080:8080 ${common} ${IMAGE} >/dev/null`,
-      'until wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1; do sleep 1; done',
-      `docker run -d --name cp-worker --network cp ${common} ${IMAGE} node /app/worker/dist/main.js >/dev/null`,
     ].join(' && '),
   );
+}
+
+function startApiAndWorker() {
+  inTestbed(
+    [
+      `docker run -d --name cp-api --network cp -p 8080:8080 ${controlPlaneEnv} ${IMAGE} >/dev/null`,
+      'until wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1; do sleep 1; done',
+      `docker run -d --name cp-worker --network cp ${controlPlaneEnv} ${IMAGE} node /app/worker/dist/main.js >/dev/null`,
+    ].join(' && '),
+  );
+}
+
+function startControlPlane() {
+  log('starting Postgres, the API and the worker inside the testbed');
+  inTestbed(
+    'docker rm -f cp-db cp-api cp-worker >/dev/null 2>&1; docker network rm cp >/dev/null 2>&1; docker network create cp >/dev/null',
+  );
+  startDatabase();
+  startApiAndWorker();
+}
+
+/** The tunnel's local port must be free, or requests would silently reach another API. */
+async function assertPortFree(port) {
+  const { createServer } = await import('node:net');
+  await new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', () => {
+      reject(new Error(`local port ${port} is in use; stop whatever holds it (a local testbed?)`));
+    });
+    probe.listen(port, '127.0.0.1', () => probe.close(resolve));
+  });
 }
 
 let tunnel = null;
 async function openTunnel() {
   if (!vps) return;
+  await assertPortFree(18090);
   tunnel = spawn('ssh', ['-o', 'BatchMode=yes', '-N', '-L', '18090:127.0.0.1:18090', sshTarget], {
     stdio: 'ignore',
   });
@@ -278,6 +307,62 @@ async function run() {
   pass('every action is in the audit log, chain verified', `${audit.entries.length} entries`);
 }
 
+/**
+ * The control-plane disaster drill (§30 ⑧, §34.1): back up, lose the whole
+ * control plane, show apps keep running and healing without it (N6), restore
+ * to a fresh database, and show the agent re-attaches with nothing lost.
+ */
+async function drill() {
+  inTestbed(
+    'docker exec cp-db pg_dump -U vdeploy -Fc vdeploy > /tmp/cp.dump && head -c 5 /tmp/cp.dump | grep -q PGDMP',
+  );
+  const size = Number(inTestbed('wc -c < /tmp/cp.dump'));
+  pass('control plane backed up and the dump verified', `${Math.round(size / 1024)} KB`);
+
+  const before = managedContainers()
+    .map(([name]) => name)
+    .sort();
+  inTestbed('docker rm -f cp-api cp-worker cp-db >/dev/null');
+  await sleep(5000);
+  const [victim] = before;
+  inTestbed(`docker kill ${victim} >/dev/null`);
+  await until(
+    'offline self-heal',
+    async () => {
+      const containers = managedContainers();
+      return containers.length === 2 && containers.every(([, s]) => s === 'running');
+    },
+    60_000,
+  );
+  pass('control plane gone: apps kept running and healed without it', victim);
+
+  startDatabase();
+  inTestbed(
+    'docker cp /tmp/cp.dump cp-db:/tmp/cp.dump && docker exec cp-db pg_restore -U vdeploy -d vdeploy --no-owner /tmp/cp.dump',
+  );
+  startApiAndWorker();
+  const serverId = (await op('project.list', {})).result[0]?.serverId;
+  await until(
+    'agent re-attached',
+    async () => {
+      const { result } = await op('server.status', { serverId });
+      return result.status === 'online';
+    },
+    120_000,
+  );
+  await sleep(8000);
+  const after = managedContainers()
+    .map(([name]) => name)
+    .sort();
+  if (JSON.stringify(after) !== JSON.stringify(before)) {
+    throw new Error(`containers changed across the restore: ${before} → ${after}`);
+  }
+  const from = new Date(Date.now() - 3600_000).toISOString();
+  const { result: audit } = await op('audit.export', { from, to: new Date().toISOString() });
+  if (!audit.verification.ok) throw new Error('audit chain broken after restore');
+  pass('restored: same session, agent re-attached, same containers, audit chain intact');
+}
+
 try {
   verifyBaseline();
   ensureTestbed();
@@ -286,7 +371,8 @@ try {
   startControlPlane();
   await openTunnel();
   await run();
-  log(`M1 exit criteria: ${results.length} checks passed`);
+  await drill();
+  log(`M1 exit criteria and restore drill: ${results.length} checks passed`);
 } catch (error) {
   console.error(`[e2e] FAILED: ${error instanceof Error ? error.message : error}`);
   try {

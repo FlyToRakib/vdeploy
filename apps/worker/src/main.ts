@@ -1,3 +1,4 @@
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { parseEnv } from '@vdeploy/contracts';
 import { APPLY_QUEUE, connect, queueConnection, type ApplyJob } from '@vdeploy/db';
 import { createPostgresBackend, Worker } from 'bullmq';
@@ -17,6 +18,10 @@ const config = parseEnv(
   }),
   process.env,
 );
+
+// Node gives each address 250 ms by default before trying the next; on a slow
+// or nested network every attempt times out. Registries answer within 2.5 s.
+setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 const log = pino({ level: config.LOG_LEVEL });
 const { db, close } = connect(config.DATABASE_URL);
