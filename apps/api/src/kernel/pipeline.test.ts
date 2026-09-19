@@ -576,5 +576,9 @@ describe('stored specs', () => {
     });
     const res = await op(owner, 'project.get', { projectId: id });
     expect(res.statusCode).toBe(200);
+    // Returned with its defaults, so screens can rely on every field.
+    expect(
+      res.json<{ result: { spec: { ai: { managed: boolean } } } }>().result.spec.ai.managed,
+    ).toBe(true);
   });
 });

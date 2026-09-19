@@ -52,7 +52,8 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       .select()
       .from(projects)
       .where(eq(projects.id, id(args, 'projectId')));
-    return row;
+    // With every default filled in: screens and editors see the whole spec.
+    return row ? { ...row, spec: readSpec(row.spec) } : row;
   },
   'release.list': async ({ deps, args }) =>
     deps.db
