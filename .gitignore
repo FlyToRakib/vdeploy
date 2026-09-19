@@ -1,0 +1,8 @@
+
+# Local-only secrets and machine-specific config — NEVER commit
+.vdeploy-local/
+*.env
+!*.env.example
+.env
+.env.*
+!.env.example
