@@ -96,6 +96,13 @@ export const OPERATIONS = [
     obj({ ...P, releaseId: idSchema('release') }),
   ),
   query(
+    'server.list',
+    'org',
+    'metrics',
+    'List the servers: whether each is connected, reachable, and how many apps it runs',
+    obj({}),
+  ),
+  query(
     'server.status',
     'server',
     'metrics',

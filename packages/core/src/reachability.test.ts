@@ -23,6 +23,7 @@ describe('reachability verdict', () => {
       checkedAt,
     });
     expect(v.status).toBe('blocked');
+    expect(v.plain).toMatch(/on ports 80 and 443:/);
     expect(v.fix.join('\n')).toMatch(/Security List/);
     expect(v.fix.join('\n')).toMatch(/iptables .*--dports 80,443/);
   });
@@ -35,7 +36,7 @@ describe('reachability verdict', () => {
       checkedAt,
     });
     expect(v.status).toBe('partly');
-    expect(v.plain).toMatch(/port 443/);
+    expect(v.plain).toMatch(/on port 443:/);
     expect(v.fix[0]).toMatch(/security group/);
     expect(v.fix.at(-1)).toMatch(/ufw allow/);
   });
@@ -65,5 +66,13 @@ describe('reachability verdict', () => {
   it('cannot check a server without a public address', () => {
     const v = reachabilityVerdict({ ipv4: null, provider: null, ports: {}, checkedAt });
     expect(v.status).toBe('unknown');
+    const reserved = reachabilityVerdict({
+      ipv4: null,
+      unusable: '10.0.0.5',
+      provider: null,
+      ports: {},
+      checkedAt,
+    });
+    expect(reserved.plain).toMatch(/^10\.0\.0\.5 is a private or reserved address/);
   });
 });

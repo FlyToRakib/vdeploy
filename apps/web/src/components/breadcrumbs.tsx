@@ -2,7 +2,38 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { activeItem } from '@/lib/nav';
+
+type Names = Record<string, string>;
+const CrumbNames = createContext<{ names: Names; setNames: Dispatch<SetStateAction<Names>> }>({
+  names: {},
+  setNames: () => undefined,
+});
+
+/** Holds the readable names pages give to ids in the address (srv_01… → "web-1"). */
+export function CrumbNamesProvider({ children }: { children: ReactNode }) {
+  const [names, setNames] = useState<Names>({});
+  const value = useMemo(() => ({ names, setNames }), [names]);
+  return <CrumbNames.Provider value={value}>{children}</CrumbNames.Provider>;
+}
+
+/** Shows `name` instead of `id` wherever the id appears in the breadcrumb. */
+export function useCrumbName(id: string, name: string | undefined) {
+  const { setNames } = useContext(CrumbNames);
+  useEffect(() => {
+    if (name) setNames((n) => (n[id] === name ? n : { ...n, [id]: name }));
+  }, [id, name, setNames]);
+}
 
 function titleCase(segment: string): string {
   return segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, ' ');
@@ -10,6 +41,7 @@ function titleCase(segment: string): string {
 
 export function Breadcrumbs() {
   const pathname = usePathname();
+  const { names } = useContext(CrumbNames);
   const section = activeItem(pathname);
   const rest = section && section.href !== '/' ? pathname.slice(section.href.length) : pathname;
   const extra = rest.split('/').filter(Boolean);
@@ -28,7 +60,7 @@ export function Breadcrumbs() {
               aria-current={i === extra.length - 1 ? 'page' : undefined}
               className="text-foreground"
             >
-              {titleCase(decodeURIComponent(segment))}
+              {names[segment] ?? titleCase(decodeURIComponent(segment))}
             </span>
           </li>
         ))}

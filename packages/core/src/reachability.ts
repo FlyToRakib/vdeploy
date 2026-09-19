@@ -45,6 +45,8 @@ const GENERIC =
  */
 export function reachabilityVerdict(input: {
   ipv4: string | null;
+  /** The address on record when it is not a public one (a private or reserved address). */
+  unusable?: string | null;
   provider: string | null;
   ports: { 80?: PortReach; 443?: PortReach };
   checkedAt: Date;
@@ -59,9 +61,10 @@ export function reachabilityVerdict(input: {
     return {
       ...base,
       status: 'unknown',
-      plain:
-        'This server has no public address we know of, so we cannot check whether visitors can reach it.',
-      fix: ['Set the address visitors reach the server at (Servers → Address), then check again.'],
+      plain: input.unusable
+        ? `${input.unusable} is a private or reserved address: visitors on the internet cannot use it, so there is nothing to check.`
+        : 'This server has no public address we know of, so we cannot check whether visitors can reach it.',
+      fix: ["Set the server's public address (the one your provider shows), then check again."],
     };
   }
   const blocked = ([80, 443] as const).filter((p) => input.ports[p] !== 'open');
@@ -73,13 +76,13 @@ export function reachabilityVerdict(input: {
       fix: [],
     };
   }
-  const which = blocked.join(' and ');
+  const which = `port${blocked.length > 1 ? 's' : ''} ${blocked.join(' and ')}`;
   const refused = blocked.every((p) => input.ports[p] === 'closed');
   if (refused) {
     return {
       ...base,
       status: blocked.length === 2 ? 'blocked' : 'partly',
-      plain: `The server at ${input.ipv4} answers, but refuses connections on port ${which}: the VDeploy router may not be running yet, or a firewall on the server rejects them.`,
+      plain: `The server at ${input.ipv4} answers, but refuses connections on ${which}: the VDeploy router may not be running yet, or a firewall on the server rejects them.`,
       fix: ['Wait a minute and check again: the router starts with the agent.', HOST_FIREWALL],
     };
   }
@@ -87,7 +90,7 @@ export function reachabilityVerdict(input: {
   return {
     ...base,
     status: blocked.length === 2 ? 'blocked' : 'partly',
-    plain: `Visitors cannot reach this server on port ${which}: connections to ${input.ipv4} get no answer, which almost always means a firewall${input.provider ? ` at ${input.provider}` : ' at your hosting provider'} is dropping them. Your sites stay unreachable, and no certificate can be issued, until it is opened.`,
+    plain: `Visitors cannot reach this server on ${which}: connections to ${input.ipv4} get no answer, which almost always means a firewall${input.provider ? ` at ${input.provider}` : ' at your hosting provider'} is dropping them. Your sites stay unreachable, and no certificate can be issued, until it is opened.`,
     fix: [
       ...(provider ?? [GENERIC]),
       ...(input.provider === 'Oracle Cloud' ? [] : [HOST_FIREWALL]),

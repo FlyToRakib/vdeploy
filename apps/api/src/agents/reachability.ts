@@ -57,6 +57,7 @@ export async function checkReachability(
   }
   const result = reachabilityVerdict({
     ipv4,
+    unusable: ipv4 ? null : server.ipv4,
     provider: server.provider,
     ports,
     checkedAt: now(),

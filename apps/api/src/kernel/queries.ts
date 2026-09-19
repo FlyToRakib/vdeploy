@@ -17,7 +17,7 @@ import {
   servers,
   urlSettingsFor,
 } from '@vdeploy/db';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { GITHUB_QUERIES } from './github.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
 import type { Handler } from './context.js';
@@ -105,6 +105,33 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       );
     if (!row) throw new VDeployError('not_found', 'Deployment not found');
     return row;
+  },
+  'server.list': async ({ deps, actor }) => {
+    const rows = await deps.db
+      .select({
+        id: servers.id,
+        name: servers.name,
+        status: servers.status,
+        lastSeenAt: servers.lastSeenAt,
+        agentVersion: servers.agentVersion,
+        publicIpv4: servers.publicIpv4,
+        provider: servers.provider,
+        reachability: servers.reachability,
+        capacity: servers.capacity,
+      })
+      .from(servers)
+      .where(eq(servers.orgId, actor.orgId))
+      .orderBy(servers.name);
+    const counts = await deps.db
+      .select({ serverId: projects.serverId, n: count() })
+      .from(projects)
+      .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)))
+      .groupBy(projects.serverId);
+    return rows.map(({ reachability, ...row }) => ({
+      ...row,
+      reachable: reachability?.status ?? null,
+      projects: counts.find((c) => c.serverId === row.id)?.n ?? 0,
+    }));
   },
   'server.status': async ({ deps, args }) => {
     const [row] = await deps.db

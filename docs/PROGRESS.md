@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.16a — dashboard: servers
+**Task:** 2.16b — dashboard: projects list and new project
 **Status:** in progress
-**Updated:** 2026-09-20 10:00 UTC
+**Updated:** 2026-09-20 12:00 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -34,17 +34,18 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.13 extended preflight (§30 ①–③): the agent's preflight also checks the distribution (Ubuntu 22.04+, Debian 11+, Rocky/Alma/RHEL 9, Fedora 40+, Amazon Linux 2023; CentOS, Alpine and end-of-life releases refused with the reinstall to do, untested ones warned; `allowUnsupportedOS` in the agent config lets a test machine through with a warning), hosting panels (cPanel, Plesk, aaPanel, CyberPanel, Hestia, Vesta, DirectAdmin, ISPConfig, Webmin), a laptop or desktop session, IPv6-only servers, and existing containers (counted and left alone); a port conflict names the program holding the port (socket inode → process, read from /proc). The agent recognises its hosting provider from firmware and reports it. The control plane checks from outside that ports 80 and 443 answer (plain TCP connect, only the server's stored public IPv4, at most every 10 minutes per server, `REACHABILITY_CHECK`), telling a refused connection from a dropped one, and stores the verdict with provider-specific steps (Oracle's Security List + host iptables, AWS security group, GCP, Azure, Hetzner, DigitalOcean, Vultr, Linode; general advice otherwise); `server.check_reachability` runs it on request and `server.status` shows it. Verified in local dind: preflight names what it checked; the Alpine testbed passes only through `allowUnsupportedOS` (e2e)
 - [x] 2.14 notifications (§18, ADR 0009): email lists and webhooks per org (admin only, audited), each subscribed to triggers: deploy failed (with the plain-language reason), deploy succeeded (off by default), app keeps crashing and out of memory (from agent evidence, named by the §32 rules, never the app's own output, at most hourly), server offline for 5 minutes (once per outage), visitors can't reach a server (daily while it lasts), AI applied a change. A Postgres outbox with one delivery per cause per channel, sent by the worker with retries at 1 min → 6 h, then failed with the reason; webhooks are signed (`t=…,v1=HMAC-SHA256`, per-channel secret shown once, stored sealed) and reach only public addresses, checked and pinned against DNS rebinding (`WEBHOOK_ALLOW_PRIVATE` for LAN installs); `notification.channel_test` and `notification.deliveries`. Verified in local dind: a failed deploy reached a webhook receiver, signed and saying why (e2e, 28 checks)
 - [x] 2.15 GitHub App (ADR 0010): an install link carrying a signed state; linking (`github.link`, admin, gated and audited) proved by GitHub OAuth — the person's own token must see the installation, so a guessed installation id links nothing — and one installation belongs to one org; `github.installations`, `github.repositories`, `github.unlink`; uninstall/suspend from GitHub followed. Signed webhooks (raw body, HMAC checked before parsing): a push deploys every project on that repository and branch with autoDeploy, honouring monorepo path filters, as `project.deploy_commit` of the pushed commit, through the gate as the person who linked the account (origin `webhook`, their current role), once per delivery. Private repositories build through short-lived installation tokens at the exact commit; public ones as before; the not-found message names who must approve the app. Key read from a file; half a configuration refuses to start. Verified against a stand-in GitHub with a generated key, and the local e2e still passes (28 checks); **the live check on github.com waits for the app's credentials (see Blocked)**
+- [x] 2.16a dashboard: servers —  (connection, reachability, app count); the Servers screen lists them problems-first, each with an icon-and-word status, address, provider and size, and is usable at phone width; "Add a server" names it, asks for the password again when the change needs it (a reusable step-up prompt that retries the action), shows the one-time connect command with a copy button and notices by itself when the server connects; the server page leads with "Can visitors reach it?" (the verdict, the provider's steps with commands set apart, Check again), then address (change it, or go back to detection), room for apps, and the agent; a pending server can make a fresh connect command; breadcrumbs show names, not ids. Also: the reachability verdict says "ports 80 and 443" and names a private address as such. Verified in the browser preview against the dev API (desktop and phone width)
 
 ## Doing
 
-- [ ] 2.16a dashboard: servers — list with health, add + enrollment command, server page (address, reachability, resources)
+- [ ] 2.16b dashboard: projects list and new project (folder/zip upload, GitHub repository, image) with the detection preview
 
 ## Next (M2)
 
-- [ ] 2.16b dashboard: projects list and new project (folder/zip upload, GitHub repository, image) with the detection preview
 - [ ] 2.16c dashboard: project page — overview and actions, deployments with build logs, live logs, event timeline
 - [ ] 2.16d dashboard: config with Simple/Advanced (env, write-only secrets, domains, resources, storage, raw spec)
 - [ ] 2.16e dashboard: approvals (plan, blast radius, type-the-name), notification channels, GitHub connection
+- [ ] 2.16f one-command bootstrap (§25): the connect command installs the agent binary (served by the control plane, checksummed), runs preflight, enrolls and sets up the systemd unit — idempotent, with --dry-run
 - [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright)
 
 ## Known gaps (tracked, not forgotten)

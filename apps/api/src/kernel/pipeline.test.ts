@@ -527,3 +527,36 @@ describe('notification channels', () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+describe('server list', () => {
+  it('lists the org servers with connection, reachability and app counts', async () => {
+    const serverId = newId('server');
+    await t.database.db.insert(servers).values({
+      id: serverId,
+      orgId,
+      name: 'listed-box',
+      status: 'online',
+      reachability: {
+        status: 'reachable',
+        ipv4: '8.8.8.8',
+        ports: { 80: 'open', 443: 'open' },
+        provider: null,
+        plain: 'ok',
+        fix: [],
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    const res = await op(owner, 'server.list', {});
+    expect(res.statusCode).toBe(200);
+    const list = res.json<{
+      result: { name: string; status: string; projects: number; reachable: string | null }[];
+    }>().result;
+    expect(list.length).toBeGreaterThan(0);
+    expect(list.find((s) => s.name === 'listed-box')).toMatchObject({
+      status: 'online',
+      reachable: 'reachable',
+      projects: 0,
+    });
+    expect(list.every((s) => typeof s.projects === 'number')).toBe(true);
+  });
+});
