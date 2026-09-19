@@ -63,16 +63,22 @@ export function newId<K extends IdKind>(kind: K): `${(typeof ID_PREFIXES)[K]}_${
   return `${ID_PREFIXES[kind]}_${ulid()}`;
 }
 
-/** Schema accepting only ids of one kind — `idSchema('project')` rejects `srv_...`. */
-export function idSchema<K extends IdKind>(kind: K) {
+export type Id<K extends IdKind> = `${(typeof ID_PREFIXES)[K]}_${string}`;
+
+/**
+ * Schema accepting only ids of one kind — `idSchema('project')` rejects `srv_...`.
+ * A plain pattern at runtime (so it exports to JSON Schema for the agent),
+ * typed as the prefixed id at compile time.
+ */
+export function idSchema<K extends IdKind>(kind: K): z.ZodType<Id<K>, string> {
   const prefix = ID_PREFIXES[kind];
   return z
     .string()
-    .regex(new RegExp(`^${prefix}_${ULID_PATTERN}$`), `must be a ${kind} id (${prefix}_…)`)
-    .transform((value) => value as `${(typeof ID_PREFIXES)[K]}_${string}`);
+    .regex(
+      new RegExp(`^${prefix}_${ULID_PATTERN}$`),
+      `must be a ${kind} id (${prefix}_…)`,
+    ) as unknown as z.ZodType<Id<K>, string>;
 }
-
-export type Id<K extends IdKind> = `${(typeof ID_PREFIXES)[K]}_${string}`;
 
 export function idKindOf(value: string): IdKind | undefined {
   const prefix = value.slice(0, value.indexOf('_'));
