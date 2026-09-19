@@ -6,3 +6,4 @@ export * from './spec/quantities.js';
 export * from './spec/versions.js';
 export * from './operations/define.js';
 export * from './operations/catalog.js';
+export * from './kernel.js';

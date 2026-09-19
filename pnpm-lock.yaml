@@ -39,6 +39,12 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/core:
+    dependencies:
+      '@vdeploy/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
 packages:
 
   '@cacheable/memory@2.2.0':

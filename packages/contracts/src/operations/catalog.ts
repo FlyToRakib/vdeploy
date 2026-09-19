@@ -398,3 +398,8 @@ export function findOperation(name: string): Operation | undefined {
 export const OperationNameSchema = z.enum(
   OPERATIONS.map((op) => op.name) as [OperationName, ...OperationName[]],
 );
+
+/** Parsed (defaults applied) input of an operation. */
+export type OperationArgs<N extends OperationName> = z.output<
+  Extract<Operation, { name: N }>['input']
+>;
