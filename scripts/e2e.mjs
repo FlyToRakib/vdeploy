@@ -262,7 +262,11 @@ async function run() {
   pass('server added', server.serverId);
 
   // ACME points at a closed local port: the testbed never asks a real CA for anything.
-  const agentConfig = { reconcileSeconds: 5, acmeServer: 'https://127.0.0.1:14000/dir' };
+  const agentConfig = {
+    reconcileSeconds: 5,
+    storageScanSeconds: 5,
+    acmeServer: 'https://127.0.0.1:14000/dir',
+  };
   inTestbed(
     `mkdir -p /etc/vdeploy && echo '${JSON.stringify(agentConfig)}' > /etc/vdeploy/agent.json`,
   );
@@ -474,6 +478,50 @@ async function logsAndHistory(helloId) {
   pass('deploy history with its build log and the event timeline', `${events.length} events`);
 }
 
+/**
+ * Runtime watch, deploy-time guard, in-place conversion (§17.2): files the
+ * app wrote to /app/uploads are reported; a restart that would delete them
+ * is held for confirmation with the loss named; making the folder
+ * permanent moves the same file into it.
+ */
+async function keepUploads(projectId) {
+  await until('unsaved files reported', async () => {
+    const { result } = await op('storage.status', { projectId });
+    return result.unsaved.some((u) => u.path === '/app/uploads' && u.status === 'unprotected');
+  });
+  const restart = await op('project.restart', { projectId });
+  if (
+    restart.status !== 'pending_approval' ||
+    !restart.plan.plan.blastRadius.dataAtRisk.includes('files in /app/uploads')
+  ) {
+    throw new Error(`a restart that deletes files was not held: ${JSON.stringify(restart)}`);
+  }
+  await call('POST', `/api/v1/plans/${restart.plan.id}/reject`);
+  pass('a restart that would delete unsaved files is held, naming them');
+
+  const replica = () =>
+    inTestbed(
+      `docker ps --filter label=io.vdeploy.project=${projectId} --format '{{.Names}}' | grep -v release | head -1`,
+    );
+  const firstFile = (name) => inTestbed(`docker exec ${name} head -c 13 /app/uploads/first.txt`);
+  const before = firstFile(replica());
+  const keep = await op('storage.make_persistent', { projectId, mountPath: '/app/uploads' });
+  const done = await settled(keep.plan.id, 1_200_000);
+  if (done.status !== 'applied') throw new Error(JSON.stringify(done));
+  // Every older copy has drained away: only the new one, with its permanent folder, is left.
+  await until(
+    'old copies retired',
+    async () =>
+      inTestbed(`docker ps -a --filter label=io.vdeploy.project=${projectId} --format '{{.Names}}'`)
+        .split('\n')
+        .filter(Boolean).length === 1,
+    180_000,
+  );
+  const after = firstFile(replica());
+  if (after !== before) throw new Error(`the file changed: ${before} → ${after}`);
+  pass('made permanent in place: the same file kept', before);
+}
+
 /** Waits for a plan to finish and returns it. */
 async function settled(planId, timeoutMs = 300_000) {
   return until(
@@ -585,8 +633,18 @@ function nodeAppArchive(message = 'railpack ok', format = 'tar.gz') {
     }),
     'index.js': `require('http').createServer((q, s) => s.end('${message}\\n')).listen(process.env.PORT || 3000);\n`,
   };
-  // The .zip version also has a folder users upload into (§17.2 must flag it).
-  if (format === 'zip') return zipOf({ ...files, 'uploads/.keep': '' });
+  // The .zip version also has a folder users upload into (§17.2 must flag it),
+  // and on its first start writes a file there, as an uploader would.
+  if (format === 'zip') {
+    return zipOf({
+      ...files,
+      'index.js': `const fs = require('fs');
+fs.mkdirSync('uploads', { recursive: true });
+if (!fs.existsSync('uploads/first.txt')) fs.writeFileSync('uploads/first.txt', Date.now() + '-' + 'x'.repeat(2e6));
+${files['index.js']}`,
+      'uploads/.keep': '',
+    });
+  }
   const dir = mkdtempSync(join(tmpdir(), 'vdeploy-e2e-app-'));
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   const archive = execFileSync('tar', ['-czf', '-', '-C', dir, '.'], { maxBuffer: 64 << 20 });
@@ -686,6 +744,7 @@ async function buildFromSource(serverId) {
   const uploads = storage.flagged.find((f) => f.path === '/app/uploads');
   if (uploads?.status !== 'unprotected') throw new Error(JSON.stringify(storage));
   pass('build flagged a folder whose files a deploy would delete', uploads.path);
+  await keepUploads(nodeApp.id);
 }
 
 const INSTANT_HOST = 'hello.apps.vdeploy.test';

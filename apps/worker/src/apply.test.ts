@@ -518,6 +518,43 @@ describe('building from uploaded source', () => {
     ]);
   });
 
+  it('reads unsaved files from the agent report when planning, minus temporary ones', async () => {
+    const created = await createProject();
+    await t.db
+      .update(observedState)
+      .set({
+        report: {
+          generation: 0,
+          projects: [
+            {
+              projectId: created.id,
+              replicas: [],
+              unsaved: [
+                { path: '/app/uploads', files: 12 },
+                { path: '/app/cache', files: 3 },
+              ],
+            },
+          ],
+          events: null,
+        },
+      })
+      .where(eq(observedState.serverId, serverId));
+    clearInterval(agentTimer); // keep the report as written
+    try {
+      await t.db
+        .update(projects)
+        .set({ ignoredPaths: ['/app/cache'] })
+        .where(eq(projects.id, created.id));
+      const world = await loadPlanWorld(t.db, created.id, {});
+      expect(world.unsaved).toEqual(['/app/uploads']);
+      const restart = await plan('project.restart', { projectId: created.id });
+      expect(restart.tier).toBe('destructive');
+      expect(restart.blastRadius.dataAtRisk).toEqual(['files in /app/uploads']);
+    } finally {
+      agentTimer = setInterval(() => void agentTick(), 50);
+    }
+  });
+
   it('needs the build secrets it names', async () => {
     const uploadId = await upload();
     const row = await plan('project.create', {

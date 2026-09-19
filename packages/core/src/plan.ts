@@ -33,6 +33,35 @@ export interface PlanContext {
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   /** The server the project runs (or will run) on, for the governor (§14). */
   server?: ServerBudget | null;
+  /**
+   * Folders where the running app wrote files outside its permanent folders,
+   * as its agent last reported (§17.2), minus those marked only temporary.
+   */
+  unsaved?: string[];
+}
+
+/**
+ * What replacing the containers would delete: files in folders that are
+ * not permanent, unless the new spec makes them permanent (the agent then
+ * moves them in first). Any of it makes the change destructive, so it is
+ * confirmed with the loss spelled out (§17.2 "guard at deploy time").
+ */
+function unsavedAtRisk(
+  context: PlanContext,
+  volumes: ApplicationSpec['runtime']['volumes'],
+): string[] {
+  const covered = (path: string) =>
+    volumes.some((v) => path === v.mountPath || path.startsWith(`${v.mountPath}/`));
+  return (context.unsaved ?? []).filter((path) => !covered(path)).map((path) => `files in ${path}`);
+}
+
+function guarded(draft: Draft, atRisk: string[]): Draft {
+  if (atRisk.length === 0) return draft;
+  return {
+    ...draft,
+    tier: maxTier(draft.tier, 'destructive'),
+    blastRadius: { ...draft.blastRadius, dataAtRisk: [...draft.blastRadius.dataAtRisk, ...atRisk] },
+  };
 }
 
 interface Draft {
@@ -99,18 +128,22 @@ function specChange(
     { kind: 'create_release' },
     { kind: 'deploy', strategy: next.deploy.strategy },
   );
-  return {
-    specHash,
-    changes: diffSpecs(before, next),
-    steps,
-    tier: lost.length ? maxTier(floor, 'destructive') : floor,
-    blastRadius: radius(next, {
-      domains: hosts(before, next),
-      downtime: next.deploy.strategy === 'recreate' && before ? 'brief' : 'none',
-      dataAtRisk: lost,
-      rollbackTo: project?.currentReleaseId ?? null,
-    }),
-  };
+  const atRisk = project ? unsavedAtRisk(context, next.runtime.volumes) : [];
+  return guarded(
+    {
+      specHash,
+      changes: diffSpecs(before, next),
+      steps,
+      tier: lost.length ? maxTier(floor, 'destructive') : floor,
+      blastRadius: radius(next, {
+        domains: hosts(before, next),
+        downtime: next.deploy.strategy === 'recreate' && before ? 'brief' : 'none',
+        dataAtRisk: lost,
+        rollbackTo: project?.currentReleaseId ?? null,
+      }),
+    },
+    atRisk,
+  );
 }
 
 function simple(
@@ -174,17 +207,20 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       throw new VDeployError('conflict', 'Deploy the project once before rotating its secrets');
     }
     // A new value, a new release pinning it, and a health-gated deploy: never two manual steps.
-    return {
-      specHash: null,
-      changes: [],
-      steps: [
-        { kind: 'rotate_secret', secretId: args.secretId },
-        { kind: 'create_release' },
-        { kind: 'deploy', strategy: project.spec.deploy.strategy },
-      ],
-      tier: 'destructive',
-      blastRadius: radius(project.spec, { rollbackTo: project.currentReleaseId }),
-    };
+    return guarded(
+      {
+        specHash: null,
+        changes: [],
+        steps: [
+          { kind: 'rotate_secret', secretId: args.secretId },
+          { kind: 'create_release' },
+          { kind: 'deploy', strategy: project.spec.deploy.strategy },
+        ],
+        tier: 'destructive',
+        blastRadius: radius(project.spec, { rollbackTo: project.currentReleaseId }),
+      },
+      unsavedAtRisk(context, project.spec.runtime.volumes),
+    );
   },
   'project.scale': (args, context) => {
     const project = requireProject(context);
@@ -194,7 +230,14 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     });
     const { min, max } = project.spec.scaling;
     const withinDeclared = args.replicas >= min && args.replicas <= max;
-    const draft = specChange(project, next, withinDeclared ? 'safe' : 'sensitive', context);
+    // Scaling up keeps every running copy; scaling down removes some, and their files.
+    const shrinking = args.replicas < project.spec.runtime.replicas;
+    const draft = specChange(
+      project,
+      next,
+      withinDeclared ? 'safe' : 'sensitive',
+      shrinking ? context : { ...context, unsaved: [] },
+    );
     // Replicas are live state, not part of a release: scaling changes no image and no release.
     return {
       ...draft,
@@ -217,8 +260,14 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       'none',
     );
   },
-  'project.restart': (_args, context) =>
-    simple(requireProject(context), { kind: 'restart' }, 'safe', 'brief'),
+  'project.restart': (_args, context) => {
+    // A restart replaces every container: whatever they wrote outside permanent folders goes.
+    const project = requireProject(context);
+    return guarded(
+      simple(project, { kind: 'restart' }, 'safe', 'brief'),
+      unsavedAtRisk(context, project.spec.runtime.volumes),
+    );
+  },
   'project.stop': (_args, context) =>
     simple(requireProject(context), { kind: 'stop' }, 'sensitive', 'until_started'),
   'project.start': (_args, context) => {
@@ -239,7 +288,10 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       tier: 'destructive',
       blastRadius: radius(project.spec, {
         downtime: 'permanent',
-        dataAtRisk: args.keepData ? [] : volumes,
+        dataAtRisk: [
+          ...(args.keepData ? [] : volumes),
+          ...unsavedAtRisk(context, project.spec.runtime.volumes),
+        ],
       }),
     };
   },

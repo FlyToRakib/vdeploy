@@ -75,7 +75,7 @@ const FrameHeader = {
 };
 
 const ReconcileEvent = z.strictObject({
-  kind: z.enum(['created', 'healed', 'stopped', 'removed', 'refused', 'failed']),
+  kind: z.string().regex(/^[a-z_]{1,32}$/),
   projectId: z.string().max(64),
   container: z.string().max(128).optional(),
   message: z.string().max(4096).optional(),
@@ -98,6 +98,11 @@ export const ObservedReport = z.strictObject({
           .max(64)
           .nullable(),
         error: z.string().max(4096).optional(),
+        /** Folders holding files the next deploy would delete (§17.2). */
+        unsaved: z
+          .array(z.strictObject({ path: z.string().max(1024), files: z.number().int().min(0) }))
+          .max(20)
+          .optional(),
       }),
     )
     .max(200)

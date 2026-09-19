@@ -2,7 +2,7 @@ import { readSpec, type ApplicationSpec, type Id } from '@vdeploy/contracts';
 import { footprint, NO_FOOTPRINT, type ServerBudget } from '@vdeploy/core';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
-import { projects, releases, servers } from './schema/index.js';
+import { observedState, projects, releases, servers } from './schema/index.js';
 
 export interface ProjectSnapshot {
   id: Id<'project'>;
@@ -15,6 +15,30 @@ export interface PlanWorld {
   project: ProjectSnapshot | null;
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   server?: ServerBudget | null;
+  unsaved?: string[];
+}
+
+/**
+ * Folders where the project's running containers wrote files outside its
+ * permanent folders, per its agent's latest report, minus those a person
+ * marked only temporary (§17.2).
+ */
+async function unsavedFor(
+  db: Database,
+  project: { id: string; serverId: string | null; ignoredPaths: string[] },
+): Promise<string[]> {
+  if (!project.serverId) return [];
+  const [observed] = await db
+    .select({ report: observedState.report })
+    .from(observedState)
+    .where(eq(observedState.serverId, project.serverId));
+  const entry = observed?.report.projects?.find((p) => p.projectId === project.id);
+  const ignored = (path: string) =>
+    project.ignoredPaths.some((i) => path === i || path.startsWith(`${i}/`));
+  return (entry?.unsaved ?? [])
+    .map((u) => u.path)
+    .filter((path) => !ignored(path))
+    .sort();
 }
 
 /**
@@ -79,6 +103,7 @@ export async function loadPlanWorld(
       running: row.running,
     },
     server: row.serverId ? await serverBudget(db, row.serverId, row.id) : null,
+    unsaved: await unsavedFor(db, row),
   };
   if (typeof args.releaseId === 'string') {
     const [release] = await db

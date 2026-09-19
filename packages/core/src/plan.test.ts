@@ -253,6 +253,37 @@ describe('permanent folders', () => {
   });
 });
 
+describe('the deploy-time guard for unsaved files', () => {
+  const project = makeProject(makeSpec({ scaling: { max: 3 } }));
+  const context = { project, unsaved: ['/app/uploads'] };
+
+  it('makes a change that replaces containers destructive, naming what is lost', () => {
+    const plan = buildPlan(
+      'project.update_spec',
+      { projectId: project.id, spec: makeSpec({ metadata: { name: 'blog', labels: { v: '2' } } }) },
+      context,
+    );
+    expect(plan.tier).toBe('destructive');
+    expect(plan.blastRadius.dataAtRisk).toEqual(['files in /app/uploads']);
+    expect(buildPlan('project.restart', { projectId: project.id }, context).tier).toBe(
+      'destructive',
+    );
+  });
+
+  it('is satisfied by making that folder permanent, and not raised by scaling up', () => {
+    const single = makeProject();
+    const keep = buildPlan(
+      'storage.make_persistent',
+      { projectId: single.id, mountPath: '/app/uploads' },
+      { project: single, unsaved: ['/app/uploads'] },
+    );
+    expect(keep.blastRadius.dataAtRisk).toEqual([]);
+    expect(keep.tier).toBe('sensitive');
+    const up = buildPlan('project.scale', { projectId: project.id, replicas: 3 }, context);
+    expect(up.tier).toBe('safe');
+  });
+});
+
 describe('plan_hash', () => {
   it('is stable for the same intent against the same state', () => {
     const project = makeProject();

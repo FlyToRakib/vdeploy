@@ -64,13 +64,16 @@ func (c *Client) EnsureNetwork(ctx context.Context, name, projectID string) erro
 // EnsureVolume creates a permanent folder's volume if it does not exist.
 // Volumes are never removed by the agent: deleting data is a separate,
 // explicit, snapshotted operation (§17.2).
-func (c *Client) EnsureVolume(ctx context.Context, name, projectID string) error {
+func (c *Client) EnsureVolume(ctx context.Context, name, projectID string) (bool, error) {
 	err := c.do(ctx, http.MethodGet, "/volumes/"+url.PathEscape(name), nil, nil, &struct{}{})
 	if !IsNotFound(err) {
-		return err
+		return false, err
 	}
 	body := map[string]any{"Name": name, "Labels": managedLabels(projectID)}
-	return c.do(ctx, http.MethodPost, "/volumes/create", nil, body, &struct{}{})
+	if err := c.do(ctx, http.MethodPost, "/volumes/create", nil, body, &struct{}{}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // EnsureImage pulls a digest-pinned image unless it is already present.

@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { newId, type ApplicationSpec, type BuildResult, type BuildView } from '@vdeploy/contracts';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
-import { builds, uploads } from './schema/index.js';
+import { builds, observedState, uploads } from './schema/index.js';
 
 /** Channel on which a queued build wakes the gateway holding its server's agent. */
 export const BUILDS_CHANNEL = 'vdeploy_builds';
@@ -172,7 +172,7 @@ export async function listBuilds(db: Executor, projectId: string): Promise<Build
  */
 export async function storageStatus(
   db: Executor,
-  project: { id: string; spec: ApplicationSpec; ignoredPaths: string[] },
+  project: { id: string; serverId: string | null; spec: ApplicationSpec; ignoredPaths: string[] },
 ) {
   const [latest] = await db
     .select({ persistence: builds.persistence })
@@ -191,8 +191,24 @@ export async function storageStatus(
         : ('unprotected' as const);
     return { ...finding, status, volume: volume?.name ?? null };
   });
+  // What the running app has actually written outside its permanent folders.
+  const [observed] = project.serverId
+    ? await db
+        .select({ report: observedState.report })
+        .from(observedState)
+        .where(eq(observedState.serverId, project.serverId))
+    : [];
+  const unsaved = (
+    observed?.report.projects?.find((p) => p.projectId === project.id)?.unsaved ?? []
+  ).map((u) => ({
+    ...u,
+    status: project.ignoredPaths.some((p) => inside(u.path, p))
+      ? ('temporary' as const)
+      : ('unprotected' as const),
+  }));
   return {
     folders: volumes.map((v) => ({ name: v.name, path: v.mountPath })),
     flagged,
+    unsaved,
   };
 }

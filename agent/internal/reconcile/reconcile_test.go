@@ -54,9 +54,15 @@ func (f *fakeEngine) EnsureNetwork(_ context.Context, name, _ string) error {
 	return nil
 }
 
-func (f *fakeEngine) EnsureVolume(_ context.Context, name, _ string) error {
+func (f *fakeEngine) EnsureVolume(_ context.Context, name, _ string) (bool, error) {
+	created := !f.volumes[name]
 	f.volumes[name] = true
-	return nil
+	return created, nil
+}
+
+func (f *fakeEngine) CopyPath(_ context.Context, fromID, folder, toID string) (int64, error) {
+	f.calls = append(f.calls, "copy "+f.containers[fromID].Name+":"+folder+" -> "+f.containers[toID].Name)
+	return 4096, nil
 }
 
 func (f *fakeEngine) EnsureImage(_ context.Context, ref string) error {
@@ -752,5 +758,118 @@ func TestAReleaseCommandThatHangsIsStoppedAtItsTimeout(t *testing.T) {
 	report := reconcile(t, r, desired(1, p))
 	if len(engine.running()) != 0 || !strings.Contains(report.Projects[0].Error, "did not finish within 1m0s") {
 		t.Fatalf("running = %v error = %q", engine.running(), report.Projects[0].Error)
+	}
+}
+
+type fakeStorage struct {
+	sizes map[string]int64
+	added map[string][]string
+}
+
+func (f *fakeStorage) WritableLayers(context.Context) (map[string]int64, error) {
+	return f.sizes, nil
+}
+
+func (f *fakeStorage) AddedFiles(_ context.Context, id string) ([]string, error) {
+	return f.added[id], nil
+}
+
+func TestUnsavedFoldersIgnoreNoiseAndPermanentFolders(t *testing.T) {
+	files := []string{
+		"/app/uploads", "/app/uploads/a.png", "/app/uploads/2026/b.png",
+		"/app/data.sqlite", "/tmp/x", "/root/.npm/_cacache/y", "/home/node/.cache/z",
+		"/var/lib/app/state/k", "/app/keep/f", "/home/node/.n8n/database.sqlite",
+	}
+	got := unsavedFolders(files, []spec.Volume{{Name: "keep", MountPath: "/app/keep"}})
+	want := []UnsavedFolder{
+		{Path: "/app/uploads", Files: 3},
+		{Path: "/app/data.sqlite", Files: 1},
+		{Path: "/home/node/.n8n", Files: 1},
+		{Path: "/var/lib/app", Files: 1},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestReportsFilesADeployWouldDelete(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	storage := &fakeStorage{sizes: map[string]int64{}, added: map[string][]string{}}
+	r.Storage = storage
+	reconcile(t, r, desired(1, testProject(idA, 1, 1)))
+	for id := range engine.containers {
+		storage.sizes[id] = 50 << 20
+		storage.added[id] = []string{"/app/uploads/a.png", "/app/uploads/b.png"}
+	}
+	advance(unsavedEvery)
+	report := reconcile(t, r, desired(1, testProject(idA, 1, 1)))
+	if !slices.Equal(report.Projects[0].Unsaved, []UnsavedFolder{{Path: "/app/uploads", Files: 2}}) {
+		t.Fatalf("unsaved = %+v", report.Projects[0].Unsaved)
+	}
+	// Between scans the last result is repeated, not recomputed.
+	storage.added = map[string][]string{}
+	report = reconcile(t, r, desired(1, testProject(idA, 1, 1)))
+	if len(report.Projects[0].Unsaved) != 1 {
+		t.Fatalf("unsaved = %+v", report.Projects[0].Unsaved)
+	}
+}
+
+func TestANewPermanentFolderKeepsTheFilesAlreadyThere(t *testing.T) {
+	for _, strategy := range []string{"blueGreen", "recreate"} {
+		t.Run(strategy, func(t *testing.T) {
+			engine := newFake()
+			r := newReconciler(engine)
+			v1 := testProject(idA, 1, 1)
+			v1.Spec.Runtime.Volumes = nil
+			v1.Spec.Deploy.Strategy = strategy
+			settle(t, r, desired(1, v1))
+			old := engine.running()[0]
+
+			v2 := testProject(idA, 2, 1)
+			v2.Spec.Runtime.Volumes = []spec.Volume{{Name: "uploads", MountPath: "/app/uploads"}}
+			v2.Spec.Deploy.Strategy = strategy
+			engine.calls = nil
+			report := reconcile(t, r, desired(2, v2))
+			copied := slices.IndexFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "copy "+old+":/app/uploads") })
+			started := slices.IndexFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "start ") && strings.Contains(c, "-v2-") })
+			if copied < 0 || started < 0 || copied > started {
+				t.Fatalf("calls = %v", engine.calls)
+			}
+			if !slices.Contains(kinds(report.Events), "moved") {
+				t.Fatalf("events = %v", report.Events)
+			}
+			// Once moved, later passes copy nothing again.
+			engine.calls = nil
+			settle(t, r, desired(2, v2))
+			if slices.ContainsFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "copy ") }) {
+				t.Fatalf("copied twice: %v", engine.calls)
+			}
+		})
+	}
+}
+
+func TestFilesAreKeptFromTheNewestEarlierReleaseNotAnOlderOneStillDraining(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	noVolume := func(version int) spec.DesiredProject {
+		p := testProject(idA, version, 1)
+		p.Spec.Runtime.Volumes = nil
+		return p
+	}
+	settle(t, r, desired(1, noVolume(1)))
+	reconcile(t, r, desired(2, noVolume(2))) // v1 still draining next to v2
+	var v2 string
+	for _, name := range engine.running() {
+		if strings.Contains(name, "-v2-") {
+			v2 = name
+		}
+	}
+	v3 := testProject(idA, 3, 1)
+	v3.Spec.Runtime.Volumes = []spec.Volume{{Name: "uploads", MountPath: "/app/uploads"}}
+	engine.calls = nil
+	reconcile(t, r, desired(3, v3))
+	if !slices.ContainsFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "copy "+v2+":") }) {
+		t.Fatalf("calls = %v, want a copy from %s", engine.calls, v2)
 	}
 }

@@ -42,6 +42,8 @@ type Config struct {
 	// BuildMinFreeDiskMB and BuildMinFreeMemoryMB: below these, builds are refused.
 	BuildMinFreeDiskMB   int64 `json:"buildMinFreeDiskMB"`
 	BuildMinFreeMemoryMB int64 `json:"buildMinFreeMemoryMB"`
+	// StorageScanSeconds is how often containers are checked for files a deploy would delete.
+	StorageScanSeconds int `json:"storageScanSeconds"`
 }
 
 // Defaults are safe for a fresh server.
@@ -56,6 +58,7 @@ func Defaults() Config {
 		RoutingDir:           "/etc/vdeploy/traefik/dynamic",
 		BuildMinFreeDiskMB:   4096,
 		BuildMinFreeMemoryMB: 256,
+		StorageScanSeconds:   300,
 	}
 }
 
@@ -73,6 +76,9 @@ func Load(path string) (Config, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", path, err)
+	}
+	if cfg.StorageScanSeconds < 5 {
+		return cfg, fmt.Errorf("config %s: storageScanSeconds must be at least 5", path)
 	}
 	if cfg.ReconcileSeconds < 5 {
 		return cfg, fmt.Errorf("config %s: reconcileSeconds must be at least 5", path)

@@ -22,7 +22,10 @@ import (
 type Engine interface {
 	ListManaged(ctx context.Context) ([]docker.Container, error)
 	EnsureNetwork(ctx context.Context, name, projectID string) error
-	EnsureVolume(ctx context.Context, name, projectID string) error
+	// EnsureVolume reports whether it had to create the volume.
+	EnsureVolume(ctx context.Context, name, projectID string) (bool, error)
+	// CopyPath copies a folder from one container into another, not yet started.
+	CopyPath(ctx context.Context, fromID, folder, toID string) (int64, error)
 	EnsureImage(ctx context.Context, ref string) error
 	Create(ctx context.Context, c compose.Container) (string, error)
 	Start(ctx context.Context, id string) error
@@ -52,6 +55,8 @@ type ProjectState struct {
 	ProjectID string    `json:"projectId"`
 	Replicas  []Replica `json:"replicas"`
 	Error     string    `json:"error,omitempty"`
+	// Unsaved are folders holding files the next deploy would delete (§17.2).
+	Unsaved []UnsavedFolder `json:"unsaved,omitempty"`
 }
 
 // Report is the outcome of one reconciliation pass.
@@ -84,11 +89,19 @@ type Reconciler struct {
 	Built func(imageID, projectID string) bool
 	// Releases remembers which releases ran their release command.
 	Releases *ReleaseLog
-	Now      func() time.Time
+	// Storage lets the agent see what containers write outside permanent folders.
+	Storage Storage
+	// StorageScan paces that look (default unsavedEvery).
+	StorageScan time.Duration
+	Now         func() time.Time
 
 	ready         map[string]*readiness
 	draining      map[string]time.Time
 	releaseStarts map[string]time.Time
+	unsaved       map[string][]UnsavedFolder
+	unsavedAt     time.Time
+	// moving: new permanent folders (by volume) whose files still have to be copied in.
+	moving map[string]bool
 }
 
 func (r *Reconciler) now() time.Time {
@@ -143,6 +156,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	// Traffic moves to new replicas only once all of them are ready, and old
 	// ones are retired only after that, once they have drained.
 	p.route(ctx, state)
+	p.watchUnsaved(ctx, state)
+	for i := range p.report.Projects {
+		p.report.Projects[i].Unsaved = r.unsaved[p.report.Projects[i].ProjectID]
+	}
 	p.retire(ctx)
 	return p.report, nil
 }
@@ -196,14 +213,29 @@ func (p *pass) converge(ctx context.Context, project spec.DesiredProject, contai
 		return fmt.Errorf("network: %w", err)
 	}
 	for _, v := range project.Spec.Runtime.Volumes {
-		if err := engine.EnsureVolume(ctx, compose.VolumeName(project.ProjectID, v.Name), project.ProjectID); err != nil {
+		volume := compose.VolumeName(project.ProjectID, v.Name)
+		created, err := engine.EnsureVolume(ctx, volume, project.ProjectID)
+		if err != nil {
 			return fmt.Errorf("volume %s: %w", v.Name, err)
+		}
+		if created {
+			// A folder made permanent now: files the app already wrote there move in first.
+			if p.r.moving == nil {
+				p.r.moving = map[string]bool{}
+			}
+			p.r.moving[volume] = true
 		}
 	}
 	if project.Spec.Deploy.Strategy == "recreate" {
 		// Singletons and lock-holders: the old copy stops before the new one starts.
+		// While its files still have to move into a new permanent folder, it is
+		// only stopped, so they can be copied; it is removed once no longer wanted.
 		for _, c := range p.old(project.ProjectID) {
-			p.remove(ctx, c)
+			if p.moving(project) && c.Labels[compose.RoleLabel] == "" {
+				p.stopOld(ctx, c)
+			} else {
+				p.remove(ctx, c)
+			}
 		}
 	}
 	// A new release's replicas start only after its release command succeeded.
@@ -255,6 +287,10 @@ func (p *pass) ensureRunning(ctx context.Context, project spec.DesiredProject, c
 	id, err := engine.Create(ctx, c)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", c.Name, err)
+	}
+	if err := p.moveIntoNewFolders(ctx, project, id); err != nil {
+		_ = engine.Remove(ctx, id)
+		return err
 	}
 	if err := engine.Start(ctx, id); err != nil {
 		return fmt.Errorf("start %s: %w", c.Name, err)

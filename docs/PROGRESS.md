@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.11b — runtime watch, deploy-time guard, in-place conversion
+**Task:** 2.12 — plain-language diagnostic layer
 **Status:** in progress
-**Updated:** 2026-09-20 00:30 UTC
+**Updated:** 2026-09-20 02:00 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -29,13 +29,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.9 release command (`deploy.releaseCommand`, `deploy.releaseTimeout` default 10m): the agent runs it once per release in a one-shot container with the release's image, environment, secrets, network and folders, before any of its replicas start, while the old release keeps serving; success is recorded on the agent's disk so self-heals, restarts and rollbacks never rerun it; failure or timeout starts nothing and reports the end of the output, and the worker rolls back with that reason. Verified in local dind: a failing migration kept nginx 1.28 serving with the error shown; a passing one let the release go live (e2e)
 - [x] 2.10 live logs and deploy history: the agent streams a project's own containers' output on request (tail ≤ 1000 per container, then follow up to 30 min; lines capped at 8 KB; batched every 300 ms; at most 8 streams per connection; a slow viewer gets a "lines skipped" marker instead of unbounded buffering); the gateway multiplexes requests by id, accepts answers only from the server asked, and strips terminal control codes; `project.logs` (recent lines, through the gate) and `GET /api/v1/projects/:id/logs/stream` (SSE: recent, then live, with heartbeats); agent events stored as a per-project timeline (`project.events`, only for projects on the reporting server, repeats collapsed, 30-day retention); releases remember their build, so `deployment.logs` shows the build log and outcome; gateway handles each agent's frames strictly in order. Verified in local dind (e2e)
 - [x] 2.11a persistent folders at build time (§17.2): every build and detection preview scans the source — WordPress, Laravel, Django, Rails, Strapi, Ghost, n8n, SQLite files anywhere, generic uploads/media/attachments/data/files — and places findings in the container under the image's working directory; `storage.status` shows each flagged folder as permanent, temporary (a person said so, `storage.ignore_path`) or unprotected; `storage.make_persistent` adds a permanent folder as a planned spec change (readable volume names, refused for multi-replica apps). Verified in local dind: a .zip with an uploads folder is flagged unprotected (e2e)
+- [x] 2.11b persistent folders at runtime and deploy time (§17.2): the agent checks each running replica's writable layer (every `storageScanSeconds`, default 300) and reports folders holding files outside permanent folders, leaving out caches, temp and system paths; `storage.status` shows them; any plan that would replace those containers (spec change, restart, rotation, scale-down, delete) names "files in <folder>" as data at risk and becomes destructive, so it is held for explicit confirmation — unless the folder is marked temporary, or the plan makes it permanent; making a folder permanent copies the files already there from the newest earlier replica into the new volume before the new replica starts (recreate deploys only stop the old one until then). Also: agent event kinds are free text, so a new kind never costs a report or the connection. Verified in local dind: a restart that would delete an uploaded file is held with the loss named; after making /app/uploads permanent the same file is there (e2e)
 
 ## Doing
-- [ ] 2.11b runtime writable-layer watch, deploy-time guard (data at risk → explicit confirmation), in-place conversion copying existing files
+
+- [ ] 2.12 deterministic plain-language diagnostic layer
 
 ## Next (M2)
 
-- [ ] 2.12 deterministic plain-language diagnostic layer
 - [ ] 2.13 extended preflight (IPv6, panel, port-conflict process, existing Docker) + external reachability probe
 - [ ] 2.14 notifications (email, webhook)
 - [ ] 2.15 GitHub App + webhooks (needs credentials — see Blocked)

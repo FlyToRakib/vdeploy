@@ -176,7 +176,10 @@ func serve(configPath string, log *slog.Logger) error {
 	reports := make(chan reconcile.Report, 16)
 	reconciler := &reconcile.Reconciler{
 		Engine: engine, Policy: policy, Log: log,
-		Prober: reconcile.NetProber{Resolver: engine},
+		Prober:  reconcile.NetProber{Resolver: engine},
+		Storage: engine,
+		// Checking containers for files a deploy would delete (§17.2).
+		StorageScan: time.Duration(cfg.StorageScanSeconds) * time.Second,
 	}
 	if cfg.Routing {
 		if err := os.MkdirAll(cfg.RoutingDir, 0o755); err != nil { // #nosec G301 -- Traefik reads it
