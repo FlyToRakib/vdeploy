@@ -111,8 +111,23 @@ type inspected struct {
 		Running bool `json:"Running"`
 	} `json:"State"`
 	NetworkSettings struct {
-		Networks map[string]struct{} `json:"Networks"`
+		Networks map[string]struct {
+			IPAddress string `json:"IPAddress"`
+		} `json:"Networks"`
 	} `json:"NetworkSettings"`
+}
+
+// ContainerIP is a container's address on one of its networks.
+func (c *Client) ContainerIP(ctx context.Context, name, network string) (string, error) {
+	current, err := c.inspect(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	endpoint, ok := current.NetworkSettings.Networks[network]
+	if !ok || endpoint.IPAddress == "" {
+		return "", fmt.Errorf("%s has no address on %s", name, network)
+	}
+	return endpoint.IPAddress, nil
 }
 
 func (c *Client) inspect(ctx context.Context, name string) (*inspected, error) {

@@ -18,6 +18,9 @@ import (
 // interrupted pass is simply resumed by the next one, which is idempotent.
 const passTimeout = 5 * time.Minute
 
+// settleInterval paces passes while a replica is starting or a release draining.
+const settleInterval = 2 * time.Second
+
 // Loop keeps the server converged: on a timer, and on each accepted desired
 // state. The last accepted state is persisted, so after a restart or a
 // reboot the agent converges again without the control plane (N6).
@@ -118,22 +121,24 @@ func (l *Loop) accept(frame []byte) error {
 	return nil
 }
 
-func (l *Loop) pass(ctx context.Context) {
+// pass runs one reconciliation and reports whether the server is still settling.
+func (l *Loop) pass(ctx context.Context) bool {
 	if l.current == nil {
-		return
+		return false
 	}
 	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), passTimeout)
 	defer cancel()
 	report, err := l.Reconciler.Reconcile(passCtx, l.current)
 	if err != nil {
 		l.Reconciler.Log.Warn("reconcile pass failed", "err", err)
-		return
+		return false
 	}
 	select {
 	case l.Reports <- report:
 	default:
 		l.Reconciler.Log.Warn("report dropped: nobody is listening")
 	}
+	return report.Settling
 }
 
 // Run converges until ctx is cancelled.
@@ -141,9 +146,17 @@ func (l *Loop) Run(ctx context.Context) error {
 	if err := l.load(); err != nil {
 		l.Reconciler.Log.Error("starting without a desired state", "err", err)
 	}
-	l.pass(ctx)
 	ticker := time.NewTicker(l.Interval)
 	defer ticker.Stop()
+	// While settling, pass every couple of seconds; otherwise on the interval.
+	pace := func(settling bool) {
+		if settling {
+			ticker.Reset(min(settleInterval, l.Interval))
+		} else {
+			ticker.Reset(l.Interval)
+		}
+	}
+	pace(l.pass(ctx))
 	for {
 		select {
 		case <-ctx.Done():
@@ -155,9 +168,9 @@ func (l *Loop) Run(ctx context.Context) error {
 				l.Reconciler.Log.Warn("desired state not accepted", "err", err)
 				continue
 			}
-			l.pass(ctx)
+			pace(l.pass(ctx))
 		case <-ticker.C:
-			l.pass(ctx)
+			pace(l.pass(ctx))
 		}
 	}
 }

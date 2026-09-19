@@ -244,9 +244,7 @@ describe('agent channel', () => {
       ...fake.session.next('observed_state'),
       report: {
         generation: 1,
-        projects: [
-          { projectId, replicas: [{ name: 'vd-x', state: 'running', release: releaseId }] },
-        ],
+        projects: [{ projectId, replicas: [{ name: 'vd-x', state: 'ready', release: releaseId }] }],
         events: null,
       },
     });

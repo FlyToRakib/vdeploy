@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
@@ -54,21 +55,43 @@ type Report struct {
 	Generation int64          `json:"generation"`
 	Projects   []ProjectState `json:"projects"`
 	Events     []Event        `json:"events"`
+	// Settling means a replica is still starting or an old one draining: pass again soon.
+	Settling bool `json:"settling"`
 }
 
-// Reconciler converges one server.
+// Reconciler converges one server. Between passes it remembers which
+// replicas passed their startup check, and since when an old release has
+// been draining.
 type Reconciler struct {
 	Engine  Engine
 	Policy  guard.Policy
 	Log     *slog.Logger
 	Routing Routing
+	// Prober checks new replicas before they take traffic; nil trusts "running".
+	Prober Prober
+	Now    func() time.Time
+
+	ready    map[string]*readiness
+	draining map[string]time.Time
+}
+
+func (r *Reconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 type pass struct {
 	r        *Reconciler
 	existing map[string]docker.Container
 	wanted   map[string]bool
-	report   Report
+	// states is each desired replica's assessed state in this pass.
+	states map[string]string
+	// desired and settled: which projects exist, and which have every replica ready.
+	desired map[string]spec.DesiredProject
+	settled map[string]bool
+	report  Report
 }
 
 func (p *pass) event(kind, projectID, container, message string) {
@@ -81,17 +104,30 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	if err != nil {
 		return Report{}, fmt.Errorf("list managed containers: %w", err)
 	}
-	p := &pass{r: r, existing: map[string]docker.Container{}, wanted: map[string]bool{}}
+	if r.ready == nil {
+		r.ready = map[string]*readiness{}
+		r.draining = map[string]time.Time{}
+	}
+	p := &pass{
+		r:        r,
+		existing: map[string]docker.Container{},
+		wanted:   map[string]bool{},
+		states:   map[string]string{},
+		desired:  map[string]spec.DesiredProject{},
+		settled:  map[string]bool{},
+	}
 	p.report.Generation = state.Generation
 	for _, c := range listed {
 		p.existing[c.Name] = c
 	}
 	for _, project := range state.Projects {
+		p.desired[project.ProjectID] = project
 		p.report.Projects = append(p.report.Projects, p.project(ctx, project))
 	}
-	// Traffic moves to the new replicas before the old ones are removed.
+	// Traffic moves to new replicas only once all of them are ready, and old
+	// ones are retired only after that, once they have drained.
 	p.route(ctx, state)
-	p.removeUnwanted(ctx)
+	p.retire(ctx)
 	return p.report, nil
 }
 
@@ -110,14 +146,26 @@ func (p *pass) project(ctx context.Context, project spec.DesiredProject) Project
 		p.event("failed", project.ProjectID, "", err.Error())
 		result.Error = err.Error()
 	}
+	settled := project.Running
 	for _, c := range containers {
-		state := "missing"
-		if existing, ok := p.existing[c.Name]; ok {
-			state = existing.State
-		}
+		state := p.assess(ctx, project, c)
+		p.states[c.Name] = state
+		settled = settled && state == StateReady
 		result.Replicas = append(result.Replicas, Replica{Name: c.Name, State: state, Release: project.ReleaseID})
 	}
+	p.settled[project.ProjectID] = settled
 	return result
+}
+
+// old lists the containers of a project that are not in its desired set.
+func (p *pass) old(projectID string) []docker.Container {
+	var out []docker.Container
+	for name, c := range p.existing {
+		if !p.wanted[name] && c.Labels[compose.ProjectLabel] == projectID {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (p *pass) converge(ctx context.Context, project spec.DesiredProject, containers []compose.Container) error {
@@ -134,6 +182,12 @@ func (p *pass) converge(ctx context.Context, project spec.DesiredProject, contai
 	for _, v := range project.Spec.Runtime.Volumes {
 		if err := engine.EnsureVolume(ctx, compose.VolumeName(project.ProjectID, v.Name), project.ProjectID); err != nil {
 			return fmt.Errorf("volume %s: %w", v.Name, err)
+		}
+	}
+	if project.Spec.Deploy.Strategy == "recreate" {
+		// Singletons and lock-holders: the old copy stops before the new one starts.
+		for _, c := range p.old(project.ProjectID) {
+			p.remove(ctx, c)
 		}
 	}
 	var errs []error
@@ -153,8 +207,10 @@ func (p *pass) ensureRunning(ctx context.Context, projectID string, c compose.Co
 		if err := engine.Start(ctx, existing.ID); err != nil {
 			return fmt.Errorf("start %s: %w", c.Name, err)
 		}
-		p.existing[c.Name] = docker.Container{ID: existing.ID, Name: c.Name, State: "running"}
-		p.event("healed", projectID, c.Name, "was "+existing.State)
+		was := existing.State
+		existing.State = "running"
+		p.existing[c.Name] = existing
+		p.event("healed", projectID, c.Name, "was "+was)
 		return nil
 	}
 	if err := engine.EnsureImage(ctx, c.Image); err != nil {
@@ -167,7 +223,7 @@ func (p *pass) ensureRunning(ctx context.Context, projectID string, c compose.Co
 	if err := engine.Start(ctx, id); err != nil {
 		return fmt.Errorf("start %s: %w", c.Name, err)
 	}
-	p.existing[c.Name] = docker.Container{ID: id, Name: c.Name, State: "running"}
+	p.existing[c.Name] = docker.Container{ID: id, Name: c.Name, State: "running", Labels: c.Labels}
 	p.event("created", projectID, c.Name, "")
 	return nil
 }
@@ -183,31 +239,68 @@ func (p *pass) stopAll(ctx context.Context, projectID string, containers []compo
 			errs = append(errs, fmt.Errorf("stop %s: %w", c.Name, err))
 			continue
 		}
-		p.existing[c.Name] = docker.Container{ID: existing.ID, Name: c.Name, State: "exited"}
+		existing.State = "exited"
+		p.existing[c.Name] = existing
 		p.event("stopped", projectID, c.Name, "")
 	}
 	return errors.Join(errs...)
 }
 
-// removeUnwanted stops and removes managed containers no desired project
-// accounts for: old releases, surplus replicas, deleted projects. Their
-// volumes and networks stay; data is never removed implicitly.
-func (p *pass) removeUnwanted(ctx context.Context) {
+func (p *pass) remove(ctx context.Context, c docker.Container) {
+	projectID := c.Labels[compose.ProjectLabel]
+	if c.State == "running" {
+		if err := p.r.Engine.Stop(ctx, c.ID, 30); err != nil {
+			p.event("failed", projectID, c.Name, "stop: "+err.Error())
+			return
+		}
+	}
+	if err := p.r.Engine.Remove(ctx, c.ID); err != nil {
+		p.event("failed", projectID, c.Name, "remove: "+err.Error())
+		return
+	}
+	delete(p.existing, c.Name)
+	delete(p.r.ready, c.Name)
+	p.event("removed", projectID, c.Name, "")
+}
+
+// retire removes containers no desired project accounts for: old releases,
+// surplus replicas, deleted projects. An old release of a running project
+// keeps serving until every new replica is ready, and then drains first.
+// Volumes and networks stay: data is never removed implicitly.
+func (p *pass) retire(ctx context.Context) {
 	for name, c := range p.existing {
 		if p.wanted[name] {
 			continue
 		}
 		projectID := c.Labels[compose.ProjectLabel]
-		if c.State == "running" {
-			if err := p.r.Engine.Stop(ctx, c.ID, 30); err != nil {
-				p.event("failed", projectID, name, "stop: "+err.Error())
-				continue
-			}
-		}
-		if err := p.r.Engine.Remove(ctx, c.ID); err != nil {
-			p.event("failed", projectID, name, "remove: "+err.Error())
+		serving := c.State == "running" && (p.r.ready[name] == nil || p.r.ready[name].failed == "")
+		if project, ok := p.desired[projectID]; ok && project.Running && serving && !p.drained(project) {
+			p.report.Settling = true
 			continue
 		}
-		p.event("removed", projectID, name, "")
+		p.remove(ctx, c)
 	}
+	for projectID := range p.r.draining {
+		if len(p.old(projectID)) == 0 {
+			delete(p.r.draining, projectID)
+		}
+	}
+}
+
+// drained reports whether a running project's old release may go now: every
+// new replica is ready and the drain period since the switch has passed.
+func (p *pass) drained(project spec.DesiredProject) bool {
+	if !p.settled[project.ProjectID] {
+		return false
+	}
+	since, draining := p.r.draining[project.ProjectID]
+	if !draining {
+		p.r.draining[project.ProjectID] = p.r.now()
+		return false
+	}
+	drain, err := time.ParseDuration(project.Spec.Deploy.DrainPeriod)
+	if err != nil {
+		drain = 30 * time.Second
+	}
+	return p.r.now().Sub(since) >= drain
 }

@@ -99,6 +99,7 @@ function resetTestbed() {
       'pkill vd-agent; sleep 1',
       'rm -rf /var/lib/vdeploy /etc/vdeploy /var/log/vd-agent.log',
       'docker ps -aq --filter label=io.vdeploy.managed=true | xargs -r docker rm -f >/dev/null',
+      'docker rm -f vd-traefik >/dev/null 2>&1',
       'true',
     ].join('; '),
   );
@@ -244,17 +245,20 @@ async function run() {
   });
   pass('agent connected over signed frames');
 
+  const helloSpec = (image) => ({
+    apiVersion: 'vdeploy/v1',
+    kind: 'Application',
+    metadata: { name: 'hello' },
+    source: { type: 'image', image },
+    build: { strategy: 'image' },
+    runtime: { replicas: 2, resources: { memory: { request: '32Mi', limit: '64Mi' } } },
+    network: { containerPort: 80, domains: [{ host: HELLO_HOST, tls: { provider: 'none' } }] },
+    health: { startup: { type: 'http', path: '/' } },
+    deploy: { drainPeriod: '5s' },
+  });
   const created = await op('project.create', {
     serverId: server.serverId,
-    spec: {
-      apiVersion: 'vdeploy/v1',
-      kind: 'Application',
-      metadata: { name: 'hello' },
-      source: { type: 'image', image: 'nginx:1.27-alpine' },
-      build: { strategy: 'image' },
-      runtime: { replicas: 2, resources: { memory: { request: '32Mi', limit: '64Mi' } } },
-      network: { containerPort: 80 },
-    },
+    spec: helloSpec('nginx:1.27-alpine'),
   });
   const planId = created.plan.id;
   const applied = await until('plan applied', async () => {
@@ -289,6 +293,9 @@ async function run() {
   );
   pass('self-healed a killed container', victim);
 
+  const [hello] = (await op('project.list', {})).result;
+  await blueGreen(hello.id, helloSpec);
+
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
   const { result: audit } = await op('audit.export', { from, to });
@@ -305,6 +312,59 @@ async function run() {
   if (!audit.verification.ok)
     throw new Error(`audit chain broken: ${JSON.stringify(audit.verification)}`);
   pass('every action is in the audit log, chain verified', `${audit.entries.length} entries`);
+}
+
+const HELLO_HOST = 'hello.vdeploy.test';
+
+/** The version nginx reports through Traefik, or null when the request failed. */
+function served() {
+  const headers = inTestbed(
+    `wget -S -q -O /dev/null -T 2 --header 'Host: ${HELLO_HOST}' http://127.0.0.1/ 2>&1 || true`,
+  );
+  return /server: nginx\/(\S+)/i.exec(headers)?.[1] ?? null;
+}
+
+// One request every 100 ms through Traefik, each logged as ok or fail, until told to stop.
+const TRAFFIC = `while [ ! -f /tmp/traffic.stop ]; do wget -q -O /dev/null -T 2 --header "Host: ${HELLO_HOST}" http://127.0.0.1/ && echo ok || echo fail; sleep 0.1; done > /tmp/traffic.log`;
+
+/**
+ * A new release goes live without dropping a request (§4, M2 2.2): traffic
+ * stays on the old replicas until every new one passes its startup check,
+ * then switches, and the old ones go only after draining.
+ */
+async function blueGreen(projectId, spec) {
+  await until('routed through traefik', async () => served()?.startsWith('1.27'));
+  inTestbed(
+    ['rm -f /tmp/traffic.stop /tmp/traffic.log', `nohup sh -c '${TRAFFIC}' >/dev/null 2>&1 &`].join(
+      '; ',
+    ),
+  );
+  const update = await op('project.update_spec', { projectId, spec: spec('nginx:1.28-alpine') });
+  await until('new release applied', async () => {
+    const plan = await call('GET', `/api/v1/plans/${update.plan.id}`);
+    if (plan.status === 'failed' || plan.status === 'stale') throw new Error(JSON.stringify(plan));
+    return plan.status === 'applied';
+  });
+  // Traefik picks up the new routing file within a couple of seconds of the switch.
+  const version = await until(
+    'traffic on the new release',
+    async () => {
+      const current = served();
+      return current?.startsWith('1.28') ? current : null;
+    },
+    20_000,
+  );
+  await until('old release drained', async () => managedContainers().length === 2, 60_000);
+  inTestbed('touch /tmp/traffic.stop; sleep 3');
+  const outcomes = inTestbed('cat /tmp/traffic.log').split('\n');
+  const failed = outcomes.filter((o) => o !== 'ok').length;
+  if (failed > 0) {
+    throw new Error(`${failed} of ${outcomes.length} requests failed during the switch`);
+  }
+  pass(
+    'blue/green switch, no request dropped',
+    `${outcomes.length} requests, now nginx ${version}`,
+  );
 }
 
 /**

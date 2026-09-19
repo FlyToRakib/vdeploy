@@ -43,8 +43,36 @@ func (t TraefikRouting) Write(key string, content []byte) error { return t.Dir.W
 // Prune implements Routing.
 func (t TraefikRouting) Prune(keep map[string]bool) error { return t.Dir.Prune(keep) }
 
-// route points each running project's hostnames at its running replicas,
-// and withdraws routing for everything else.
+// backends is where a project's traffic goes: its new replicas once every one
+// of them is ready (blue/green), until then the old release still running.
+func (p *pass) backends(project spec.DesiredProject, containers []compose.Container) []router.Backend {
+	port := project.Spec.Network.ContainerPort
+	var out []router.Backend
+	if p.settled[project.ProjectID] {
+		for _, c := range containers {
+			out = append(out, router.Backend{Container: c.Name, Port: port})
+		}
+		return out
+	}
+	for _, c := range p.old(project.ProjectID) {
+		if c.State == "running" {
+			out = append(out, router.Backend{Container: c.Name, Port: port})
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	// Nothing old to fall back on (a first deploy, or scaling up): route the ready ones.
+	for _, c := range containers {
+		if p.states[c.Name] == StateReady {
+			out = append(out, router.Backend{Container: c.Name, Port: port})
+		}
+	}
+	return out
+}
+
+// route points each running project's hostnames at the replicas that should
+// serve it, and withdraws routing for everything else.
 func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 	routing := p.r.Routing
 	if routing == nil {
@@ -64,15 +92,13 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 		if err != nil {
 			continue
 		}
-		var backends []router.Backend
-		for _, c := range containers {
-			if p.existing[c.Name].State == "running" {
-				backends = append(backends, router.Backend{Container: c.Name, Port: network.ContainerPort})
-			}
-		}
 		key := compose.ProjectKey(project.ProjectID)
+		backends := p.backends(project, containers)
 		content, ok := router.File(key, network, network.Domains, backends)
 		if !ok {
+			if len(containers) > 0 {
+				keep[key] = true // replicas still starting: leave the current routing as it is
+			}
 			continue
 		}
 		if err := routing.Join(ctx, compose.NetworkName(project.ProjectID)); err != nil {

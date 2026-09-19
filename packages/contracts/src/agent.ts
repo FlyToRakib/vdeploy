@@ -74,6 +74,8 @@ export const ObservedReport = z.strictObject({
     .max(200)
     .nullable(),
   events: z.array(ReconcileEvent).max(1000).nullable(),
+  /** A replica is still starting or an old release draining. */
+  settling: z.boolean().optional(),
 });
 export type ObservedReport = z.infer<typeof ObservedReport>;
 

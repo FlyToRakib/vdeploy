@@ -51,6 +51,26 @@ type Application struct {
 	} `json:"metadata"`
 	Runtime Runtime  `json:"runtime"`
 	Network *Network `json:"network,omitempty"`
+	Health  Health   `json:"health"`
+	Deploy  Deploy   `json:"deploy"`
+}
+
+// Probe checks one replica: an HTTP GET or a TCP connect.
+type Probe struct {
+	Type    string `json:"type"`
+	Path    string `json:"path,omitempty"`
+	Timeout string `json:"timeout"`
+}
+
+// Health says how to know a replica is ready for traffic.
+type Health struct {
+	Startup *Probe `json:"startup,omitempty"`
+}
+
+// Deploy is how a new release replaces the old one.
+type Deploy struct {
+	Strategy    string `json:"strategy"`
+	DrainPeriod string `json:"drainPeriod"`
 }
 
 // Runtime is how the application's containers run.

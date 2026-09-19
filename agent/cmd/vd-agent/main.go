@@ -147,7 +147,10 @@ func serve(configPath string, log *slog.Logger) error {
 	}
 	updates := make(chan reconcile.Update)
 	reports := make(chan reconcile.Report, 16)
-	reconciler := &reconcile.Reconciler{Engine: engine, Policy: policy, Log: log}
+	reconciler := &reconcile.Reconciler{
+		Engine: engine, Policy: policy, Log: log,
+		Prober: reconcile.NetProber{Resolver: engine},
+	}
 	if cfg.Routing {
 		if err := os.MkdirAll(cfg.RoutingDir, 0o755); err != nil { // #nosec G301 -- Traefik reads it
 			return fmt.Errorf("routing dir: %w", err)

@@ -26,6 +26,9 @@ export async function bumpGeneration(tx: Executor, serverId: string): Promise<nu
   return row.generation;
 }
 
+/** Replica states the agent reports for a container that is up. Only ready takes traffic. */
+const LIVE = new Set(['running', 'starting', 'ready', 'unhealthy']);
+
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
@@ -57,12 +60,16 @@ export async function waitForConvergence(
         return { ok: false, reason: trouble.message ?? `the agent reported ${trouble.kind}` };
       const project = report.projects?.find((p) => p.projectId === expected.projectId);
       if (project?.error) return { ok: false, reason: project.error };
-      const running = (project?.replicas ?? []).filter((r) => r.state === 'running');
+      const replicas = project?.replicas ?? [];
+      const unhealthy = replicas.find((r) => r.state === 'unhealthy');
+      if (unhealthy && expected.replicas > 0)
+        return { ok: false, reason: 'The new version never passed its health check' };
+      const ready = replicas.filter((r) => r.state === 'ready');
       const converged =
         expected.replicas === 0
-          ? running.length === 0
-          : running.length === expected.replicas &&
-            running.every((r) => r.release === expected.releaseId);
+          ? replicas.every((r) => !LIVE.has(r.state))
+          : ready.length === expected.replicas &&
+            ready.every((r) => r.release === expected.releaseId);
       if (converged) return { ok: true };
     }
     if (Date.now() >= deadline) {

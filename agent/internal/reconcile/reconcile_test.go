@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
@@ -106,8 +107,29 @@ var policy = guard.Policy{AllowedRegistries: []string{"docker.io"}, MaxMemoryByt
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// clock is the reconciler's time in tests; advance it to let drains finish.
+var clock = time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+
+func advance(d time.Duration) { clock = clock.Add(d) }
+
 func newReconciler(engine Engine) *Reconciler {
-	return &Reconciler{Engine: engine, Policy: policy, Log: quietLogger()}
+	return &Reconciler{Engine: engine, Policy: policy, Log: quietLogger(), Now: func() time.Time { return clock }}
+}
+
+// settle runs passes until nothing is starting or draining.
+func settle(t *testing.T, r *Reconciler, state *spec.DesiredState) []Event {
+	t.Helper()
+	var events []Event
+	for range 10 {
+		report := reconcile(t, r, state)
+		events = append(events, report.Events...)
+		if !report.Settling {
+			return events
+		}
+		advance(time.Minute)
+	}
+	t.Fatal("never settled")
+	return nil
 }
 
 func testProject(id string, version, replicas int) spec.DesiredProject {
@@ -165,7 +187,7 @@ func TestFreshDeployCreatesEverything(t *testing.T) {
 	if got := kinds(report.Events); !slices.Equal(got, []string{"created"}) {
 		t.Fatalf("events = %v", got)
 	}
-	if report.Projects[0].Replicas[0].State != "running" {
+	if report.Projects[0].Replicas[0].State != StateReady {
 		t.Fatalf("observed = %+v", report.Projects[0])
 	}
 }
@@ -205,7 +227,7 @@ func TestNewReleaseReplacesOldContainersAfterStartingNewOnes(t *testing.T) {
 	r := newReconciler(engine)
 	reconcile(t, r, desired(1, testProject(idA, 1, 1)))
 	engine.calls = nil
-	reconcile(t, r, desired(2, testProject(idA, 2, 1)))
+	settle(t, r, desired(2, testProject(idA, 2, 1)))
 
 	running := engine.running()
 	if len(running) != 1 || !strings.Contains(running[0], "-v2-") {
@@ -224,12 +246,12 @@ func TestNewRevisionRestartsWithoutANewRelease(t *testing.T) {
 	p := testProject(idA, 1, 2)
 	reconcile(t, r, desired(1, p))
 	p.Revision = 1
-	report := reconcile(t, r, desired(2, p))
+	events := settle(t, r, desired(2, p))
 	running := engine.running()
 	if len(running) != 2 || !strings.Contains(running[0], "-r1-") || !strings.Contains(running[1], "-r1-") {
 		t.Fatalf("running = %v", running)
 	}
-	if got := kinds(report.Events); !slices.Equal(got, []string{"created", "created", "removed", "removed"}) {
+	if got := kinds(events); !slices.Equal(got, []string{"created", "created", "removed", "removed"}) {
 		t.Fatalf("events = %v", got)
 	}
 }
@@ -349,5 +371,135 @@ func TestRoutesFollowTheRunningReplicas(t *testing.T) {
 	reconcile(t, r, desired(3, stopped))
 	if _, ok := routing.files[key]; ok {
 		t.Fatal("a stopped project is still routed")
+	}
+}
+
+// fakeProber answers health checks from a table; missing names fail.
+type fakeProber struct{ healthy map[string]bool }
+
+func (f *fakeProber) Probe(_ context.Context, container, _ string, _ int, _ spec.Probe) error {
+	if f.healthy[container] {
+		return nil
+	}
+	return errors.New("connection refused")
+}
+
+func TestTrafficMovesOnlyOnceEveryNewReplicaIsReady(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	prober := &fakeProber{healthy: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+	r.Prober = prober
+	key := compose.ProjectKey("prj_" + idA)
+
+	v1, _ := compose.Plan(routedProject(1))
+	for _, c := range v1 {
+		prober.healthy[c.Name] = true
+	}
+	settle(t, r, desired(1, routedProject(1)))
+
+	v2, _ := compose.Plan(routedProject(2))
+	prober.healthy[v2[0].Name] = true // one of two new replicas is up
+	report := reconcile(t, r, desired(2, routedProject(2)))
+	if !report.Settling || report.Projects[0].Replicas[1].State != StateStarting {
+		t.Fatalf("report = %+v", report)
+	}
+	if !strings.Contains(routing.files[key], "-v1-") || strings.Contains(routing.files[key], "-v2-") {
+		t.Fatalf("traffic moved before every new replica was ready: %s", routing.files[key])
+	}
+	if len(engine.running()) != 4 {
+		t.Fatalf("running = %v", engine.running())
+	}
+
+	prober.healthy[v2[1].Name] = true
+	report = reconcile(t, r, desired(2, routedProject(2)))
+	if strings.Contains(routing.files[key], "-v1-") || !strings.Contains(routing.files[key], "-v2-") {
+		t.Fatalf("traffic did not move: %s", routing.files[key])
+	}
+	if !report.Settling || len(engine.running()) != 4 {
+		t.Fatalf("old release retired before draining: %v", engine.running())
+	}
+
+	advance(31 * time.Second)
+	report = reconcile(t, r, desired(2, routedProject(2)))
+	running := engine.running()
+	if report.Settling || len(running) != 2 || !strings.Contains(running[0], "-v2-") {
+		t.Fatalf("settling=%v running=%v", report.Settling, running)
+	}
+}
+
+func TestAReplicaThatNeverBecomesHealthyKeepsTheOldReleaseServing(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	prober := &fakeProber{healthy: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+	r.Prober = prober
+	key := compose.ProjectKey("prj_" + idA)
+
+	v1, _ := compose.Plan(routedProject(1))
+	for _, c := range v1 {
+		prober.healthy[c.Name] = true
+	}
+	settle(t, r, desired(1, routedProject(1)))
+
+	reconcile(t, r, desired(2, routedProject(2)))
+	advance(61 * time.Second)
+	report := reconcile(t, r, desired(2, routedProject(2)))
+	if report.Projects[0].Replicas[0].State != StateUnhealthy {
+		t.Fatalf("replicas = %+v", report.Projects[0].Replicas)
+	}
+	if !slices.Contains(kinds(report.Events), "failed") {
+		t.Fatalf("events = %v", report.Events)
+	}
+	if !strings.Contains(routing.files[key], "-v1-") {
+		t.Fatalf("the old release lost its traffic: %s", routing.files[key])
+	}
+
+	// The control plane rolls back: v1 is desired again and v2 goes away.
+	settle(t, r, desired(3, routedProject(1)))
+	running := engine.running()
+	if len(running) != 2 || !strings.Contains(running[0], "-v1-") || !strings.Contains(routing.files[key], "-v1-") {
+		t.Fatalf("running = %v routes = %s", running, routing.files[key])
+	}
+}
+
+func TestFirstDeployIsRoutedOnlyWhenReady(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	prober := &fakeProber{healthy: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+	r.Prober = prober
+	key := compose.ProjectKey("prj_" + idA)
+
+	reconcile(t, r, desired(1, routedProject(1)))
+	if _, ok := routing.files[key]; ok {
+		t.Fatalf("routed before anything was ready: %s", routing.files[key])
+	}
+	v1, _ := compose.Plan(routedProject(1))
+	prober.healthy[v1[0].Name] = true
+	reconcile(t, r, desired(1, routedProject(1)))
+	if !strings.Contains(routing.files[key], "-v1-r0-0:") || strings.Contains(routing.files[key], "-v1-r0-1:") {
+		t.Fatalf("routes = %s", routing.files[key])
+	}
+}
+
+func TestRecreateStopsTheOldReleaseFirst(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	p := testProject(idA, 1, 1)
+	p.Spec.Deploy.Strategy = "recreate"
+	reconcile(t, r, desired(1, p))
+	engine.calls = nil
+
+	p = testProject(idA, 2, 1)
+	p.Spec.Deploy.Strategy = "recreate"
+	reconcile(t, r, desired(2, p))
+	removeAt := slices.IndexFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "remove ") })
+	createAt := slices.IndexFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "create ") })
+	if removeAt < 0 || createAt < 0 || removeAt > createAt {
+		t.Fatalf("calls = %v", engine.calls)
 	}
 }

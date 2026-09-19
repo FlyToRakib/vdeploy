@@ -62,7 +62,7 @@ async function agentTick() {
       projectId: p.projectId,
       replicas: Array.from({ length: p.spec.runtime.replicas }, (_, i) => ({
         name: `vd-${p.projectId}-v${p.releaseVersion}-r${p.revision}-${i}`,
-        state: p.running && p.releaseVersion < crashFrom ? 'running' : 'exited',
+        state: !p.running ? 'exited' : p.releaseVersion < crashFrom ? 'ready' : 'unhealthy',
         release: p.releaseId,
       })),
     })),

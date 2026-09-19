@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.2 — health-gated blue/green through Traefik: HTTP startup probe, switch, drain, auto-rollback
+**Task:** 2.3 — instant URLs (wildcard base domain + zero-domain fallback)
 **Status:** in progress
-**Updated:** 2026-09-19 14:57 UTC
+**Updated:** 2026-09-19 15:20 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -17,14 +17,14 @@ verified unchanged before, after, and after testbed teardown.
 
 - [x] **M1 — Kernel** (1.1–1.25): monorepo, contracts (ids, errors, spec + versions, operation catalog, agent frames), kernel planning (diff, plan_hash, releases), Postgres schema with DB-enforced immutability, seven-layer policy engine (exhaustive matrix, 100% branch coverage), hash-chained audit log, API with the full §20.2 auth surface, dashboard shell, Go agent (L6 guard + 38-case adversarial suite, reconciler, signed wss transport, enrollment, preflight), one-pipeline operations with signed approvals, worker applying plans with auto-rollback, e2e exit test + control-plane restore drill passed on the VPS testbed. See `git log` for the per-task record.
 - [x] 2.1 agent-managed Traefik v3.7.13 (digest-pinned, built from constants, only container with host ports/bind, OOM-protected), routing files per project (write-temp + rename, pruned), Traefik joins only routed project networks, traffic moves to new replicas before old ones are removed; verified in local dind (Host routing → nginx, unknown host → 404)
+- [x] 2.2 health-gated blue/green: the agent probes each new replica (HTTP path from `health.startup`, else TCP) until it passes or its startup window closes; traffic stays on the old release until every new replica is ready, then switches in one routing-file rename; old replicas drain (`deploy.drainPeriod`, default 30s) before removal; `recreate` stops the old first; unhealthy replicas are reported and the worker rolls back at once instead of waiting out the deploy timeout; the loop passes every 2s while settling. Verified in local dind: nginx 1.27 → 1.28 under 10 req/s through Traefik, 0 of 125 requests failed (new e2e check)
 
 ## Doing
 
-- [ ] 2.2 health-gated blue/green through Traefik: HTTP startup probe, switch, drain, auto-rollback
+- [ ] 2.3 instant URLs — wildcard base domain + zero-domain fallback (sslip.io style), HTTP-01 via Traefik
 
 ## Next (M2)
 
-- [ ] 2.3 instant URLs — wildcard base domain + zero-domain fallback (sslip.io style), HTTP-01 via Traefik
 - [ ] 2.4 DNS verification before any ACME request (A/AAAA vs server IP, Cloudflare proxy detection, registrar guidance)
 - [ ] 2.5 env vars + versioned secrets (AES-256-GCM envelope, per-project DEK), delivery to the agent, build-time vs runtime split
 - [ ] 2.6 resource governor at plan time (capacity, requests, headroom) + capacity in plain words
