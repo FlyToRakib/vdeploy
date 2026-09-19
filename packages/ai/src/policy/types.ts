@@ -1,4 +1,4 @@
-import type { ErrorCode, Id, Role } from '@vdeploy/contracts';
+import type { ErrorCode, Id, Role, ScopeKind } from '@vdeploy/contracts';
 
 export type AiMode = 'ask' | 'propose' | 'autopilot';
 
@@ -42,4 +42,24 @@ export interface Denied {
 
 export function deny(layer: Layer, code: ErrorCode, reason: string): Denied {
   return { effect: 'deny', layer, code, reason };
+}
+
+/**
+ * The resource an operation names, resolved by the caller from the database
+ * before the policy engine runs. The engine never trusts ids in the input
+ * alone: ownership and scope are checked against this record.
+ */
+export interface Target {
+  kind: ScopeKind;
+  /** Null for org-scoped operations. */
+  id: string | null;
+  orgId: Id<'organization'>;
+  /** The server the resource lives on (the server itself for server scope). */
+  serverId: Id<'server'> | null;
+  /** The project's `ai.managed`; true for anything that is not a project. */
+  aiManaged: boolean;
+  /** The project is labelled `env: production`. */
+  production: boolean;
+  /** The project's `ai.autoApply`; both tiers for anything that is not a project. */
+  projectAutoApply: readonly ('safe' | 'sensitive')[];
 }

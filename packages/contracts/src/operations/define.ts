@@ -22,6 +22,17 @@ export type Role = z.infer<typeof Role>;
 export const ScopeKind = z.enum(['org', 'project', 'server', 'database']);
 export type ScopeKind = z.infer<typeof ScopeKind>;
 
+/** What kind of information a read exposes — the unit of L1 read grants. */
+export const ReadCategory = z.enum([
+  'config',
+  'deployHistory',
+  'logs',
+  'metrics',
+  'secretNames',
+  'sourceFiles',
+]);
+export type ReadCategory = z.infer<typeof ReadCategory>;
+
 /** The input field that names the scoped resource, per scope kind. */
 export const SCOPE_FIELD = {
   org: null,
@@ -39,6 +50,8 @@ export interface OperationDefinition<
   summary: string;
   tier: RiskTier;
   mutates: boolean;
+  /** For reads: the category of information returned. Null for mutations. */
+  reads: ReadCategory | null;
   scope: ScopeKind;
   /** Minimum RBAC role — the L0 ceiling for humans and the AI acting for them. */
   minRole: Role;
@@ -69,6 +82,7 @@ export function operation<Name extends string, Input extends z.ZodType>(
     summary,
     tier,
     mutates: true,
+    reads: null,
     scope,
     minRole: options.minRole ?? DEFAULT_ROLE[tier],
     stepUp: options.stepUp ?? tier === 'destructive',
@@ -80,6 +94,7 @@ export function operation<Name extends string, Input extends z.ZodType>(
 export function query<Name extends string, Input extends z.ZodType>(
   name: Name,
   scope: ScopeKind,
+  reads: ReadCategory,
   summary: string,
   input: Input,
 ): OperationDefinition<Name, Input> {
@@ -88,6 +103,7 @@ export function query<Name extends string, Input extends z.ZodType>(
     summary,
     tier: 'safe',
     mutates: false,
+    reads,
     scope,
     minRole: 'viewer',
     stepUp: false,
