@@ -23,6 +23,7 @@ It is exercised automatically by `scripts/e2e.mjs` (the restore drill).
    | `CONTROL_PLANE_KEY` | Every agent refuses the new control plane (they pinned the old key). Each server must be re-enrolled. |
    | `AUTH_SECRET` | Everyone is signed out; two-factor secrets can no longer be read, so users must set up 2FA again. |
    | `APPROVAL_KEY` | Approvals that were issued but not yet applied become invalid; people approve again. |
+   | `SECRETS_KEY` | **Every stored secret is lost for good**: the database holds them only encrypted under keys this one wraps. Apps keep running with the values they have, but each secret must be set again before the next deploy. |
 
    Keep them in a password manager or secret store — **not** next to the
    database dump. A dump plus its secrets is the whole control plane.
@@ -40,7 +41,7 @@ dump offsite.
    ```
 
 3. Start the API and the worker with the **same** `CONTROL_PLANE_KEY`,
-   `AUTH_SECRET` and `APPROVAL_KEY` as before. The API applies any newer
+   `AUTH_SECRET`, `APPROVAL_KEY` and `SECRETS_KEY` as before. The API applies any newer
    migrations on start (forward-only).
 4. Wait for agents to reconnect — they retry with backoff up to one minute.
    In the dashboard each server returns to **online**.

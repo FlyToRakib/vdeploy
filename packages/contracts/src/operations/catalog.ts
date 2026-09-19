@@ -10,6 +10,7 @@ import {
   Scaling,
   Schedule,
 } from '../spec/sections.js';
+import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
 import { operation, query, Role, type OperationDefinition } from './define.js';
 
@@ -57,6 +58,13 @@ export const OPERATIONS = [
     obj({ ...P, deploymentId: idSchema('deployment') }),
   ),
   query('release.list', 'project', 'deployHistory', 'List releases of a project', obj(P)),
+  query(
+    'secret.list',
+    'project',
+    'secretNames',
+    'List the secrets of a project: names and versions, never values',
+    obj(P),
+  ),
   query(
     'release.get',
     'project',
@@ -314,6 +322,18 @@ export const OPERATIONS = [
     obj({ databaseId }),
   ),
   operation(
+    'secret.generate',
+    'sensitive',
+    'project',
+    'Create or replace a secret with a random value made on the server, so no one sees it',
+    obj({
+      ...P,
+      name: SecretName,
+      length: z.number().int().min(16).max(256).default(40),
+      alphabet: z.enum(['alphanumeric', 'hex']).default('alphanumeric'),
+    }),
+  ),
+  operation(
     'secret.rotate',
     'destructive',
     'project',
@@ -344,6 +364,20 @@ export const OPERATIONS = [
     'Open an audited, recorded terminal into a container',
     obj({ ...P, replica: z.number().int().min(0).max(63).default(0) }),
     { minRole: 'developer' },
+  ),
+  operation(
+    'secret.set',
+    'human_only',
+    'project',
+    'Store a secret value; it can be replaced but never shown again without step-up',
+    obj({
+      ...P,
+      name: SecretName,
+      value: z
+        .string()
+        .min(1)
+        .refine((v) => new TextEncoder().encode(v).length <= MAX_SECRET_BYTES, 'at most 32 KiB'),
+    }),
   ),
   operation(
     'secret.read_value',

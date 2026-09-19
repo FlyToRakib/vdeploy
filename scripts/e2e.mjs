@@ -127,6 +127,7 @@ const dbPassword = secret();
 const controlPlaneEnv = [
   `-e DATABASE_URL=postgres://vdeploy:${dbPassword}@db:5432/vdeploy`,
   `-e APPROVAL_KEY=${secret()}`,
+  `-e SECRETS_KEY=${secret()}`,
   `-e CONTROL_PLANE_KEY=${secret()}`,
   `-e AUTH_SECRET=${secret()}`,
   `-e PUBLIC_URL=${PUBLIC_URL}`,

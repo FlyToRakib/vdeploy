@@ -16,6 +16,8 @@ export const ApiConfig = z.object({
   PUBLIC_URL: z.url({ protocol: /^https?$/ }),
   /** Signs approvals (§8 L5). Rotating it voids every outstanding approval, by design. */
   APPROVAL_KEY: Key32,
+  /** Wraps every project's secret key (§22). Losing it loses every stored secret. */
+  SECRETS_KEY: Key32,
   /** Ed25519 seed that signs every frame to agents (ADR 0004). Agents pin its public key. */
   CONTROL_PLANE_KEY: Key32,
   /** Signs sessions and encrypts 2FA secrets. At least 32 random characters. */

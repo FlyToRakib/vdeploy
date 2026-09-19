@@ -111,6 +111,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       mailer,
       queue: deps.queue,
       approvalKey: config.APPROVAL_KEY,
+      secretsKey: config.SECRETS_KEY,
       publicUrl: config.PUBLIC_URL,
       now: deps.now ?? (() => new Date()),
     }),

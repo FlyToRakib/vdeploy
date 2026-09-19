@@ -3,9 +3,11 @@ import { hashOf } from '@vdeploy/core';
 import {
   approvals,
   auditLog,
+  idempotencyKeys,
   organization,
   plans,
   projects,
+  secretVersions,
   serverEnrollments,
   servers,
   session,
@@ -239,6 +241,55 @@ describe('planned changes', () => {
     expect(second.json()).toEqual(first.json());
     const rows = await t.database.db.select().from(plans).where(eq(plans.projectId, projectId));
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe('secrets', () => {
+  it('stores values sealed, shows only names, and reveals only after step-up', async () => {
+    const projectId = await seedProject(orgId, 'vault');
+    const set = await op(owner, 'secret.set', {
+      projectId,
+      name: 'stripe_key',
+      value: 'sk_live_do_not_log',
+    });
+    expect(set.statusCode).toBe(200);
+    const { secretId, version } = set.json<{ result: { secretId: string; version: number } }>()
+      .result;
+    expect(version).toBe(1);
+    const again = await op(owner, 'secret.set', { projectId, name: 'stripe_key', value: 'v2' });
+    expect(again.json<{ result: { version: number } }>().result.version).toBe(2);
+    await op(owner, 'secret.generate', { projectId, name: 'session_key', length: 48 });
+
+    const listed = await op(owner, 'secret.list', { projectId });
+    expect(JSON.stringify(listed.json())).not.toContain('sk_live');
+    expect(listed.json<{ result: { name: string; version: number }[] }>().result).toMatchObject([
+      { name: 'session_key', version: 1 },
+      { name: 'stripe_key', version: 2 },
+    ]);
+    const stored = await t.database.db.select().from(secretVersions);
+    expect(JSON.stringify(stored)).not.toContain('sk_live');
+
+    // A fresh session has not proven itself again yet.
+    const admin = await member('admin', 'vault-admin@example.com');
+    const locked = await op(admin, 'secret.read_value', { projectId, secretId });
+    expect(locked.statusCode).toBe(403);
+    await stepUp(admin);
+    const revealed = await op(
+      admin,
+      'secret.read_value',
+      { projectId, secretId },
+      { idempotencyKey: 'reveal-once-0001' },
+    );
+    expect(revealed.json<{ result: { value: string } }>().result.value).toBe('v2');
+    // The reveal is audited, and its answer is not kept for replay.
+    const kept = await t.database.db.select().from(idempotencyKeys);
+    expect(JSON.stringify(kept)).not.toContain('"v2"');
+    const [entry] = await t.database.db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.chain, orgId), eq(auditLog.action, 'secret.read_value')))
+      .orderBy(auditLog.seq);
+    expect(entry?.outcome).toBe('denied');
   });
 });
 

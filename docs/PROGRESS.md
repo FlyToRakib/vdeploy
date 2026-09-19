@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.5 — env vars + versioned secrets
+**Task:** 2.5b — env vars, secret delivery to the agent, build/runtime split
 **Status:** in progress
-**Updated:** 2026-09-19 15:50 UTC
+**Updated:** 2026-09-19 16:05 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -20,10 +20,11 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.2 health-gated blue/green: the agent probes each new replica (HTTP path from `health.startup`, else TCP) until it passes or its startup window closes; traffic stays on the old release until every new replica is ready, then switches in one routing-file rename; old replicas drain (`deploy.drainPeriod`, default 30s) before removal; `recreate` stops the old first; unhealthy replicas are reported and the worker rolls back at once instead of waiting out the deploy timeout; the loop passes every 2s while settling. Verified in local dind: nginx 1.27 → 1.28 under 10 req/s through Traefik, 0 of 125 requests failed (new e2e check)
 - [x] 2.3 instant URLs: org URL settings (`urls.configure` / `urls.get`) — zero-domain fallback `{project}.{ip-dashed}.sslip.io` by default (nip.io selectable), or a wildcard base domain with a one-label `{project}` pattern, or off; each project stores its host (unique among live projects, numbered around collisions, stable), earlier hosts 301 to the new one; server public IPv4 from agent interface addresses or a public connection address; agent routes the instant host with HTTP-01 TLS, redirects old hosts, and refuses frames where two projects claim one hostname (+3 adversarial cases). Verified in local dind: `hello.apps.vdeploy.test` served over HTTPS, plain HTTP redirected (new e2e check). ADR 0006
 - [x] 2.4 DNS verified before any certificate: the worker checks every certificate host (Let's Encrypt domains, instant and redirecting hosts) — A/AAAA against the server's IPv4/IPv6, Cloudflare proxy ranges, CNAME on the apex, zone from SOA for registrar-ready "name" values — re-checking on a doubling countdown (15 s → 5 min), never a retry button; the agent attaches the ACME resolver only to verified hosts and serves the rest on plain HTTP; `domain.status` shows status, what DNS returned, and copy-paste records; `server.set_address` sets a NAT'd server's address by hand (detection never overwrites it); an address change re-verifies everything. Verified in local dind with a CoreDNS resolver: host verified, then HTTPS served (e2e check)
+- [x] 2.5a secret store: per-project data key wrapped by `SECRETS_KEY` (AES-256-GCM), values AES-256-GCM under it with the (secret, version) as associated data; versions immutable (DB trigger); `secret.set` (human only), `secret.generate` (server-made random value — usable by the AI, which never sees it), `secret.list` (names and versions only), `secret.read_value` (step-up, audited, answer never stored for idempotent replay); restore runbook lists `SECRETS_KEY`
 
 ## Doing
 
-- [ ] 2.5 env vars + versioned secrets (AES-256-GCM envelope, per-project DEK), delivery to the agent, build-time vs runtime split
+- [ ] 2.5b env vars (`env.set`/`env.unset`, runtime vs build), releases pin secret versions, values sealed to each agent's X25519 key for delivery, `secret.rotate`
 
 ## Next (M2)
 

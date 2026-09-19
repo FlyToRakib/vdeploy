@@ -50,6 +50,13 @@
       "when": 1789832167040,
       "tag": "0006_domain_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789833127891,
+      "tag": "0007_secrets",
+      "breakpoints": true
     }
   ]
 }

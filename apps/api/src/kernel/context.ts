@@ -15,6 +15,8 @@ export interface KernelDeps {
   mailer: Mailer;
   queue: ApplyQueue;
   approvalKey: Buffer;
+  /** The installation key that wraps each project's secret key. */
+  secretsKey: Buffer;
   publicUrl: string;
   now: () => Date;
 }

@@ -14,3 +14,4 @@ export * from './agent.js';
 export * from './pipeline.js';
 export * from './urls.js';
 export * from './dns.js';
+export * from './secrets.js';

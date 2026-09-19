@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { idSchema } from '../ids.js';
+import { SecretName } from '../secrets.js';
 import { Cpu, Duration, Memory } from './quantities.js';
 
 /** DNS label: used in hostnames, container names and network names. */
@@ -55,7 +56,8 @@ export const Build = z.strictObject({
   context: z.string().max(512).default('.'),
   target: z.string().max(128).optional(),
   args: z.record(EnvKey, z.string().max(4096)).default({}),
-  secrets: z.array(ResourceName).max(32).default([]),
+  /** Build-time secrets by name, mounted with BuildKit --secret, never in a layer. */
+  secrets: z.array(SecretName).max(32).default([]),
   cache: z.enum(['registry', 'local', 'none']).default('registry'),
   builder: idSchema('server').optional(),
 });

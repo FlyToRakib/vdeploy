@@ -2,6 +2,7 @@ import { VDeployError, type OperationName } from '@vdeploy/contracts';
 import {
   deployments,
   domainChecksFor,
+  listSecrets,
   projects,
   releases,
   servers,
@@ -116,6 +117,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       .orderBy(projects.name),
   }),
   'domain.status': async ({ deps, args }) => domainChecksFor(deps.db, [id(args, 'projectId')]),
+  'secret.list': async ({ deps, args }) => listSecrets(deps.db, id(args, 'projectId')),
   'project.logs': notYet,
   'project.metrics': notYet,
   'project.events': notYet,

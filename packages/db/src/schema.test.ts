@@ -2,6 +2,7 @@ import { newId } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { auditLog, organization, projects, releases } from './schema/index.js';
+import { putSecret, readSecret } from './secrets.js';
 import { startTestDatabase, type TestDatabase } from './testing.js';
 
 let t: TestDatabase;
@@ -54,6 +55,30 @@ describe('schema', () => {
     expect(
       await refusal(t.db.execute(sql`update releases set image = 'x' where id = ${releaseId}`)),
     ).toMatch(/append-only/);
+  });
+
+  it('never rewrites a stored secret version', async () => {
+    const { orgId, projectId } = await seedRelease();
+    const kek = Buffer.alloc(32, 9);
+    const { secretId } = await t.db.transaction((tx) =>
+      putSecret(tx, kek, {
+        orgId,
+        projectId,
+        name: 'api_token',
+        value: 'first',
+        actor: { userId: 'usr_x', origin: 'api' },
+      }),
+    );
+    expect(
+      await refusal(
+        t.db.execute(sql`update secret_versions set sealed = 'x' where secret_id = ${secretId}`),
+      ),
+    ).toMatch(/append-only/);
+    expect((await readSecret(t.db, kek, projectId, secretId)).value).toBe('first');
+    // A different installation key opens nothing.
+    await expect(readSecret(t.db, Buffer.alloc(32, 1), projectId, secretId)).rejects.toThrow(
+      /cannot be opened/,
+    );
   });
 
   it('refuses to update, delete or truncate audit records', async () => {

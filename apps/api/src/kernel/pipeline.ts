@@ -18,6 +18,7 @@ import {
   type OperationResponse,
   type Plan,
   type PlanView,
+  VALUE_BEARING_OPERATIONS,
 } from '@vdeploy/contracts';
 import { buildPlan, isPlannable } from '@vdeploy/core';
 import { aiGrants, appendAudit, idempotencyKeys, plans, type ActorRecord } from '@vdeploy/db';
@@ -136,7 +137,8 @@ async function remember(
   key: string | undefined,
   response: OperationResponse,
 ): Promise<OperationResponse> {
-  if (key) {
+  // An answer holding a secret value is never written anywhere, replay store included.
+  if (key && !VALUE_BEARING_OPERATIONS.has(name)) {
     await deps.db
       .insert(idempotencyKeys)
       .values({ userId: actor.userId, key, operation: name, response })

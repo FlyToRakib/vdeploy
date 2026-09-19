@@ -13,6 +13,7 @@ export function testConfig(databaseUrl: string) {
     DATABASE_URL: databaseUrl,
     PUBLIC_URL: ORIGIN,
     APPROVAL_KEY: 'ab'.repeat(32),
+    SECRETS_KEY: 'cd'.repeat(32),
     CONTROL_PLANE_KEY: 'cd'.repeat(32),
     AUTH_SECRET: 'test-secret-that-is-at-least-32-characters-long',
     BREACHED_PASSWORD_CHECK: 'false',

@@ -8,6 +8,8 @@ import {
   member,
   organization,
   projects,
+  putSecret,
+  readSecret,
   refreshInstantHosts,
   resetDomainChecks,
   serverEnrollments,
@@ -16,7 +18,7 @@ import {
   urlSettings,
   verifyAuditChain,
 } from '@vdeploy/db';
-import { isPublicIpv4 } from '@vdeploy/core';
+import { generateSecret, isPublicIpv4 } from '@vdeploy/core';
 import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
 import type { Handler, HandlerContext } from './context.js';
 
@@ -161,6 +163,28 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
     });
     return { serverId, ipv4, ipv6, detected: !manual };
   },
+  'secret.set': async ({ deps, actor, args }) =>
+    deps.db.transaction((tx) =>
+      putSecret(tx, deps.secretsKey, {
+        orgId: actor.orgId,
+        projectId: String(args.projectId),
+        name: String(args.name),
+        value: String(args.value),
+        actor: { userId: actor.userId, origin: actor.origin },
+      }),
+    ),
+  'secret.generate': async ({ deps, actor, args }) =>
+    deps.db.transaction((tx) =>
+      putSecret(tx, deps.secretsKey, {
+        orgId: actor.orgId,
+        projectId: String(args.projectId),
+        name: String(args.name),
+        value: generateSecret(Number(args.length), args.alphabet as 'alphanumeric' | 'hex'),
+        actor: { userId: actor.userId, origin: actor.origin },
+      }),
+    ),
+  'secret.read_value': async ({ deps, args }) =>
+    readSecret(deps.db, deps.secretsKey, String(args.projectId), String(args.secretId)),
   'server.add': async (context) => {
     const serverId = newId('server');
     await context.deps.db

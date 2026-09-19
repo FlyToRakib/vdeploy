@@ -187,6 +187,51 @@ export const domainChecks = pgTable(
   (t) => [index('domain_checks_due').on(t.nextCheckAt)],
 );
 
+/**
+ * Secrets (§22): named per project, versioned, values envelope-encrypted.
+ * Metadata lives here; values live only in secret_versions, sealed.
+ */
+export const secrets = pgTable(
+  'secrets',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    currentVersion: integer('current_version').notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('secrets_project_name').on(t.projectId, t.name)],
+);
+
+/** One value of a secret. Never changed once written — enforced by a trigger. */
+export const secretVersions = pgTable(
+  'secret_versions',
+  {
+    secretId: text('secret_id')
+      .notNull()
+      .references(() => secrets.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    /** AES-256-GCM under the project's data key, bound to (secret, version). */
+    sealed: text('sealed').notNull(),
+    createdBy: jsonb('created_by').$type<ActorRecord>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.secretId, t.version] })],
+);
+
+/** Each project's data key, wrapped by the installation key (never stored in the clear). */
+export const projectKeys = pgTable('project_keys', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  wrapped: text('wrapped').notNull(),
+  createdAt: createdAt(),
+});
+
 /** How an org's projects get instant URLs (§13.1); no row means the defaults. */
 export const urlSettings = pgTable('url_settings', {
   orgId: text('org_id')

@@ -148,6 +148,8 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'api_key.revoke': { keyId: 'key_01J9Z3Q8S7M2K4X6V1B5N0C9D8' },
   'urls.configure': { mode: 'wildcard', baseDomain: 'apps.example.com' },
   'server.set_address': { ipv4: '8.8.4.4' },
+  'secret.generate': { name: 'session_key' },
+  'secret.set': { name: 'stripe_key', value: 'sk_test_x' },
 };
 
 /** A valid input for any operation, naming the given target. */
