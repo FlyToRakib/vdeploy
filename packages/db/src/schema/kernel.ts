@@ -1,4 +1,10 @@
-import type { AiGrants, ApplicationSpec, BlastRadius, Plan } from '@vdeploy/contracts';
+import type {
+  AiGrants,
+  ApplicationSpec,
+  BlastRadius,
+  ObservedReport,
+  Plan,
+} from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
 import {
   boolean,
@@ -31,7 +37,19 @@ export const servers = pgTable('servers', {
   arch: text('arch'),
   capacity: jsonb('capacity').$type<{ cpus: number; memoryBytes: number; diskBytes: number }>(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  /** Bumped on every change to what this server should run; the agent ignores older ones. */
+  desiredGeneration: integer('desired_generation').notNull().default(0),
   createdAt: createdAt(),
+});
+
+/** The latest report an agent sent (§25 observed_state). */
+export const observedState = pgTable('observed_state', {
+  serverId: text('server_id')
+    .primaryKey()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  generation: integer('generation').notNull(),
+  report: jsonb('report').$type<ObservedReport>().notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const projects = pgTable(
@@ -44,6 +62,10 @@ export const projects = pgTable(
     spec: jsonb('spec').$type<ApplicationSpec>().notNull(),
     specHash: text('spec_hash').notNull(),
     currentReleaseId: text('current_release_id'),
+    /** Desired: false while the project is stopped (`project.stop`). */
+    running: boolean('running').notNull().default(true),
+    /** Bumped by `project.restart` to replace containers without a new release. */
+    revision: integer('revision').notNull().default(0),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

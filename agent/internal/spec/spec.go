@@ -39,6 +39,8 @@ type DesiredProject struct {
 	Spec           Application `json:"spec"`
 	Image          string      `json:"image"`
 	Running        bool        `json:"running"`
+	// Revision is bumped to replace every container without a new release.
+	Revision int `json:"revision"`
 }
 
 // Application is the subset of the Application spec the agent acts on.

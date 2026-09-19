@@ -15,6 +15,11 @@ export const DesiredProject = z.strictObject({
   image: PinnedImage,
   /** False keeps the project defined but stopped (`project.stop`). */
   running: z.boolean(),
+  /**
+   * Bumped to replace every container without changing the release
+   * (`project.restart`): the agent starts the new ones, then stops the old.
+   */
+  revision: z.number().int().min(0),
 });
 export type DesiredProject = z.infer<typeof DesiredProject>;
 
@@ -30,6 +35,88 @@ export const DesiredState = z.strictObject({
   projects: z.array(DesiredProject).max(200),
 });
 export type DesiredState = z.infer<typeof DesiredState>;
+
+/** Header every signed frame body carries (ADR 0004). */
+const FrameHeader = {
+  v: z.literal(1),
+  serverId: idSchema('server'),
+  nonce: z.string().min(16).max(128),
+  seq: z.number().int().positive(),
+  sentAt: z.iso.datetime({ offset: true }),
+};
+
+const ReconcileEvent = z.strictObject({
+  kind: z.enum(['created', 'healed', 'stopped', 'removed', 'refused', 'failed']),
+  projectId: z.string().max(64),
+  container: z.string().max(128).optional(),
+  message: z.string().max(4096).optional(),
+});
+
+export const ObservedReport = z.strictObject({
+  generation: z.number().int(),
+  projects: z
+    .array(
+      z.strictObject({
+        projectId: z.string().max(64),
+        replicas: z
+          .array(
+            z.strictObject({
+              name: z.string().max(128),
+              state: z.string().max(32),
+              release: z.string().max(64),
+            }),
+          )
+          .max(64)
+          .nullable(),
+        error: z.string().max(4096).optional(),
+      }),
+    )
+    .max(200)
+    .nullable(),
+  events: z.array(ReconcileEvent).max(1000).nullable(),
+});
+export type ObservedReport = z.infer<typeof ObservedReport>;
+
+/**
+ * Everything an agent may send. The control plane treats agents as untrusted
+ * input too: a compromised server must not be able to hurt the control plane.
+ */
+export const AgentFrame = z.discriminatedUnion('type', [
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('hello'),
+    agentVersion: z.string().max(64),
+    protocol: z.number().int(),
+    generation: z.number().int(),
+    hostname: z.string().max(253),
+    arch: z.string().max(32),
+    os: z.string().max(32),
+    cpus: z.number().int().min(0).max(4096),
+    memoryBytes: z.number().int().min(0),
+  }),
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('ack'),
+    generation: z.number().int(),
+    accepted: z.boolean(),
+    error: z.string().max(8192).optional(),
+  }),
+  z.strictObject({ ...FrameHeader, type: z.literal('observed_state'), report: ObservedReport }),
+]);
+export type AgentFrame = z.infer<typeof AgentFrame>;
+
+/** Enrollment request from `vd-agent enroll` (§25). */
+export const EnrollRequest = z.strictObject({
+  token: z.string().min(20).max(128),
+  publicKey: z.base64().length(44),
+  hostname: z.string().max(253),
+  arch: z.string().max(32),
+  os: z.string().max(32),
+  agentVersion: z.string().max(64),
+  cpus: z.number().int().min(0).max(4096),
+  memoryBytes: z.number().int().min(0),
+});
+export type EnrollRequest = z.infer<typeof EnrollRequest>;
 
 /**
  * The JSON Schema the Go agent validates every desired-state frame against.

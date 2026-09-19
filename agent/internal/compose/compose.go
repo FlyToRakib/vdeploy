@@ -102,7 +102,7 @@ func Plan(p spec.DesiredProject) ([]Container, error) {
 	replicas := make([]Container, 0, rt.Replicas)
 	for i := range rt.Replicas {
 		replicas = append(replicas, Container{
-			Name:    fmt.Sprintf("vd-%s-v%d-%d", ProjectKey(p.ProjectID), p.ReleaseVersion, i),
+			Name:    fmt.Sprintf("vd-%s-v%d-r%d-%d", ProjectKey(p.ProjectID), p.ReleaseVersion, p.Revision, i),
 			Image:   p.Image,
 			Cmd:     rt.Command,
 			User:    rt.User,

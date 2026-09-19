@@ -218,6 +218,22 @@ func TestNewReleaseReplacesOldContainersAfterStartingNewOnes(t *testing.T) {
 	}
 }
 
+func TestNewRevisionRestartsWithoutANewRelease(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	p := testProject(idA, 1, 2)
+	reconcile(t, r, desired(1, p))
+	p.Revision = 1
+	report := reconcile(t, r, desired(2, p))
+	running := engine.running()
+	if len(running) != 2 || !strings.Contains(running[0], "-r1-") || !strings.Contains(running[1], "-r1-") {
+		t.Fatalf("running = %v", running)
+	}
+	if got := kinds(report.Events); !slices.Equal(got, []string{"created", "created", "removed", "removed"}) {
+		t.Fatalf("events = %v", got)
+	}
+}
+
 func TestStoppedProjectStaysStopped(t *testing.T) {
 	engine := newFake()
 	r := newReconciler(engine)

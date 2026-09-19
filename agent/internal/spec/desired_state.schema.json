@@ -1078,6 +1078,11 @@
           },
           "running": {
             "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -1086,7 +1091,8 @@
           "releaseVersion",
           "spec",
           "image",
-          "running"
+          "running",
+          "revision"
         ],
         "additionalProperties": false
       }

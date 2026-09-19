@@ -110,7 +110,8 @@
         }
       },
       "image": "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "running": true
+      "running": true,
+      "revision": 0
     }
   ]
 }
