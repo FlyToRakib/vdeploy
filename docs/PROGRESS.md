@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.16c — dashboard: project page
+**Task:** 2.16d — dashboard: config
 **Status:** in progress
-**Updated:** 2026-09-20 14:00 UTC
+**Updated:** 2026-09-20 16:00 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -36,17 +36,17 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.15 GitHub App (ADR 0010): an install link carrying a signed state; linking (`github.link`, admin, gated and audited) proved by GitHub OAuth — the person's own token must see the installation, so a guessed installation id links nothing — and one installation belongs to one org; `github.installations`, `github.repositories`, `github.unlink`; uninstall/suspend from GitHub followed. Signed webhooks (raw body, HMAC checked before parsing): a push deploys every project on that repository and branch with autoDeploy, honouring monorepo path filters, as `project.deploy_commit` of the pushed commit, through the gate as the person who linked the account (origin `webhook`, their current role), once per delivery. Private repositories build through short-lived installation tokens at the exact commit; public ones as before; the not-found message names who must approve the app. Key read from a file; half a configuration refuses to start. Verified against a stand-in GitHub with a generated key, and the local e2e still passes (28 checks); **the live check on github.com waits for the app's credentials (see Blocked)**
 - [x] 2.16a dashboard: servers — `server.list` (connection, reachability, app count); the Servers screen lists them problems-first, each with an icon-and-word status, address, provider and size, and is usable at phone width; "Add a server" names it, asks for the password again when the change needs it (a reusable step-up prompt that retries the action), shows the one-time connect command with a copy button and notices by itself when the server connects; the server page leads with "Can visitors reach it?" (the verdict, the provider's steps with commands set apart, Check again), then address (change it, or go back to detection), room for apps, and the agent; a pending server can make a fresh connect command; breadcrumbs show names, not ids. Also: the reachability verdict says "ports 80 and 443" and names a private address as such. Verified in the browser preview against the dev API (desktop and phone width)
 - [x] 2.16b dashboard: projects — `project.list` now says how each project is doing in one word (live, deploying, needs a look, down, stopped, not deployed yet — from what was asked, the latest deployment and what the agent sees) with its address and replicas; the Projects screen lists them down-first with teaching empty state. New project in three steps: where it runs; where its code is — a folder (zipped in the browser, leaving out node_modules, git history and .env files, which are named so their values go into settings), a .zip/.tar.gz (drop or choose), a GitHub repository (connected accounts' repositories, private ones marked, or any public one; "Connect GitHub" when the app is set up), or an image; then "we think this is a Node.js 22 app; it starts with npm run start" from the server's detection, with name and port, and the plan followed until it is live, waits for approval, or fails in plain words. A create plan now records the project it made. Also: a worker test no longer races its stand-in agent; and the agent sets PORT to the container port unless the app sets its own, so most frameworks listen where traffic is sent. Verified in the browser preview (desktop and phone) and the local e2e
+- [x] 2.16c dashboard: project page — header with status, address and actions (deploy latest for GitHub projects or redeploy, restart, stop/start), each run through the gate and followed to the end with a plain-language toast, waiting for approval when a change needs it; tabs that are real URLs. Overview: when something is wrong, the last failed deploy's reason and the diagnosis rules' causes with what to do (amber when the old version still serves), running copies, version, where the code comes from, port, and a timeline of what the agent did, in words. Deployments: every deploy with its version, outcome and reason, its build log on demand, and "go back to this version". Logs: live over server-sent events with search, pause and download, scrolling only its own box. Also: the gate reads stored specs through readSpec, so a spec written before a field existed gets its default instead of failing. Verified in the browser preview against seeded history (desktop and phone); the live stream through the dashboard is checked end to end in the 2.17 walkthrough
 
 ## Doing
 
-- [ ] 2.16c dashboard: project page — overview and actions, deployments with build logs, live logs, event timeline
+- [ ] 2.16d dashboard: config with Simple/Advanced (env, write-only secrets, domains, resources, storage, raw spec)
 
 ## Next (M2)
 
-- [ ] 2.16d dashboard: config with Simple/Advanced (env, write-only secrets, domains, resources, storage, raw spec)
 - [ ] 2.16e dashboard: approvals (plan, blast radius, type-the-name), notification channels, GitHub connection
 - [ ] 2.16f one-command bootstrap (§25): the connect command installs the agent binary (served by the control plane, checksummed), runs preflight, enrolls and sets up the systemd unit — idempotent, with --dry-run
-- [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright)
+- [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright, including live logs through the dashboard)
 
 ## Known gaps (tracked, not forgotten)
 

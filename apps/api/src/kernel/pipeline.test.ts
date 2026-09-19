@@ -560,3 +560,21 @@ describe('server list', () => {
     expect(list.every((s) => typeof s.projects === 'number')).toBe(true);
   });
 });
+
+describe('stored specs', () => {
+  it('reads a spec stored before a field existed, with its default', async () => {
+    const id = newId('project');
+    // Written before the `ai` section existed: the gate must not trip over it.
+    const older: Partial<typeof spec> = { ...spec };
+    delete older.ai;
+    await t.database.db.insert(projects).values({
+      id,
+      orgId,
+      name: 'older-spec',
+      spec: older as typeof spec,
+      specHash: hashOf(spec),
+    });
+    const res = await op(owner, 'project.get', { projectId: id });
+    expect(res.statusCode).toBe(200);
+  });
+});

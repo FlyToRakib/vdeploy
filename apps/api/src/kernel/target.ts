@@ -1,5 +1,11 @@
 import type { Target } from '@vdeploy/ai';
-import { SCOPE_FIELD, VDeployError, type Id, type OperationDefinition } from '@vdeploy/contracts';
+import {
+  readSpec,
+  SCOPE_FIELD,
+  VDeployError,
+  type Id,
+  type OperationDefinition,
+} from '@vdeploy/contracts';
 import type { PlanContext } from '@vdeploy/core';
 import { loadPlanWorld, projects, servers, type Database } from '@vdeploy/db';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -40,14 +46,16 @@ export async function resolveTarget(
       .from(projects)
       .where(and(eq(projects.id, id), isNull(projects.deletedAt)));
     if (!row) throw NOT_FOUND();
+    // Through readSpec, like every reader: a spec stored before a field existed gets its default.
+    const spec = readSpec(row.spec);
     return {
       kind: 'project',
       id: row.id,
       orgId: row.orgId as Id<'organization'>,
       serverId: row.serverId as Id<'server'> | null,
-      aiManaged: row.spec.ai.managed,
-      production: row.spec.metadata.labels.env === 'production',
-      projectAutoApply: row.spec.ai.autoApply,
+      aiManaged: spec.ai.managed,
+      production: spec.metadata.labels.env === 'production',
+      projectAutoApply: spec.ai.autoApply,
     };
   }
   if (op.scope === 'server') {
