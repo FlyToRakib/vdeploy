@@ -1,5 +1,5 @@
 import { VDeployError, type OperationName } from '@vdeploy/contracts';
-import { deployments, projects, releases, servers } from '@vdeploy/db';
+import { deployments, projects, releases, servers, urlSettingsFor } from '@vdeploy/db';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Handler } from './context.js';
 
@@ -97,6 +97,14 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       .where(eq(servers.id, id(args, 'serverId')));
     return row?.capacity ?? null;
   },
+  'urls.get': async ({ deps, actor }) => ({
+    settings: await urlSettingsFor(deps.db, actor.orgId),
+    projects: await deps.db
+      .select({ id: projects.id, name: projects.name, instantHost: projects.instantHost })
+      .from(projects)
+      .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)))
+      .orderBy(projects.name),
+  }),
   'project.logs': notYet,
   'project.metrics': notYet,
   'project.events': notYet,

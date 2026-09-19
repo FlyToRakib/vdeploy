@@ -139,6 +139,34 @@ func Check(p spec.DesiredProject, policy Policy) error {
 	return nil
 }
 
+// sharedHosts refuses any hostname two projects claim: traffic for one
+// project must never be routable to another.
+func sharedHosts(projects []spec.DesiredProject) []error {
+	owner := map[string]string{}
+	var refusals []error
+	for _, p := range projects {
+		hosts := append([]string{p.Hosts.Instant}, p.Hosts.Redirects...)
+		if p.Spec.Network != nil {
+			for _, d := range p.Spec.Network.Domains {
+				hosts = append(hosts, d.Host)
+			}
+		}
+		for _, host := range hosts {
+			other, taken := owner[host]
+			switch {
+			case host == "":
+			case !taken:
+				owner[host] = p.ProjectID
+			case other != p.ProjectID:
+				refusals = append(refusals, &Refusal{ProjectID: p.ProjectID, Reasons: []string{
+					"hostname " + host + " is already routed to project " + other,
+				}})
+			}
+		}
+	}
+	return refusals
+}
+
 // Admit is the agent's only intake for desired state: strict contract
 // validation, then every L6 rule on every project. All refusals are reported.
 func Admit(frame []byte, policy Policy) (*spec.DesiredState, error) {
@@ -152,6 +180,7 @@ func Admit(frame []byte, policy Policy) (*spec.DesiredState, error) {
 			refusals = append(refusals, err)
 		}
 	}
+	refusals = append(refusals, sharedHosts(state.Projects)...)
 	if len(refusals) > 0 {
 		return nil, errors.Join(refusals...)
 	}

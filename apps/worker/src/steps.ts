@@ -8,7 +8,14 @@ import {
   type PlanStep,
 } from '@vdeploy/contracts';
 import { createRelease, hashOf } from '@vdeploy/core';
-import { deployments, projects, releases, servers, type Database } from '@vdeploy/db';
+import {
+  deployments,
+  projects,
+  refreshInstantHosts,
+  releases,
+  servers,
+  type Database,
+} from '@vdeploy/db';
 import { and, desc, eq } from 'drizzle-orm';
 import { bumpGeneration, waitForConvergence, type Expectation } from './converge.js';
 import type { RegistryAccess } from './registry.js';
@@ -81,13 +88,16 @@ async function updateSpec(deps: StepDeps, state: ApplyState) {
   if (state.projectId === null) {
     const id = newId('project');
     const serverId = await chooseServer(deps, state, spec);
-    await deps.db.insert(projects).values({
-      id,
-      orgId: state.orgId,
-      serverId,
-      name: spec.metadata.name,
-      spec,
-      specHash: hashOf(spec),
+    await deps.db.transaction(async (tx) => {
+      await tx.insert(projects).values({
+        id,
+        orgId: state.orgId,
+        serverId,
+        name: spec.metadata.name,
+        spec,
+        specHash: hashOf(spec),
+      });
+      await refreshInstantHosts(tx, { orgId: state.orgId, projectId: id });
     });
     state.projectId = id;
     return;

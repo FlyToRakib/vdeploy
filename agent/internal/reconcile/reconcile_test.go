@@ -503,3 +503,29 @@ func TestRecreateStopsTheOldReleaseFirst(t *testing.T) {
 		t.Fatalf("calls = %v", engine.calls)
 	}
 }
+
+func TestInstantHostIsRoutedWithTLSAndOldHostsRedirect(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+	p := routedProject(1)
+	p.Hosts = spec.Hosts{Instant: "blog.apps.example.com", Redirects: []string{"blog.8-8-4-4.sslip.io", "blog.example.com"}}
+
+	reconcile(t, r, desired(1, p))
+	file := routing.files[compose.ProjectKey("prj_"+idA)]
+	for _, want := range []string{
+		"Host(`blog.apps.example.com`)",
+		"Host(`blog.example.com`)",
+		"Host(`blog.8-8-4-4.sslip.io`)",
+		"https://blog.apps.example.com${1}",
+	} {
+		if !strings.Contains(file, want) {
+			t.Fatalf("routing lacks %s:\n%s", want, file)
+		}
+	}
+	// A redirect never shadows a domain the project itself serves.
+	if strings.Contains(file, "moved-1") {
+		t.Fatalf("own domain turned into a redirect:\n%s", file)
+	}
+}

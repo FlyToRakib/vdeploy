@@ -130,6 +130,22 @@ func TestHostileFramesAreRefused(t *testing.T) {
 		}, "malformed"},
 		{"NUL in command", func(f map[string]any) { runtime(f)["command"] = []any{"sh", "-c\x00rm"} }, "NUL"},
 
+		// Hostnames: they are spliced into Traefik rules, and routing is a trust boundary.
+		{"rule injection in the instant host", func(f map[string]any) {
+			project(f)["hosts"].(map[string]any)["instant"] = "a.example.com`) || Host(`victim.example.com"
+		}, "contract"},
+		{"rule injection in a redirect", func(f map[string]any) {
+			project(f)["hosts"].(map[string]any)["redirects"] = []any{"x.io`) || PathPrefix(`/"}
+		}, "contract"},
+		{"another project's hostname", func(f map[string]any) {
+			var twin map[string]any
+			raw, _ := json.Marshal(project(f))
+			_ = json.Unmarshal(raw, &twin)
+			twin["projectId"] = "prj_01J9Z3Q8S7M2K4X6V1B5N0C9ZZ"
+			twin["hosts"] = map[string]any{"instant": "evil.8-8-4-4.sslip.io", "redirects": []any{"blog.8-8-4-4.sslip.io"}}
+			f["projects"] = append(f["projects"].([]any), twin)
+		}, "already routed"},
+
 		// Protocol.
 		{"future protocol", func(f map[string]any) { f["protocol"] = 2 }, "contract"},
 		{"future spec version", func(f map[string]any) { appSpec(f)["apiVersion"] = "vdeploy/v2" }, "contract"},

@@ -4,6 +4,7 @@ import type {
   BlastRadius,
   ObservedReport,
   Plan,
+  UrlSettings,
 } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
 import {
@@ -39,6 +40,8 @@ export const servers = pgTable('servers', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   /** Bumped on every change to what this server should run; the agent ignores older ones. */
   desiredGeneration: integer('desired_generation').notNull().default(0),
+  /** Where the internet reaches this server; backs its zero-domain URLs (§13.1). */
+  publicIpv4: text('public_ipv4'),
   createdAt: createdAt(),
 });
 
@@ -66,6 +69,10 @@ export const projects = pgTable(
     running: boolean('running').notNull().default(true),
     /** Bumped by `project.restart` to replace containers without a new release. */
     revision: integer('revision').notNull().default(0),
+    /** The project's instant URL host (§13.1); stable until the org's URL settings change. */
+    instantHost: text('instant_host'),
+    /** Earlier instant hosts, newest first; each redirects to the current one. */
+    previousHosts: jsonb('previous_hosts').$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -73,6 +80,9 @@ export const projects = pgTable(
   (t) => [
     uniqueIndex('projects_org_name_live')
       .on(t.orgId, t.name)
+      .where(sql`${t.deletedAt} is null`),
+    uniqueIndex('projects_instant_host_live')
+      .on(t.instantHost)
       .where(sql`${t.deletedAt} is null`),
   ],
 );
@@ -140,6 +150,15 @@ export const aiGrants = pgTable('ai_grants', {
     .primaryKey()
     .references(() => organization.id, { onDelete: 'cascade' }),
   grants: jsonb('grants').$type<AiGrants>().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** How an org's projects get instant URLs (§13.1); no row means the defaults. */
+export const urlSettings = pgTable('url_settings', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id, { onDelete: 'cascade' }),
+  settings: jsonb('settings').$type<UrlSettings>().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"slices"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
@@ -71,6 +72,32 @@ func (p *pass) backends(project spec.DesiredProject, containers []compose.Contai
 	return out
 }
 
+// routes are the hostnames a project answers on: its own domains and its
+// instant URL, plus earlier instant URLs that redirect to the current one.
+func routes(project spec.DesiredProject) ([]spec.Domain, []router.Redirect) {
+	hosts := project.Spec.Network.Domains
+	instant := project.Hosts.Instant
+	if instant == "" {
+		return hosts, nil
+	}
+	own := map[string]bool{}
+	for _, d := range hosts {
+		own[d.Host] = true
+	}
+	if !own[instant] {
+		d := spec.Domain{Host: instant, Paths: []string{"/"}}
+		d.TLS.Provider = router.CertResolver
+		hosts = append(slices.Clip(hosts), d)
+	}
+	var redirects []router.Redirect
+	for _, old := range project.Hosts.Redirects {
+		if old != instant && !own[old] {
+			redirects = append(redirects, router.Redirect{From: old, To: instant})
+		}
+	}
+	return hosts, redirects
+}
+
 // route points each running project's hostnames at the replicas that should
 // serve it, and withdraws routing for everything else.
 func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
@@ -94,7 +121,8 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 		}
 		key := compose.ProjectKey(project.ProjectID)
 		backends := p.backends(project, containers)
-		content, ok := router.File(key, network, network.Domains, backends)
+		hosts, redirects := routes(project)
+		content, ok := router.File(key, network, hosts, redirects, backends)
 		if !ok {
 			if len(containers) > 0 {
 				keep[key] = true // replicas still starting: leave the current routing as it is

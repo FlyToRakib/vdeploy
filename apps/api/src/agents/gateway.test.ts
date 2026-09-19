@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { Browser, startTestApp, type TestApp } from '../test-helpers.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
+import { publicAddress } from './gateway.js';
 
 let t: TestApp;
 let base: string;
@@ -321,5 +322,18 @@ describe('agent channel', () => {
     });
     const code = await new Promise<number>((resolve) => socket.on('close', resolve));
     expect(code).toBe(1008);
+  });
+});
+
+describe('the server public address', () => {
+  it('prefers a public interface address, then a public connection address', () => {
+    expect(publicAddress(['10.0.0.5', '8.8.4.4'], '1.1.1.1')).toBe('8.8.4.4');
+    expect(publicAddress(['10.0.0.5'], '::ffff:1.1.1.1')).toBe('1.1.1.1');
+    expect(publicAddress(['2001:4860::1'], '1.1.1.1')).toBe('1.1.1.1');
+  });
+
+  it('stays unknown behind NAT with a local control plane', () => {
+    expect(publicAddress(['172.17.0.2'], '127.0.0.1')).toBeNull();
+    expect(publicAddress([], undefined)).toBeNull();
   });
 });

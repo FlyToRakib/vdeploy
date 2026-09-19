@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -76,7 +77,29 @@ func facts(memoryBytes int64) identity.Facts {
 	return identity.Facts{
 		Hostname: hostname, Arch: runtime.GOARCH, OS: runtime.GOOS,
 		AgentVersion: version, CPUs: runtime.NumCPU(), MemoryBytes: memoryBytes,
+		Addresses: publicAddresses(),
 	}
+}
+
+// publicAddresses lists the internet-routable IPs on this machine's
+// interfaces; the control plane builds zero-domain URLs from them.
+func publicAddresses() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok || !ipNet.IP.IsGlobalUnicast() || ipNet.IP.IsPrivate() {
+			continue
+		}
+		out = append(out, ipNet.IP.String())
+		if len(out) == 16 {
+			break
+		}
+	}
+	return out
 }
 
 // doctor prints every preflight check and refuses to continue on a failure.

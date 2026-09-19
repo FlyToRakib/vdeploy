@@ -111,7 +111,8 @@
       },
       "image": "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "running": true,
-      "revision": 0
+      "revision": 0,
+      "hosts": { "instant": "blog.8-8-4-4.sslip.io", "redirects": [] }
     }
   ]
 }

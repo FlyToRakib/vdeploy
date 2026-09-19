@@ -38,6 +38,10 @@ export async function desiredStateFor(db: Database, serverId: string): Promise<D
         image: release.image,
         running: project.running,
         revision: project.revision,
+        hosts: {
+          instant: project.instantHost,
+          redirects: project.instantHost ? project.previousHosts : [],
+        },
       };
     }),
   });

@@ -5,3 +5,4 @@ export * from './queue.js';
 export * from './notify.js';
 export * from './desired.js';
 export * from './plan-context.js';
+export * from './instant.js';

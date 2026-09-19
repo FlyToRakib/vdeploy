@@ -3,3 +3,4 @@ export * from './diff.js';
 export * from './risk.js';
 export * from './plan.js';
 export * from './release.js';
+export * from './instant.js';

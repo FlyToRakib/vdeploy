@@ -117,6 +117,26 @@ describe('administrative operations', () => {
     expect(stored.some((row) => row.tokenHash === token)).toBe(false);
     expect(stored).toHaveLength(1);
   });
+
+  it('puts every project on the wildcard domain in one step', async () => {
+    const projectId = await seedProject(orgId, 'docs');
+    const invalid = await op(owner, 'urls.configure', { mode: 'wildcard' });
+    expect(invalid.statusCode).toBe(400);
+    const res = await op(owner, 'urls.configure', {
+      mode: 'wildcard',
+      baseDomain: 'apps.acme.dev',
+    });
+    expect(res.statusCode).toBe(200);
+    const read = await op(owner, 'urls.get', {});
+    const { settings, projects: hosts } = read.json<{
+      result: {
+        settings: { mode: string };
+        projects: { id: string; instantHost: string | null }[];
+      };
+    }>().result;
+    expect(settings.mode).toBe('wildcard');
+    expect(hosts.find((p) => p.id === projectId)?.instantHost).toBe('docs.apps.acme.dev');
+  });
 });
 
 describe('planned changes', () => {

@@ -10,6 +10,7 @@ import {
   Scaling,
   Schedule,
 } from '../spec/sections.js';
+import { UrlSettings } from '../urls.js';
 import { operation, query, Role, type OperationDefinition } from './define.js';
 
 const projectId = idSchema('project');
@@ -72,6 +73,7 @@ export const OPERATIONS = [
   ),
   query('server.resources', 'server', 'metrics', 'Show server CPU, memory and disk usage', obj(S)),
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
+  query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   operation('project.restart', 'safe', 'project', 'Restart the app containers', obj(P)),
   operation('project.redeploy', 'safe', 'project', 'Deploy the current release again', obj(P)),
   operation('project.rebuild', 'safe', 'project', 'Rebuild from source and deploy', obj(P)),
@@ -383,6 +385,13 @@ export const OPERATIONS = [
       registration: z.enum(['invite', 'open', 'closed']).optional(),
     }),
     { minRole: 'owner', stepUp: true },
+  ),
+  operation(
+    'urls.configure',
+    'human_only',
+    'org',
+    'Choose how projects get instant URLs; old addresses redirect to the new ones',
+    UrlSettings,
   ),
   operation(
     'audit.export',

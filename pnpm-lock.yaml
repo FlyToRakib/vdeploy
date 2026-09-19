@@ -240,6 +240,9 @@ importers:
       '@vdeploy/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@vdeploy/core':
+        specifier: workspace:*
+        version: link:../core
       bullmq:
         specifier: ^6.3.8
         version: 6.3.8(pg@8.23.0)

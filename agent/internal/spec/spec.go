@@ -41,6 +41,15 @@ type DesiredProject struct {
 	Running        bool        `json:"running"`
 	// Revision is bumped to replace every container without a new release.
 	Revision int `json:"revision"`
+	// Hosts the control plane assigned beyond the spec's own domains.
+	Hosts Hosts `json:"hosts"`
+}
+
+// Hosts are a project's instant URL (§13.1) and the earlier ones that
+// redirect to it.
+type Hosts struct {
+	Instant   string   `json:"instant"`
+	Redirects []string `json:"redirects"`
 }
 
 // Application is the subset of the Application spec the agent acts on.

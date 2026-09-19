@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { newId, VDeployError, type OperationName } from '@vdeploy/contracts';
+import { newId, UrlSettings, VDeployError, type OperationName } from '@vdeploy/contracts';
 import {
   apikey,
   auditLog,
@@ -7,12 +7,15 @@ import {
   invitation,
   member,
   organization,
+  projects,
+  refreshInstantHosts,
   serverEnrollments,
   servers,
   session,
+  urlSettings,
   verifyAuditChain,
 } from '@vdeploy/db';
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
 import type { Handler, HandlerContext } from './context.js';
 
 /** Enrollment tokens work once, within an hour (§25). */
@@ -110,6 +113,25 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
         .set({ registration: args.registration as 'invite' | 'open' | 'closed' });
     }
     return { updated: true };
+  },
+  'urls.configure': async ({ deps, actor, args }) => {
+    const settings = UrlSettings.parse(args);
+    return deps.db.transaction(async (tx) => {
+      await tx
+        .insert(urlSettings)
+        .values({ orgId: actor.orgId, settings, updatedAt: deps.now() })
+        .onConflictDoUpdate({
+          target: urlSettings.orgId,
+          set: { settings, updatedAt: deps.now() },
+        });
+      // Every project moves to its new URL; the old one redirects to it.
+      await refreshInstantHosts(tx, { orgId: actor.orgId });
+      const hosts = await tx
+        .select({ id: projects.id, name: projects.name, instantHost: projects.instantHost })
+        .from(projects)
+        .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)));
+      return { settings, projects: hosts };
+    });
   },
   'server.add': async (context) => {
     const serverId = newId('server');

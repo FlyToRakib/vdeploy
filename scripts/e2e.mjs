@@ -2,7 +2,8 @@
 // M1 exit test (docs/IMPLEMENTATION_PROMPT.md §8): inside an isolated
 // Docker-in-Docker testbed, run the whole stack — Postgres, API, worker, agent —
 // and drive the real API: set up, enroll a server, deploy from a spec, restart
-// the agent, kill a container, and check the audit log.
+// the agent, kill a container, roll out a new release blue/green under load,
+// serve an instant URL over HTTPS, and check the audit log.
 //
 //   node scripts/e2e.mjs --local   testbed = local container vdeploy-test-dind
 //   node scripts/e2e.mjs --vps     testbed = vdeploy-test-testbed on the test VPS
@@ -233,7 +234,11 @@ async function run() {
   const { result: server } = await op('server.add', { name: 'testbed' });
   pass('server added', server.serverId);
 
-  inTestbed('mkdir -p /etc/vdeploy && echo \'{"reconcileSeconds":5}\' > /etc/vdeploy/agent.json');
+  // ACME points at a closed local port: the testbed never asks a real CA for anything.
+  const agentConfig = { reconcileSeconds: 5, acmeServer: 'https://127.0.0.1:14000/dir' };
+  inTestbed(
+    `mkdir -p /etc/vdeploy && echo '${JSON.stringify(agentConfig)}' > /etc/vdeploy/agent.json`,
+  );
   const enrolled = inTestbed(
     `vd-agent enroll --url ${PUBLIC_URL} --token ${server.token} 2>&1 | tail -3`,
   );
@@ -295,6 +300,7 @@ async function run() {
 
   const [hello] = (await op('project.list', {})).result;
   await blueGreen(hello.id, helloSpec);
+  await instantUrl();
 
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
@@ -365,6 +371,41 @@ async function blueGreen(projectId, spec) {
     'blue/green switch, no request dropped',
     `${outcomes.length} requests, now nginx ${version}`,
   );
+}
+
+const INSTANT_HOST = 'hello.apps.vdeploy.test';
+
+/** One HTTPS request to Traefik with the given SNI and Host; returns the raw response. */
+function overTls(host) {
+  const request = `GET / HTTP/1.1\\r\\nHost: ${host}\\r\\nConnection: close\\r\\n\\r\\n`;
+  return inTestbed(
+    `printf '${request}' | timeout 5 openssl s_client -quiet -servername ${host} -connect 127.0.0.1:443 2>/dev/null || true`,
+  );
+}
+
+/**
+ * Instant URLs (§13.1, M2 2.3): one setting puts every project on the org's
+ * wildcard domain over HTTPS, with plain HTTP redirected — no DNS per project.
+ */
+async function instantUrl() {
+  const { result } = await op('urls.configure', {
+    mode: 'wildcard',
+    baseDomain: INSTANT_HOST.split('.').slice(1).join('.'),
+  });
+  const host = result.projects.find((p) => p.name === 'hello')?.instantHost;
+  if (host !== INSTANT_HOST) throw new Error(`instant host is ${host}`);
+  await until(
+    'instant URL served over https',
+    async () => /^server: nginx/im.test(overTls(INSTANT_HOST)),
+    30_000,
+  );
+  const redirect = inTestbed(
+    `wget -S -q -O /dev/null -T 2 --header 'Host: ${INSTANT_HOST}' http://127.0.0.1/ 2>&1 || true`,
+  );
+  if (!new RegExp(`location: https://${INSTANT_HOST}`, 'i').test(redirect)) {
+    throw new Error(`plain http is not redirected: ${redirect}`);
+  }
+  pass('instant URL on the wildcard domain: https, http redirected', `https://${INSTANT_HOST}`);
 }
 
 /**

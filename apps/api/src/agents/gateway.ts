@@ -1,11 +1,13 @@
 import { randomBytes, type KeyObject } from 'node:crypto';
 import { AgentFrame, EnrollRequest, VDeployError } from '@vdeploy/contracts';
+import { isPublicIpv4 } from '@vdeploy/core';
 import {
   appendAudit,
   DESIRED_STATE_CHANNEL,
   desiredStateFor,
   listen,
   observedState,
+  refreshInstantHosts,
   serverEnrollments,
   servers,
   type Database,
@@ -18,6 +20,16 @@ import { hashToken } from '../kernel/admin.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
+
+/**
+ * The server's public IPv4: one its agent sees on an interface, else the
+ * address its connection came from, if that is public. Behind a NAT with
+ * the control plane on the same machine, neither is — and it stays unknown.
+ */
+export function publicAddress(addresses: readonly string[], remote: string | undefined) {
+  const bare = remote?.replace(/^::ffff:/, '');
+  return addresses.find((a) => isPublicIpv4(a)) ?? (bare && isPublicIpv4(bare) ? bare : null);
+}
 const PING_INTERVAL_MS = 30_000;
 
 export interface GatewayDeps {
@@ -71,7 +83,7 @@ export class Gateway {
     );
   }
 
-  async handle(socket: WebSocket, serverId: string): Promise<void> {
+  async handle(socket: WebSocket, serverId: string, remote?: string): Promise<void> {
     const { db, key, now, log } = this.deps;
     const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
     if (!server?.agentPublicKey) {
@@ -102,7 +114,7 @@ export class Gateway {
           if (frame.type !== 'hello') throw new VDeployError('forbidden', 'Expected hello');
           hello = true;
           clearTimeout(helloTimer);
-          await this.online(serverId, frame);
+          await this.online(serverId, server.orgId, frame, remote);
           this.connections.get(serverId)?.socket.close(1000, 'replaced by a newer connection');
           this.connections.set(serverId, { socket, session });
           await this.push(serverId);
@@ -128,17 +140,34 @@ export class Gateway {
     });
   }
 
-  private async online(serverId: string, hello: Extract<AgentFrame, { type: 'hello' }>) {
-    await this.deps.db
-      .update(servers)
-      .set({
-        status: 'online',
-        lastSeenAt: this.deps.now(),
-        agentVersion: hello.agentVersion,
-        arch: hello.arch,
-        capacity: { cpus: hello.cpus, memoryBytes: hello.memoryBytes, diskBytes: 0 },
-      })
-      .where(eq(servers.id, serverId));
+  private async online(
+    serverId: string,
+    orgId: string,
+    hello: Extract<AgentFrame, { type: 'hello' }>,
+    remote: string | undefined,
+  ) {
+    const address = publicAddress(hello.addresses ?? [], remote);
+    await this.deps.db.transaction(async (tx) => {
+      const [before] = await tx
+        .select({ publicIpv4: servers.publicIpv4 })
+        .from(servers)
+        .where(eq(servers.id, serverId));
+      await tx
+        .update(servers)
+        .set({
+          status: 'online',
+          lastSeenAt: this.deps.now(),
+          agentVersion: hello.agentVersion,
+          arch: hello.arch,
+          capacity: { cpus: hello.cpus, memoryBytes: hello.memoryBytes, diskBytes: 0 },
+          ...(address ? { publicIpv4: address } : {}),
+        })
+        .where(eq(servers.id, serverId));
+      // A new address moves this server's zero-domain URLs (§13.1).
+      if (address && address !== before?.publicIpv4) {
+        await refreshInstantHosts(tx, { orgId, serverId });
+      }
+    });
   }
 
   private async receive(serverId: string, orgId: string, frame: AgentFrame) {
@@ -235,7 +264,7 @@ export const agentRoutes =
         socket.close(1008, 'missing server id');
         return;
       }
-      void gateway.handle(socket, header);
+      void gateway.handle(socket, header, req.ip);
     });
     return Promise.resolve();
   };

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { idSchema } from './ids.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
+import { Hostname } from './spec/sections.js';
 
 /** Bumped on any breaking change to what the agent receives (§25 version negotiation). */
 export const AGENT_PROTOCOL = 1;
@@ -20,6 +21,14 @@ export const DesiredProject = z.strictObject({
    * (`project.restart`): the agent starts the new ones, then stops the old.
    */
   revision: z.number().int().min(0),
+  /**
+   * Hostnames the control plane assigned, beyond the spec's own domains
+   * (§13.1): the instant URL, and earlier ones that redirect to it.
+   */
+  hosts: z.strictObject({
+    instant: Hostname.nullable(),
+    redirects: z.array(Hostname).max(8),
+  }),
 });
 export type DesiredProject = z.infer<typeof DesiredProject>;
 
@@ -95,6 +104,8 @@ export const AgentFrame = z.discriminatedUnion('type', [
     os: z.string().max(32),
     cpus: z.number().int().min(0).max(4096),
     memoryBytes: z.number().int().min(0),
+    /** Globally routable addresses on the server's interfaces. */
+    addresses: z.array(z.string().max(45)).max(16).optional(),
   }),
   z.strictObject({
     ...FrameHeader,
@@ -117,6 +128,7 @@ export const EnrollRequest = z.strictObject({
   agentVersion: z.string().max(64),
   cpus: z.number().int().min(0).max(4096),
   memoryBytes: z.number().int().min(0),
+  addresses: z.array(z.string().max(45)).max(16).optional(),
 });
 export type EnrollRequest = z.infer<typeof EnrollRequest>;
 

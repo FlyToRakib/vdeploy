@@ -36,7 +36,7 @@ func TestFileRoutesEveryHostToEveryReplica(t *testing.T) {
 	raw, ok := File("abc", network(), []spec.Domain{
 		domain("blog.example.com", "letsencrypt", "/"),
 		domain("blog.203-0-113-42.sslip.io", "none", "/api", "/admin"),
-	}, []Backend{{"vd-abc-v1-r0-0", 3000}, {"vd-abc-v1-r0-1", 3000}})
+	}, nil, []Backend{{"vd-abc-v1-r0-0", 3000}, {"vd-abc-v1-r0-1", 3000}})
 	if !ok {
 		t.Fatal("no routing produced")
 	}
@@ -48,7 +48,7 @@ func TestFileRoutesEveryHostToEveryReplica(t *testing.T) {
 		t.Fatalf("secure router = %v", secure)
 	}
 	redirect := routers["abc-0-http"].(map[string]any)
-	if redirect["middlewares"].([]any)[0] != "vd-to-https" {
+	if redirect["middlewares"].([]any)[0] != "abc-to-https" {
 		t.Fatalf("http router must redirect to https: %v", redirect)
 	}
 	plain := routers["abc-1"].(map[string]any)
@@ -66,6 +66,30 @@ func TestFileRoutesEveryHostToEveryReplica(t *testing.T) {
 	}
 }
 
+func TestOldHostsRedirectToTheNewOne(t *testing.T) {
+	raw, ok := File("abc", network(), []spec.Domain{domain("blog.apps.example.com", "letsencrypt", "/")},
+		[]Redirect{{From: "blog.8-8-4-4.sslip.io", To: "blog.apps.example.com"}},
+		[]Backend{{"vd-abc-v1-r0-0", 3000}})
+	if !ok {
+		t.Fatal("no routing produced")
+	}
+	http := decode(t, raw)
+	routers := http["routers"].(map[string]any)
+	for _, name := range []string{"abc-moved-0", "abc-moved-0-http"} {
+		r, ok := routers[name].(map[string]any)
+		if !ok || r["rule"] != "Host(`blog.8-8-4-4.sslip.io`)" || r["middlewares"].([]any)[0] != "abc-moved-0" {
+			t.Fatalf("%s = %v", name, routers[name])
+		}
+	}
+	if routers["abc-moved-0"].(map[string]any)["tls"] == nil {
+		t.Fatal("the old https address must keep a certificate to redirect from")
+	}
+	moved := http["middlewares"].(map[string]any)["abc-moved-0"].(map[string]any)["redirectRegex"].(map[string]any)
+	if moved["replacement"] != "https://blog.apps.example.com${1}" || moved["permanent"] != true {
+		t.Fatalf("redirect = %v", moved)
+	}
+}
+
 func TestNoFileWithoutSomethingToRoute(t *testing.T) {
 	hosts := []spec.Domain{domain("a.example.com", "none", "/")}
 	backends := []Backend{{"c", 80}}
@@ -78,7 +102,7 @@ func TestNoFileWithoutSomethingToRoute(t *testing.T) {
 		"no hosts":    {network(), nil, backends},
 		"no replicas": {network(), hosts, nil},
 	} {
-		if _, ok := File("k", args.n, args.h, args.b); ok {
+		if _, ok := File("k", args.n, args.h, nil, args.b); ok {
 			t.Errorf("%s: produced a routing file", name)
 		}
 	}

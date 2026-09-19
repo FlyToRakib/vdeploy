@@ -22,6 +22,11 @@ const CertResolver = "letsencrypt"
 
 type object = map[string]any
 
+// Redirect sends an old hostname, permanently, to the same path on a new one.
+type Redirect struct {
+	From, To string
+}
+
 // Backend is one running replica Traefik may send traffic to.
 type Backend struct {
 	Container string
@@ -91,11 +96,12 @@ func service(n spec.Network, backends []Backend) object {
 
 // File renders one project's routing, or reports that it has none: no
 // network, no hostnames, or no replica ready to take traffic.
-func File(key string, network *spec.Network, hosts []spec.Domain, backends []Backend) ([]byte, bool) {
+func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Redirect, backends []Backend) ([]byte, bool) {
 	if network == nil || len(hosts) == 0 || len(backends) == 0 {
 		return nil, false
 	}
 	middlewareDefs, chain := middlewares(key, *network)
+	toHTTPS := key + "-to-https"
 	routers := object{}
 	for i, d := range hosts {
 		name := key + "-" + strconv.Itoa(i)
@@ -106,13 +112,27 @@ func File(key string, network *spec.Network, hosts []spec.Domain, backends []Bac
 			}
 			routers[name+"-http"] = object{
 				"rule": rule(d), "service": key, "entryPoints": []string{"web"},
-				"middlewares": []string{"vd-to-https"},
+				"middlewares": []string{toHTTPS},
 			}
 			continue
 		}
 		routers[name] = object{"rule": rule(d), "service": key, "entryPoints": []string{"web"}, "middlewares": chain}
 	}
-	middlewareDefs["vd-to-https"] = object{"redirectScheme": object{"scheme": "https", "permanent": true}}
+	middlewareDefs[toHTTPS] = object{"redirectScheme": object{"scheme": "https", "permanent": true}}
+	for i, r := range redirects {
+		name := key + "-moved-" + strconv.Itoa(i)
+		middlewareDefs[name] = object{"redirectRegex": object{
+			"regex": "^https?://[^/]+(.*)$", "replacement": "https://" + r.To + "${1}", "permanent": true,
+		}}
+		old := "Host(" + quote(r.From) + ")"
+		routers[name] = object{
+			"rule": old, "service": key, "entryPoints": []string{"websecure"},
+			"middlewares": []string{name}, "tls": object{"certResolver": CertResolver},
+		}
+		routers[name+"-http"] = object{
+			"rule": old, "service": key, "entryPoints": []string{"web"}, "middlewares": []string{name},
+		}
+	}
 	config := object{"http": object{
 		"routers":     routers,
 		"services":    object{key: service(*network, backends)},

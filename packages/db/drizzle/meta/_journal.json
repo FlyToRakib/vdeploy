@@ -36,6 +36,13 @@
       "when": 1789825925898,
       "tag": "0004_desired_observed",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789831169459,
+      "tag": "0005_instant_urls",
+      "breakpoints": true
     }
   ]
 }
