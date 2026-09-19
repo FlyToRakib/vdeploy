@@ -14,6 +14,9 @@ linters:
         - fmt.Errorf(
         - errors.New(
         - errors.Join(
+      # Errors from our own packages already carry context.
+      ignore-package-globs:
+        - github.com/FlyToRakib/vdeploy/agent/*
 formatters:
   enable:
     - gofmt

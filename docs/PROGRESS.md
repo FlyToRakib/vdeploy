@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.19 — agent — Docker composition + reconciliation loop
+**Task:** 1.20 — agent — enrollment, Ed25519-signed frames, wss transport
 **Status:** in progress
-**Updated:** 2026-09-19 13:20 UTC
+**Updated:** 2026-09-19 13:28 UTC
 
 ## Done
 
@@ -25,14 +25,14 @@
 - [x] 1.16 auth — Better Auth: argon2id, HIBP, server-side sessions (idle 7d + absolute 30d), TOTP + recovery codes, passkeys, scoped API keys, invite-only registration + first-run setup, per-email progressive lockout, enumeration-safe, new-device alert + not-me link, step-up (password), session list/revoke, CSRF origin check, auth audit; public auth surface is an allowlist
 - [x] 1.17 apps/web — Next 16 shell: sidebar (collapsible, org, theme, account), deep-linked sections + breadcrumbs, docked AI panel (honest AI-off state), ⌘K palette, semantic tokens contrast-tested in both themes, no-flash theming under nonce CSP, error/loading boundaries, phone layout; sign-in (password/2FA/passkey), first-run setup (shared Zod schema), forgot/reset, security settings (sessions, passkeys, TOTP + recovery codes). Verified live in the browser.
 - [x] 1.18 agent — Go module; frames validated against JSON Schema generated from contracts (drift-checked); L6 guard (digest-pinned + allowlisted registry, memory/CPU bounds, mount paths, stateful replicas, secrets refused until delivery exists); compose plans hardened replicas (own labels, project network, pids/log limits, no privilege fields at all); adversarial suite: 38 hostile frames all refused; golangci-lint clean
+- [x] 1.19 agent — stdlib Docker Engine client (ADR 0003; request types cannot express privileges/binds), reconciler (create/heal/stop/replace, new release starts before old stops, deleted projects keep volumes, only labelled containers touched, per-project failure isolation), loop (atomic persisted state, stale generations ignored, tampered disk state refused, pass never cut by shutdown), local config/policy, vd-agent binary. Verified in local dind: deploy, hardening, self-heal, restart convergence, bystander untouched
 
 ## Doing
 
-- [ ] 1.19 agent — Docker composition + reconciliation loop
+- [ ] 1.20 agent — enrollment, Ed25519-signed frames, wss transport
 
 ## Next (M1)
 
-- [ ] 1.20 agent — enrollment, Ed25519-signed frames, wss transport
 - [ ] 1.21 agent — preflight doctor
 - [ ] 1.22 control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
 - [ ] 1.23 control plane — agent gateway (wss) + worker applying plans + observed state
