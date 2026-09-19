@@ -11,6 +11,7 @@ import {
   storageStatus,
   domainChecksFor,
   listSecrets,
+  projectSummaries,
   projects,
   releases,
   serverBudget,
@@ -45,18 +46,7 @@ const notYet: Handler = () =>
 export const QUERIES: Partial<Record<OperationName, Handler>> = {
   ...NOTIFICATION_QUERIES,
   ...GITHUB_QUERIES,
-  'project.list': async ({ deps, actor }) =>
-    deps.db
-      .select({
-        id: projects.id,
-        name: projects.name,
-        serverId: projects.serverId,
-        currentReleaseId: projects.currentReleaseId,
-        updatedAt: projects.updatedAt,
-      })
-      .from(projects)
-      .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)))
-      .orderBy(projects.name),
+  'project.list': async ({ deps, actor }) => projectSummaries(deps.db, actor.orgId),
   'project.get': async ({ deps, args }) => {
     const [row] = await deps.db
       .select()

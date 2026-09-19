@@ -22,9 +22,12 @@ async function finish(
   details: Record<string, unknown>,
   error?: { code: string; message: string },
 ) {
+  // A create plan learns its project once applied, so whoever watches it can follow.
+  const created =
+    !row.projectId && typeof details.projectId === 'string' ? { projectId: details.projectId } : {};
   await deps.db
     .update(plans)
-    .set({ status, updatedAt: deps.now(), ...(error ? { error } : {}) })
+    .set({ status, updatedAt: deps.now(), ...(error ? { error } : {}), ...created })
     .where(eq(plans.id, row.id));
   await appendAudit(deps.db, {
     chain: row.orgId,

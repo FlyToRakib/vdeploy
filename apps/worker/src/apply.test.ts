@@ -239,6 +239,12 @@ describe('applyPlan', () => {
     const [release] = await t.db.select().from(releases).where(eq(releases.projectId, created.id));
     expect(release).toMatchObject({ version: 1, image: `nginx@${digest('a')}` });
     expect(created.currentReleaseId).toBe(release!.id);
+    // The create plan now names the project it made, for whoever follows it.
+    const [createPlan] = await t.db
+      .select()
+      .from(plans)
+      .where(and(eq(plans.operation, 'project.create'), eq(plans.projectId, created.id)));
+    expect(createPlan?.status).toBe('applied');
     const [deployment] = await t.db
       .select()
       .from(deployments)
@@ -649,6 +655,9 @@ describe('building from uploaded source', () => {
 
   it('reads unsaved files from the agent report when planning, minus temporary ones', async () => {
     const created = await createProject();
+    // Keep the report as written: stop the stand-in agent, and let a pass already running finish.
+    clearInterval(agentTimer);
+    await new Promise((resolve) => setTimeout(resolve, 300));
     await t.db
       .update(observedState)
       .set({
@@ -668,7 +677,6 @@ describe('building from uploaded source', () => {
         },
       })
       .where(eq(observedState.serverId, serverId));
-    clearInterval(agentTimer); // keep the report as written
     try {
       await t.db
         .update(projects)

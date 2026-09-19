@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,5 +81,24 @@ func TestPlanRefusesWithoutMemoryLimit(t *testing.T) {
 	p.Spec.Runtime.Resources.Memory.Limit = ""
 	if _, err := Plan(p); err == nil {
 		t.Fatal("planned a container with no memory limit")
+	}
+}
+
+func TestPlanTellsTheAppItsPortUnlessItChoseOne(t *testing.T) {
+	p := project()
+	replicas, err := Plan(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(replicas[0].Env, "PORT=80") {
+		t.Fatalf("env = %v", replicas[0].Env)
+	}
+	p.Spec.Runtime.Env = append(p.Spec.Runtime.Env, spec.EnvVar{Key: "PORT", Value: "8080"})
+	replicas, err = Plan(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(replicas[0].Env, "PORT=80") || !slices.Contains(replicas[0].Env, "PORT=8080") {
+		t.Fatalf("env = %v", replicas[0].Env)
 	}
 }

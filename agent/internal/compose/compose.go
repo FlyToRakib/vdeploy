@@ -102,6 +102,10 @@ func Plan(p spec.DesiredProject) ([]Container, error) {
 	if p.Spec.Network != nil {
 		port = p.Spec.Network.ContainerPort
 	}
+	// Most frameworks listen where PORT says; an app that sets its own keeps it.
+	if port > 0 && !slices.ContainsFunc(rt.Env, func(e spec.EnvVar) bool { return e.Key == "PORT" }) {
+		env = append(env, fmt.Sprintf("PORT=%d", port))
+	}
 	replicas := make([]Container, 0, rt.Replicas)
 	for i := range rt.Replicas {
 		replicas = append(replicas, Container{

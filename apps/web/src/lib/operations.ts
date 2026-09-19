@@ -48,3 +48,40 @@ export async function query<T>(name: string, input: unknown = {}, signal?: Abort
   if (outcome.status !== 'done') throw new OperationError('Unexpected answer', 'internal');
   return outcome.result;
 }
+
+export interface PlanView {
+  id: string;
+  operation: string;
+  projectId: string | null;
+  status:
+    'pending_approval' | 'approved' | 'applying' | 'applied' | 'failed' | 'rejected' | 'stale';
+  error: { code: string; message: string } | null;
+}
+
+const FINAL = new Set(['applied', 'failed', 'rejected', 'stale', 'pending_approval']);
+
+/**
+ * Follows a plan until it settles (or needs a person), reporting each change.
+ * Returns the last view; gives up after `timeoutMs` with the plan still running.
+ */
+export async function followPlan(
+  planId: string,
+  onChange: (plan: PlanView) => void,
+  { timeoutMs = 15 * 60_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<PlanView | null> {
+  const until = Date.now() + timeoutMs;
+  let last: PlanView | null = null;
+  while (Date.now() < until && !signal?.aborted) {
+    const res = await fetch(`/api/v1/plans/${encodeURIComponent(planId)}`, {
+      ...(signal ? { signal } : {}),
+    });
+    if (res.ok) {
+      const plan = (await res.json()) as PlanView;
+      if (plan.status !== last?.status) onChange(plan);
+      last = plan;
+      if (FINAL.has(plan.status)) return plan;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return last;
+}
