@@ -1,8 +1,10 @@
+import { gzipSync } from 'node:zlib';
 import { ApplicationSpec, newId } from '@vdeploy/contracts';
 import { hashOf } from '@vdeploy/core';
 import {
   approvals,
   auditLog,
+  claimBuilds,
   idempotencyKeys,
   organization,
   plans,
@@ -271,6 +273,55 @@ describe('planned changes', () => {
     expect(second.json()).toEqual(first.json());
     const rows = await t.database.db.select().from(plans).where(eq(plans.projectId, projectId));
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe('source uploads and builds', () => {
+  it('stores an upload through the gate, previews it, and serves it once to the building agent', async () => {
+    const archive = gzipSync(Buffer.from('fake tar'));
+    const notGzip = await owner.request('POST', '/api/v1/uploads', Buffer.from('plain'), {
+      'content-type': 'application/octet-stream',
+    });
+    expect(notGzip.statusCode).toBe(400);
+
+    const uploaded = await owner.request('POST', '/api/v1/uploads', archive, {
+      'content-type': 'application/gzip',
+    });
+    expect(uploaded.statusCode).toBe(201);
+    const { uploadId, size } = uploaded.json<{ uploadId: string; size: number }>();
+    expect(size).toBe(archive.length);
+    const [audited] = await t.database.db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.chain, orgId), eq(auditLog.action, 'source.upload')));
+    expect(audited?.outcome).toBe('succeeded');
+
+    const serverId = newId('server');
+    await t.database.db.insert(servers).values({ id: serverId, orgId, name: 'builder' });
+    const detect = await op(owner, 'source.detect', { serverId, uploadId });
+    const { buildId } = detect.json<{ result: { buildId: string } }>().result;
+    const queued = await op(owner, 'build.get', { buildId });
+    expect(queued.json<{ result: { status: string; kind: string } }>().result).toMatchObject({
+      status: 'queued',
+      kind: 'detect',
+    });
+
+    // The gateway claims it with a one-time token; only that token fetches the source.
+    const [claimed] = await claimBuilds(t.database.db, serverId, new Date());
+    const url = `/api/v1/agent/sources/${buildId}`;
+    const wrong = await t.app.inject({
+      method: 'GET',
+      url,
+      headers: { authorization: 'Bearer nope' },
+    });
+    expect(wrong.statusCode).toBe(404);
+    const right = await t.app.inject({
+      method: 'GET',
+      url,
+      headers: { authorization: `Bearer ${claimed!.token}` },
+    });
+    expect(right.statusCode).toBe(200);
+    expect(right.rawPayload.equals(archive)).toBe(true);
   });
 });
 

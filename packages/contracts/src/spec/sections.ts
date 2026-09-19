@@ -51,7 +51,8 @@ export const Source = z.discriminatedUnion('type', [
 ]);
 
 export const Build = z.strictObject({
-  strategy: z.enum(['dockerfile', 'nixpacks', 'compose', 'image', 'static']),
+  /** `railpack` detects how to build; `nixpacks` is accepted and built by Railpack (ADR 0008). */
+  strategy: z.enum(['dockerfile', 'railpack', 'nixpacks', 'compose', 'image', 'static']),
   dockerfile: z.string().max(512).optional(),
   context: z.string().max(512).default('.'),
   target: z.string().max(128).optional(),

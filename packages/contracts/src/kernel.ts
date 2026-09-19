@@ -7,10 +7,17 @@ import { ApplicationSpec } from './spec/application.js';
 const Sha256 = z.string().regex(/^[0-9a-f]{64}$/, 'must be a sha256 hex digest');
 
 /** An image reference pinned by digest. A release never points at a mutable tag. */
+/**
+ * An image a release runs: a registry image pinned by digest, or the local
+ * ID of an image built on the project's server (ADR 0008).
+ */
 export const PinnedImage = z
   .string()
   .max(512)
-  .regex(/^[^\s@]+@sha256:[0-9a-f]{64}$/, 'must be pinned by digest (name@sha256:…)');
+  .regex(
+    /^(?:[^\s@]+@sha256:[0-9a-f]{64}|sha256:[0-9a-f]{64})$/,
+    'must be pinned by digest (name@sha256:…)',
+  );
 
 /**
  * Immutable snapshot of everything that defines what runs (§5). Deploy creates

@@ -28,6 +28,7 @@ export const ID_PREFIXES = {
   invitation: 'inv',
   enrollment: 'enr',
   upload: 'upl',
+  build: 'bld',
   member: 'mem',
   account: 'acc',
   verification: 'vrf',

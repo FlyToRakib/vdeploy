@@ -185,6 +185,7 @@
                     "type": "string",
                     "enum": [
                       "dockerfile",
+                      "railpack",
                       "nixpacks",
                       "compose",
                       "image",
@@ -1074,7 +1075,7 @@
           "image": {
             "type": "string",
             "maxLength": 512,
-            "pattern": "^[^\\s@]+@sha256:[0-9a-f]{64}$"
+            "pattern": "^(?:[^\\s@]+@sha256:[0-9a-f]{64}|sha256:[0-9a-f]{64})$"
           },
           "running": {
             "type": "boolean"

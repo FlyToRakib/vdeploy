@@ -9,24 +9,31 @@ import {
 } from '@vdeploy/contracts';
 import { createRelease, generateSecret, hashOf, specAfter } from '@vdeploy/core';
 import {
+  abandonBuild,
   currentSecretVersions,
   deployments,
+  getBuild,
   projects,
+  queueBuild,
   readSecret,
   refreshInstantHosts,
-  rotateSecret,
   releases,
+  rotateSecret,
+  secrets,
   servers,
+  uploads,
   type ActorRecord,
   type Database,
 } from '@vdeploy/db';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { bumpGeneration, waitForConvergence, type Expectation } from './converge.js';
 import type { RegistryAccess } from './registry.js';
 import { pinImage } from './registry.js';
 
 export interface StepDeps {
   db: Database;
+  /** How long a build may take before it is given up (default one hour). */
+  buildTimeoutMs?: number;
   registry: RegistryAccess;
   /** Opens and writes secrets: rotation makes a new version. */
   secretsKey: Buffer;
@@ -205,15 +212,105 @@ async function rotate(deps: StepDeps, state: ApplyState, secretId: string) {
   state.notes.push(`${next.name} is now at version ${next.version}.`);
 }
 
-async function newRelease(deps: StepDeps, state: ApplyState) {
-  const row = await project(deps, state);
-  if (row.spec.source.type !== 'image') {
+/** How the agent builds each spec strategy (ADR 0008); the rest are not built yet. */
+const AGENT_STRATEGY = {
+  dockerfile: 'dockerfile',
+  railpack: 'railpack',
+  nixpacks: 'railpack',
+} as const;
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+/**
+ * Builds an uploaded source on the project's own server and waits for the
+ * image (ADR 0008). The build's secrets are pinned by name, like runtime ones.
+ */
+async function buildImage(
+  deps: StepDeps,
+  state: ApplyState,
+  row: Awaited<ReturnType<typeof project>>,
+  uploadId: string,
+): Promise<string> {
+  const { spec } = row;
+  const strategy =
+    spec.build.strategy in AGENT_STRATEGY
+      ? AGENT_STRATEGY[spec.build.strategy as keyof typeof AGENT_STRATEGY]
+      : null;
+  if (!strategy) {
     throw new VDeployError(
       'unavailable',
-      'Building from source is not available yet; use a prebuilt image',
+      `Building with ${spec.build.strategy} is not available yet; use a Dockerfile or auto-detect`,
     );
   }
-  const image = await pinImage(row.spec.source.image, deps.registry);
+  const [upload] = await deps.db
+    .select({ id: uploads.id, received: isNotNull(uploads.data) })
+    .from(uploads)
+    .where(and(eq(uploads.id, uploadId), eq(uploads.orgId, state.orgId)));
+  if (!upload?.received) throw new VDeployError('not_found', 'The uploaded source is not there');
+  const named = await deps.db
+    .select({ id: secrets.id, name: secrets.name, version: secrets.currentVersion })
+    .from(secrets)
+    .where(eq(secrets.projectId, row.id));
+  const buildSecrets = spec.build.secrets.map((name) => {
+    const found = named.find((s) => s.name === name);
+    if (!found) {
+      throw new VDeployError(
+        'invalid_input',
+        `The build needs a secret called ${name}; add it first`,
+      );
+    }
+    return { name, secretId: found.id, version: found.version };
+  });
+  const buildId = await deps.db.transaction((tx) =>
+    queueBuild(tx, {
+      orgId: state.orgId,
+      projectId: row.id,
+      serverId: row.serverId,
+      uploadId,
+      kind: 'build',
+      strategy,
+      options: {
+        ...(spec.build.dockerfile ? { dockerfile: spec.build.dockerfile } : {}),
+        context: spec.build.context,
+        ...(spec.build.target ? { target: spec.build.target } : {}),
+        args: spec.build.args,
+      },
+      secrets: buildSecrets,
+    }),
+  );
+  state.notes.push(`Built as ${buildId}.`);
+  const deadline = Date.now() + (deps.buildTimeoutMs ?? 60 * 60_000);
+  for (;;) {
+    const build = await getBuild(deps.db, state.orgId, buildId);
+    if (build?.status === 'succeeded' && build.image) return build.image;
+    if (build?.status === 'failed') {
+      throw new VDeployError('unavailable', `The build failed: ${build.error ?? 'see its log'}`);
+    }
+    if (Date.now() > deadline) {
+      await abandonBuild(deps.db, buildId, deps.now());
+      throw new VDeployError('unavailable', 'The build did not finish in time; try again');
+    }
+    await sleep(deps.pollMs);
+  }
+}
+
+async function newRelease(deps: StepDeps, state: ApplyState) {
+  const row = await project(deps, state);
+  const source = row.spec.source;
+  let image: string;
+  if (source.type === 'image') {
+    image = await pinImage(source.image, deps.registry);
+  } else if (source.type === 'archive') {
+    image = await buildImage(deps, state, row, source.uploadId);
+  } else {
+    throw new VDeployError(
+      'unavailable',
+      `Deploying from ${source.type} is not available yet; upload the source or use an image`,
+    );
+  }
   const [latest] = await deps.db
     .select({ version: releases.version })
     .from(releases)

@@ -1,7 +1,10 @@
 import { readSpec, VDeployError, type OperationName } from '@vdeploy/contracts';
 import { describeCapacity, footprint } from '@vdeploy/core';
 import {
+  buildView,
   deployments,
+  getBuild,
+  listBuilds,
   domainChecksFor,
   listSecrets,
   projects,
@@ -144,6 +147,12 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
   }),
   'domain.status': async ({ deps, args }) => domainChecksFor(deps.db, [id(args, 'projectId')]),
   'secret.list': async ({ deps, args }) => listSecrets(deps.db, id(args, 'projectId')),
+  'build.list': async ({ deps, args }) => listBuilds(deps.db, id(args, 'projectId')),
+  'build.get': async ({ deps, actor, args }) => {
+    const row = await getBuild(deps.db, actor.orgId, id(args, 'buildId'));
+    if (!row) throw new VDeployError('not_found', 'Build not found');
+    return buildView(row);
+  },
   'project.logs': notYet,
   'project.metrics': notYet,
   'project.events': notYet,

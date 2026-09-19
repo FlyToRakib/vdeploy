@@ -150,6 +150,9 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'server.set_address': { ipv4: '8.8.4.4' },
   'secret.generate': { name: 'session_key' },
   'secret.set': { name: 'stripe_key', value: 'sk_test_x' },
+  'source.upload': { sha256: 'a'.repeat(64), size: 1024 },
+  'source.detect': { serverId: newId('server'), uploadId: newId('upload') },
+  'build.get': { buildId: newId('build') },
 };
 
 /** A valid input for any operation, naming the given target. */

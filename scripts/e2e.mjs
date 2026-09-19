@@ -15,7 +15,9 @@
 
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -325,6 +327,7 @@ async function run() {
   await blueGreen(hello.id, helloSpec);
   await instantUrl();
   await secrets(hello.id);
+  await buildFromSource(server.serverId);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
@@ -424,6 +427,104 @@ async function secrets(projectId) {
   pass('secret delivered sealed: in the container, never in frames or on disk', name);
 }
 
+/** Sends a .tar.gz as the body of a request, with the session like `call`. */
+async function uploadArchive(archive) {
+  const res = await fetch(`${API}/api/v1/uploads`, {
+    method: 'POST',
+    headers: {
+      origin: PUBLIC_URL,
+      'user-agent': 'vdeploy-e2e',
+      'content-type': 'application/gzip',
+      cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join('; '),
+    },
+    body: archive,
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`upload → ${res.status} ${text}`);
+  return JSON.parse(text);
+}
+
+/** A tiny Node app with no Dockerfile: auto-detect has to work out how to build it. */
+function nodeAppArchive() {
+  const dir = mkdtempSync(join(tmpdir(), 'vdeploy-e2e-app-'));
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({ name: 'node-app', version: '1.0.0', scripts: { start: 'node index.js' } }),
+  );
+  writeFileSync(
+    join(dir, 'index.js'),
+    "require('http').createServer((q, s) => s.end('railpack ok\\n')).listen(process.env.PORT || 3000);\n",
+  );
+  const archive = execFileSync('tar', ['-czf', '-', '-C', dir, '.'], { maxBuffer: 64 << 20 });
+  rmSync(dir, { recursive: true, force: true });
+  return archive;
+}
+
+const NODE_HOST = 'node.vdeploy.test';
+
+/**
+ * Builds on the server (§15, M2 2.7): upload a source with no Dockerfile,
+ * preview what auto-detect finds, then deploy it — Railpack works out how to
+ * build it, a capped rootless BuildKit builds it on the server, and the
+ * result is served through Traefik.
+ */
+async function buildFromSource(serverId) {
+  const { uploadId } = await uploadArchive(nodeAppArchive());
+  const { result: preview } = await op('source.detect', { serverId, uploadId });
+  const detected = await until(
+    'detection preview',
+    async () => {
+      const { result } = await op('build.get', { buildId: preview.buildId });
+      if (result.status === 'failed') throw new Error(`detection failed: ${result.error}`);
+      return result.status === 'succeeded' ? result : null;
+    },
+    600_000,
+  );
+  if (!detected.detection?.detectedProviders?.includes('node')) {
+    throw new Error(`detection missed Node: ${JSON.stringify(detected.detection)}`);
+  }
+  pass('detection preview before deploying', detected.detection.detectedProviders.join(', '));
+
+  const created = await op('project.create', {
+    serverId,
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'node-app' },
+      source: { type: 'archive', uploadId },
+      build: { strategy: 'railpack' },
+      runtime: {
+        replicas: 1,
+        resources: { memory: { request: '64Mi', limit: '256Mi' } },
+        env: [{ key: 'PORT', value: '3000' }],
+      },
+      network: { containerPort: 3000, domains: [{ host: NODE_HOST, tls: { provider: 'none' } }] },
+      health: { startup: { type: 'http', path: '/' } },
+    },
+  });
+  await until(
+    'built and deployed',
+    async () => {
+      const plan = await call('GET', `/api/v1/plans/${created.plan.id}`);
+      if (plan.status === 'failed' || plan.status === 'stale')
+        throw new Error(JSON.stringify(plan));
+      return plan.status === 'applied';
+    },
+    1_200_000,
+  );
+  const body = await until(
+    'built app served',
+    async () => {
+      const out = inTestbed(
+        `wget -q -O - -T 3 --header 'Host: ${NODE_HOST}' http://127.0.0.1/ 2>/dev/null || true`,
+      );
+      return out.includes('railpack ok') ? out : null;
+    },
+    60_000,
+  );
+  pass('built from uploaded source on the server and served', body.trim());
+}
+
 const INSTANT_HOST = 'hello.apps.vdeploy.test';
 
 /** One HTTPS request to Traefik with the given SNI and Host; returns the raw response. */
@@ -497,7 +598,7 @@ async function drill() {
     'offline self-heal',
     async () => {
       const containers = managedContainers();
-      return containers.length === 2 && containers.every(([, s]) => s === 'running');
+      return containers.length === before.length && containers.every(([, s]) => s === 'running');
     },
     60_000,
   );

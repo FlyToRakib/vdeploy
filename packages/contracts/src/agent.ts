@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
+import { BuildResult } from './builds.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
 import { Hostname } from './spec/sections.js';
@@ -135,6 +136,7 @@ export const AgentFrame = z.discriminatedUnion('type', [
     error: z.string().max(8192).optional(),
   }),
   z.strictObject({ ...FrameHeader, type: z.literal('observed_state'), report: ObservedReport }),
+  z.strictObject({ ...FrameHeader, type: z.literal('build_result'), result: BuildResult }),
 ]);
 export type AgentFrame = z.infer<typeof AgentFrame>;
 

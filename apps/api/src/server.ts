@@ -19,6 +19,7 @@ import { authRoutes } from './routes/auth.js';
 import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
 import { operationRoutes } from './routes/operations.js';
+import { uploadRoutes } from './routes/uploads.js';
 
 /** Log fields that may carry credentials or secret values; never written out. */
 export const REDACTED_PATHS = [
@@ -97,6 +98,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     databaseUrl: config.DATABASE_URL,
     key: privateKeyFromSeed(config.CONTROL_PLANE_KEY),
     secretsKey: config.SECRETS_KEY,
+    publicUrl: config.PUBLIC_URL,
     now: deps.now ?? (() => new Date()),
     log: app.log,
   };
@@ -105,17 +107,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.addHook('onClose', () => gateway.stop());
   await app.register(agentRoutes(gateway, gatewayDeps));
 
-  await app.register(
-    operationRoutes({
-      db,
-      auth,
-      mailer,
-      queue: deps.queue,
-      approvalKey: config.APPROVAL_KEY,
-      secretsKey: config.SECRETS_KEY,
-      publicUrl: config.PUBLIC_URL,
-      now: deps.now ?? (() => new Date()),
-    }),
-  );
+  const kernel = {
+    db,
+    auth,
+    mailer,
+    queue: deps.queue,
+    approvalKey: config.APPROVAL_KEY,
+    secretsKey: config.SECRETS_KEY,
+    publicUrl: config.PUBLIC_URL,
+    now: deps.now ?? (() => new Date()),
+  };
+  await app.register(operationRoutes(kernel));
+  await app.register(uploadRoutes(kernel));
   return app;
 }

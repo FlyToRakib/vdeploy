@@ -3,12 +3,15 @@ import {
   ApplicationSpec,
   newId,
   type ApplicationSpecInput,
+  type Id,
   type OperationName,
 } from '@vdeploy/contracts';
 import { buildPlan } from '@vdeploy/core';
 import {
   approvals,
   auditLog,
+  builds,
+  finishBuild,
   deployments,
   desiredStateFor,
   loadPlanWorld,
@@ -20,10 +23,11 @@ import {
   readSecret,
   releases,
   servers,
+  uploads,
   user,
 } from '@vdeploy/db';
 import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { applyPlan, type WorkerDeps } from './apply.js';
 import type { RegistryAccess } from './registry.js';
@@ -57,7 +61,33 @@ function spec(overrides: Partial<ApplicationSpecInput> = {}) {
 /** A stand-in agent: runs whatever it is told, except releases from crashFrom on. */
 let crashFrom = Number.POSITIVE_INFINITY;
 let agentTimer: NodeJS.Timeout;
+/** A stand-in builder: every queued build succeeds, unless builds are set to fail. */
+let buildsFail = false;
+const BUILT = `sha256:${'d'.repeat(64)}`;
+async function builderTick() {
+  const pending = await t.db
+    .select()
+    .from(builds)
+    .where(and(eq(builds.serverId, serverId), inArray(builds.status, ['queued', 'running'])));
+  for (const build of pending) {
+    await finishBuild(
+      t.db,
+      serverId,
+      buildsFail
+        ? {
+            buildId: build.id as Id<'build'>,
+            ok: false,
+            error: 'npm install failed',
+            log: 'npm ERR!',
+          }
+        : { buildId: build.id as Id<'build'>, ok: true, image: BUILT, log: 'done' },
+      new Date(),
+    );
+  }
+}
+
 async function agentTick() {
+  await builderTick();
   const state = await desiredStateFor(t.db, serverId);
   const report = {
     generation: state.generation,
@@ -153,6 +183,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   crashFrom = Number.POSITIVE_INFINITY;
+  buildsFail = false;
   await t.db.update(projects).set({ deletedAt: new Date() });
 });
 
@@ -322,5 +353,65 @@ describe('environment and secrets', () => {
     expect(failed?.error?.message).toMatch(/does not have/);
     // The spec was never changed to point at it.
     expect((await project(created.id)).spec.runtime.env).toEqual([]);
+  });
+});
+
+describe('building from uploaded source', () => {
+  async function upload() {
+    const id = newId('upload');
+    await t.db.insert(uploads).values({
+      id,
+      orgId,
+      sha256: 'e'.repeat(64),
+      size: 3,
+      data: Buffer.from('tgz'),
+      createdBy: { userId, origin: 'dashboard' },
+    });
+    return id;
+  }
+
+  it('builds on the project server and deploys the built image', async () => {
+    const uploadId = await upload();
+    const source = spec({ source: { type: 'archive', uploadId }, build: { strategy: 'nixpacks' } });
+    const row = await plan('project.create', { spec: source, serverId });
+    expect(await applyPlan(deps, row.id)).toBe('applied');
+    const [created] = await t.db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.name, 'blog'), isNull(projects.deletedAt)));
+    const [release] = await t.db
+      .select()
+      .from(releases)
+      .where(eq(releases.id, created!.currentReleaseId!));
+    expect(release?.image).toBe(BUILT);
+    const [build] = await t.db.select().from(builds).where(eq(builds.projectId, created!.id));
+    // nixpacks specs are built by Railpack, its successor (ADR 0008).
+    expect(build).toMatchObject({ kind: 'build', strategy: 'railpack', status: 'succeeded' });
+  });
+
+  it("fails the plan with the build's own reason", async () => {
+    const uploadId = await upload();
+    buildsFail = true;
+    const row = await plan('project.create', {
+      spec: spec({ source: { type: 'archive', uploadId }, build: { strategy: 'dockerfile' } }),
+      serverId,
+    });
+    expect(await applyPlan(deps, row.id)).toBe('failed');
+    const [failed] = await t.db.select().from(plans).where(eq(plans.id, row.id));
+    expect(failed?.error?.message).toBe('The build failed: npm install failed');
+  });
+
+  it('needs the build secrets it names', async () => {
+    const uploadId = await upload();
+    const row = await plan('project.create', {
+      spec: spec({
+        source: { type: 'archive', uploadId },
+        build: { strategy: 'dockerfile', secrets: ['npm_token'] },
+      }),
+      serverId,
+    });
+    expect(await applyPlan(deps, row.id)).toBe('failed');
+    const [failed] = await t.db.select().from(plans).where(eq(plans.id, row.id));
+    expect(failed?.error?.message).toMatch(/needs a secret called npm_token/);
   });
 });

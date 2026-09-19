@@ -110,10 +110,15 @@ type fakeEngine struct {
 	helpers []docker.Helper
 	exit    map[string]int // by image
 	loaded  string
+	onRun   func(docker.Helper)
+	output  string
 }
 
 func (f *fakeEngine) RunHelper(_ context.Context, h docker.Helper) (int, string, error) {
 	f.helpers = append(f.helpers, h)
+	if f.onRun != nil {
+		f.onRun(h)
+	}
 	if h.Image == docker.RailpackImage {
 		// railpack writes its plan and report into the bound plan dir.
 		for _, bind := range h.Binds {
@@ -128,6 +133,9 @@ func (f *fakeEngine) RunHelper(_ context.Context, h docker.Helper) (int, string,
 				_ = os.WriteFile(filepath.Join(host, "image.tar"), []byte("tar"), 0o600)
 			}
 		}
+	}
+	if f.output != "" {
+		return f.exit[h.Image], f.output, nil
 	}
 	return f.exit[h.Image], "step output\n", nil
 }
@@ -249,5 +257,73 @@ func TestBuildsFailInPlainWords(t *testing.T) {
 				t.Fatalf("result = %+v", result)
 			}
 		})
+	}
+}
+
+func TestDetectOnlyReportsWithoutBuilding(t *testing.T) {
+	builder, engine, req := setup(t, archive(t, entry{name: "package.json", body: "{}"}))
+	req.Strategy = "railpack"
+	req.DetectOnly = true
+	result := builder.Run(context.Background(), req)
+	if !result.OK || result.Image != "" || len(engine.helpers) != 1 || string(result.Detection) == "" {
+		t.Fatalf("result = %+v helpers = %d", result, len(engine.helpers))
+	}
+}
+
+func TestBuildSecretsAreMountedNotPassedAsArguments(t *testing.T) {
+	builder, engine, req := setup(t, archive(t, entry{name: "Dockerfile", body: "FROM alpine"}))
+	req.Secrets = []Secret{{Name: "npm_token", ID: "sec_1", Version: 2, Sealed: "sealed:s3cret"}}
+	var secretFile string
+	builder.Open = func(projectID, id string, version int, sealed string) (string, error) {
+		if id != "sec_1" || version != 2 || projectID != req.ProjectID {
+			return "", errors.New("wrong secret")
+		}
+		return strings.TrimPrefix(sealed, "sealed:"), nil
+	}
+	engine.onRun = func(h docker.Helper) {
+		for _, bind := range h.Binds {
+			if host, ok := strings.CutSuffix(bind, ":/secrets:ro"); ok {
+				raw, _ := os.ReadFile(filepath.Join(host, "npm_token")) // #nosec G304 -- test temp dir
+				secretFile = string(raw)
+			}
+		}
+	}
+	result := builder.Run(context.Background(), req)
+	if !result.OK || secretFile != "s3cret" {
+		t.Fatalf("result = %+v secret file = %q", result, secretFile)
+	}
+	args := strings.Join(engine.helpers[0].Cmd, " ")
+	if !strings.Contains(args, "--secret id=npm_token,src=/secrets/npm_token") || strings.Contains(args, "s3cret") {
+		t.Fatalf("args = %s", args)
+	}
+}
+
+func TestANetworkHiccupIsRetriedOnceButAnAppErrorIsNot(t *testing.T) {
+	source := archive(t, entry{name: "Dockerfile", body: "FROM alpine"})
+	builder, engine, req := setup(t, source)
+	runs := 0
+	engine.onRun = func(docker.Helper) {
+		runs++
+		if runs == 1 {
+			engine.exit[docker.BuildkitImage] = 1
+			engine.output = "ERROR: short read: expected 240386256 bytes but got 85767488: unexpected EOF"
+		} else {
+			engine.exit[docker.BuildkitImage] = 0
+			engine.output = "done"
+		}
+	}
+	if result := builder.Run(context.Background(), req); !result.OK || runs != 2 {
+		t.Fatalf("result = %+v after %d runs", result, runs)
+	}
+
+	builder, engine, req = setup(t, source)
+	runs = 0
+	engine.onRun = func(docker.Helper) {
+		runs++
+		engine.exit[docker.BuildkitImage] = 1
+		engine.output = "npm ERR! missing script: build"
+	}
+	if result := builder.Run(context.Background(), req); result.OK || runs != 1 {
+		t.Fatalf("an app error was retried: %+v after %d runs", result, runs)
 	}
 }

@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.7b — builds: uploads, dispatch, releases from builds
+**Task:** 2.8 — direct upload deploy (folder/ZIP)
 **Status:** in progress
-**Updated:** 2026-09-19 16:50 UTC
+**Updated:** 2026-09-19 17:30 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -24,14 +24,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.5b `env.set`/`env.unset` (runtime env, or build args with `target: build`) as planned spec changes — planner and worker share `specAfter`, so the applied spec is the approved one; releases pin secret versions (entry version or current), references checked before the spec is written; each agent's X25519 key (sent in its signed hello) receives values sealed with ECDH + HKDF-SHA256 + AES-256-GCM bound to server/project/secret/version — frames and `desired.json` never hold a value; the agent opens them only to create a container (Go/TS cross-language vector test); `secret.rotate` = fresh value of the same shape → new release → health-gated deploy (generated secrets only). Verified in local dind: the value reaches the container, not the frame or disk; offline self-heal still works. ADR 0007
 - [x] 2.6 resource governor: the planner refuses (`capacity_exceeded`, 409) any create, spec edit, env change, scale, start or rollback whose memory or CPU requests would oversubscribe the server — capacity is what the agent reports net of its reserve for the OS, itself and Traefik; committed is every other running project's requests × replicas; stopped projects hold nothing. Checked when planning and again when the worker re-plans at apply time; capacity stays out of the plan hash. The refusal says what is short, by how much, and what to do. `server.resources` answers in plain words: "server-01 has 768 MB of 1.8 GB memory free — it fits about 3 more apps this size"
 - [x] 2.7a agent build executor (ADR 0008): `build` frames (sources only from the agent's own control plane, one-time bearer token, sha256 + size checked, deduped by build id across reconnects); safe extraction (no absolute/`..`/escaping links/hard links/devices, 2 GB and 100k-file caps); free-disk and free-memory watermarks; Railpack `prepare` (non-root, source read-only) for auto-detect with its detection report; rootless BuildKit v0.33.0 one-shot container capped by local build limits (default half the memory up to 2 GB, half the CPUs), OOM-killed before any app, layer cache in a volume; docker-format output loaded through the Engine API; built image IDs recorded, and a local image ID runs only for the project this agent built it for. Prototype verified in dind: Dockerfile and Railpack (Node) builds, image loaded, app started
+- [x] 2.7b source uploads (`POST /api/v1/uploads`, .tar.gz up to 200 MB, through the `source.upload` gate and audit; bytes stored only once allowed); builds queued by the worker and sent by the gateway to the project's server with a one-time download token (only its hash stored) and build secrets sealed to the agent; releases from built images (local image IDs); `railpack` strategy, `nixpacks` built by Railpack; `source.detect` detection preview; `build.get`/`build.list` with the end of the log; one automatic retry when a build fails on a network error. Verified in local dind: a Node app with no Dockerfile — detection preview (node), built by Railpack in capped rootless BuildKit on the server, deployed and served through Traefik (e2e)
 
 ## Doing
 
-- [ ] 2.7b source uploads (org-scoped, tar.gz), build dispatch through the gateway, releases from built images, `railpack` strategy (`nixpacks` → Railpack), detection preview, build secrets, e2e
+- [ ] 2.8 direct upload deploy: folder and ZIP uploads (CLI/dashboard), converted to the same archive source; git sources via public tarball until the GitHub App (2.15)
 
 ## Next (M2)
 
-- [ ] 2.8 direct upload deploy (folder/ZIP → archive source)
 - [ ] 2.9 release command (pre-start phase, gated on success)
 - [ ] 2.10 live logs (agent ring buffer → gateway → SSE) and deploy history
 - [ ] 2.11 persistent-folder detection at build time + deploy-time guard
@@ -50,6 +50,7 @@ verified unchanged before, after, and after testbed teardown.
 - The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.
 - Liveness/readiness probes after startup (§ health.liveness/readiness) are not run by the agent yet; startup probes gate traffic (2.2). Snapshots before destructive steps arrive with backups (M4); until then the agent never deletes volumes at all.
 - Instant URLs: settings are per org only (not per server); `{env}`/`{team}` patterns wait for environments and teams; no automatic sslip.io ↔ nip.io failover on Let's Encrypt rate limits (needs ACME outcomes from the agent, 2.12); a custom domain added later is not yet checked against other projects' instant hosts (2.4). The agent reads its interface addresses at start only.
+- Builds: an agent restarted mid-build loses that build (the worker gives up after its timeout and the plan fails with a plain reason); registry cache and a separate builder server wait for multi-server; built images are not yet pruned (reclaim keeping rollback targets, M4); uploads are kept in the database with no retention yet.
 - Governor: the brief blue/green overlap (old and new replicas together) is not counted, disk is not budgeted, and the agent's reserve is a fixed 256 MB; rule-based autoscaling with governor veto is not built yet.
 - Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); no bulk env import/export yet (2.16); build secrets are stored but used only once builds exist (2.7); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
 - DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale); `domain.add` does not yet refuse a host another project routes (the agent refuses such a frame).

@@ -41,6 +41,18 @@ type Request struct {
 	Target     string            `json:"target,omitempty"`
 	Args       map[string]string `json:"args"`
 	Source     Source            `json:"source"`
+	// DetectOnly runs Railpack's detection and reports it, building nothing.
+	DetectOnly bool `json:"detectOnly"`
+	// Secrets are build-time secrets, each sealed to this agent (ADR 0007).
+	Secrets []Secret `json:"secrets"`
+}
+
+// Secret is one build-time secret, mounted with BuildKit --secret.
+type Secret struct {
+	Name    string `json:"name"`
+	ID      string `json:"id"`
+	Version int    `json:"version"`
+	Sealed  string `json:"sealed"`
 }
 
 // Source is where to fetch the archive and what it must hash to.
@@ -91,12 +103,17 @@ type Builder struct {
 	Limits Limits
 	Images *Images
 	Log    *slog.Logger
+	// Open opens a sealed secret for a project; nil means builds with secrets fail.
+	Open func(projectID, secretID string, version int, sealed string) (string, error)
 
 	mu sync.Mutex
 }
 
 var (
-	safeArg   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,254}$`)
+	safeArg    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,254}$`)
+	secretName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	// transient matches build output that means the network failed, not the app.
+	transient = regexp.MustCompile(`(?i)short read|unexpected EOF|connection reset by peer|TLS handshake timeout|i/o timeout|temporary failure in name resolution|503 Service Unavailable|429 Too Many Requests`)
 	buildID   = regexp.MustCompile(`^bld_[0-9A-HJKMNP-TV-Z]{26}$`)
 	hexSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
@@ -134,6 +151,14 @@ func (r Request) validate() error {
 		if !safeArg.MatchString(key) || strings.ContainsRune(value, 0) {
 			return fail("the build setting %q is malformed", key)
 		}
+	}
+	for _, secret := range r.Secrets {
+		if !secretName.MatchString(secret.Name) {
+			return fail("the build secret name %q is malformed", secret.Name)
+		}
+	}
+	if r.DetectOnly && r.Strategy != "railpack" {
+		return fail("only auto-detect can preview a build")
 	}
 	return nil
 }
@@ -201,7 +226,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	var frontend []string
 	if req.Strategy == "railpack" {
 		info, log, err := b.prepare(ctx, req.BuildID, buildDir, plan)
-		if err != nil {
+		if err != nil || req.DetectOnly {
 			return "", info, log, err
 		}
 		detection = info
@@ -234,6 +259,18 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 		frontend = append(frontend, "--opt", "build-arg:"+key+"="+req.Args[key])
 	}
 
+	secretsDir := filepath.Join(work, "secrets")
+	binds := []string{src + ":/repo:ro", plan + ":/plan:ro", out + ":/out"}
+	if len(req.Secrets) > 0 {
+		if err := b.writeSecrets(req, secretsDir); err != nil {
+			return "", detection, "", err
+		}
+		binds = append(binds, secretsDir+":/secrets:ro")
+		for _, secret := range req.Secrets {
+			frontend = append(frontend, "--secret", "id="+secret.Name+",src=/secrets/"+secret.Name)
+		}
+	}
+
 	if err := b.Engine.EnsureBuildCache(ctx); err != nil {
 		return "", detection, "", fmt.Errorf("build cache: %w", err)
 	}
@@ -244,20 +281,26 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 		"--output", "type=docker,name="+name+",dest=/out/image.tar",
 		"--progress", "plain",
 	)
-	code, log, err := b.Engine.RunHelper(ctx, docker.Helper{
+	builder := docker.Helper{
 		Name:        "vd-build-" + strings.ToLower(req.BuildID),
 		Image:       docker.BuildkitImage,
 		Entrypoint:  []string{"buildctl-daemonless.sh"},
 		Cmd:         args,
 		Env:         []string{"BUILDKITD_FLAGS=--oci-worker-no-process-sandbox"},
-		Binds:       []string{src + ":/repo:ro", plan + ":/plan:ro", out + ":/out"},
+		Binds:       binds,
 		Volumes:     map[string]string{docker.BuildCacheVolume: "/home/user/.local/share/buildkit"},
 		MemoryBytes: b.Limits.MemoryBytes,
 		NanoCPUs:    b.Limits.NanoCPUs,
 		Network:     "bridge",
 		// Required by rootless BuildKit (ADR 0008); never available to app containers.
 		SecurityOpt: []string{"seccomp=unconfined", "apparmor=unconfined"},
-	})
+	}
+	code, log, err := b.Engine.RunHelper(ctx, builder)
+	// A download cut short is the network, not the app: one more try, from the cache.
+	if err == nil && code != 0 && transient.MatchString(log) {
+		b.logf("build hit a network error; trying once more", "build", req.BuildID)
+		code, log, err = b.Engine.RunHelper(ctx, builder)
+	}
 	if err != nil {
 		return "", detection, log, err
 	}
@@ -277,6 +320,36 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 		return "", detection, log, err
 	}
 	return id, detection, log, nil
+}
+
+func (b *Builder) logf(msg string, args ...any) {
+	if b.Log != nil {
+		b.Log.Warn(msg, args...)
+	}
+}
+
+// writeSecrets opens each build secret into a file only the builder user
+// can read. The work directory, and with it these files, is removed after.
+func (b *Builder) writeSecrets(req Request, dir string) error {
+	if b.Open == nil {
+		return fail("this server cannot open build secrets")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("secrets dir: %w", err)
+	}
+	_ = os.Chown(dir, 1000, 1000)
+	for _, secret := range req.Secrets {
+		value, err := b.Open(req.ProjectID, secret.ID, secret.Version, secret.Sealed)
+		if err != nil {
+			return fail("the build secret %s could not be opened", secret.Name)
+		}
+		file := filepath.Join(dir, secret.Name)
+		if err := os.WriteFile(file, []byte(value), 0o400); err != nil {
+			return fmt.Errorf("write build secret: %w", err)
+		}
+		_ = os.Chown(file, 1000, 1000)
+	}
+	return nil
 }
 
 // prepare runs railpack's detection and writes its build plan.

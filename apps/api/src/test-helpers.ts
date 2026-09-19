@@ -82,10 +82,14 @@ export class Browser {
         'user-agent': this.userAgent,
         'x-forwarded-for': this.ip,
         ...(cookie ? { cookie } : {}),
-        ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(payload === undefined || Buffer.isBuffer(payload)
+          ? {}
+          : { 'content-type': 'application/json' }),
         ...headers,
       },
-      ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+      ...(payload === undefined
+        ? {}
+        : { payload: Buffer.isBuffer(payload) ? payload : JSON.stringify(payload) }),
     });
     for (const c of res.cookies) {
       if (c.maxAge === 0 || c.value === '') this.cookies.delete(c.name);

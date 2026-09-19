@@ -1,16 +1,21 @@
 import { randomBytes, type KeyObject } from 'node:crypto';
 import { AgentFrame, EnrollRequest, VDeployError } from '@vdeploy/contracts';
-import { isPublicIpv4 } from '@vdeploy/core';
+import { deliveryContext, isPublicIpv4, sealTo } from '@vdeploy/core';
 import {
   appendAudit,
+  BUILDS_CHANNEL,
+  claimBuilds,
   DESIRED_STATE_CHANNEL,
   desiredStateFor,
   listen,
+  finishBuild,
   observedState,
+  readSecret,
   refreshInstantHosts,
   resetDomainChecks,
   serverEnrollments,
   servers,
+  sourceForBuild,
   type Database,
 } from '@vdeploy/db';
 import { and, eq, gt, isNull } from 'drizzle-orm';
@@ -39,6 +44,8 @@ export interface GatewayDeps {
   key: KeyObject;
   /** Opens stored secrets so they can be sealed to each agent. */
   secretsKey: Buffer;
+  /** Where agents reach this control plane: build sources are served under it. */
+  publicUrl: string;
   now: () => Date;
   log: FastifyBaseLogger;
 }
@@ -57,6 +64,7 @@ interface Connection {
 export class Gateway {
   private readonly connections = new Map<string, Connection>();
   private stopListening: (() => Promise<void>) | null = null;
+  private stopBuildListening: (() => Promise<void>) | null = null;
 
   constructor(private readonly deps: GatewayDeps) {}
 
@@ -64,12 +72,68 @@ export class Gateway {
     this.stopListening = await listen(this.deps.databaseUrl, DESIRED_STATE_CHANNEL, (serverId) => {
       void this.push(serverId);
     });
+    this.stopBuildListening = await listen(this.deps.databaseUrl, BUILDS_CHANNEL, (serverId) => {
+      void this.dispatchBuilds(serverId).catch((err: unknown) => {
+        this.deps.log.error({ err, serverId }, 'could not send builds');
+      });
+    });
+  }
+
+  /**
+   * Sends a server's queued builds to its agent (ADR 0008), each with a
+   * one-time token for its source and its build secrets sealed to the agent.
+   */
+  async dispatchBuilds(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const { db, key, now, secretsKey, publicUrl } = this.deps;
+    const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+    for (const { build, token, size, sha256 } of await claimBuilds(db, serverId, now())) {
+      const secrets = [];
+      for (const secret of build.secrets) {
+        if (!server?.agentBoxKey || !build.projectId) break;
+        const { value } = await readSecret(
+          db,
+          secretsKey,
+          build.projectId,
+          secret.secretId,
+          secret.version,
+        );
+        const context = deliveryContext(serverId, build.projectId, secret.secretId, secret.version);
+        secrets.push({
+          name: secret.name,
+          id: secret.secretId,
+          version: secret.version,
+          sealed: sealTo(server.agentBoxKey, value, context),
+        });
+      }
+      connection.socket.send(
+        seal(key, {
+          ...connection.session.next('build'),
+          build: {
+            buildId: build.id,
+            projectId: build.projectId ?? '',
+            strategy: build.strategy,
+            ...build.options,
+            detectOnly: build.kind === 'detect',
+            secrets,
+            source: {
+              url: `${publicUrl.replace(/\/$/, '')}/api/v1/agent/sources/${build.id}`,
+              token,
+              sha256,
+              size,
+            },
+          },
+        }),
+      );
+    }
   }
 
   async stop(): Promise<void> {
     for (const { socket } of this.connections.values())
       socket.close(1001, 'control plane stopping');
     await this.stopListening?.();
+    await this.stopBuildListening?.();
   }
 
   isConnected(serverId: string): boolean {
@@ -123,6 +187,7 @@ export class Gateway {
           this.connections.get(serverId)?.socket.close(1000, 'replaced by a newer connection');
           this.connections.set(serverId, { socket, session });
           await this.push(serverId);
+          await this.dispatchBuilds(serverId);
           return;
         }
         await this.receive(serverId, server.orgId, frame);
@@ -191,6 +256,8 @@ export class Gateway {
           target: observedState.serverId,
           set: { generation: frame.report.generation, report: frame.report, receivedAt: now() },
         });
+    } else if (frame.type === 'build_result') {
+      await finishBuild(db, serverId, frame.result, now());
     } else if (frame.type === 'ack' && !frame.accepted) {
       // The agent refused a desired state (L6). That is a security event, recorded as such.
       await appendAudit(db, {
@@ -265,6 +332,20 @@ export const agentRoutes =
           return server.id;
         });
         return reply.status(201).send({ serverId, controlPlaneKey: rawPublicKey(key) });
+      },
+    );
+
+    // Build sources, for the agent holding the build's one-time token (ADR 0008).
+    app.get<{ Params: { buildId: string } }>(
+      '/api/v1/agent/sources/:buildId',
+      { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+      async (req, reply) => {
+        const auth = req.headers.authorization ?? '';
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+        const data = token ? await sourceForBuild(db, req.params.buildId, token, now()) : null;
+        if (!data)
+          return reply.status(404).send({ error: { code: 'not_found', message: 'Not found' } });
+        return reply.header('content-type', 'application/gzip').send(data);
       },
     );
 

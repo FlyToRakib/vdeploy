@@ -9,17 +9,19 @@ import {
   organization,
   projects,
   putSecret,
+  queueBuild,
   readSecret,
   refreshInstantHosts,
   resetDomainChecks,
   serverEnrollments,
   servers,
   session,
+  uploads,
   urlSettings,
   verifyAuditChain,
 } from '@vdeploy/db';
 import { generateSecret, isPublicIpv4 } from '@vdeploy/core';
-import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
 import type { Handler, HandlerContext } from './context.js';
 
 /** Enrollment tokens work once, within an hour (§25). */
@@ -186,6 +188,42 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
     ),
   'secret.read_value': async ({ deps, args }) =>
     readSecret(deps.db, deps.secretsKey, String(args.projectId), String(args.secretId)),
+  'source.upload': async ({ deps, actor, args }) => {
+    const uploadId = newId('upload');
+    await deps.db.insert(uploads).values({
+      id: uploadId,
+      orgId: actor.orgId,
+      sha256: String(args.sha256),
+      size: Number(args.size),
+      createdBy: { userId: actor.userId, origin: actor.origin },
+    });
+    return { uploadId };
+  },
+  'source.detect': async ({ deps, actor, args }) => {
+    const [upload] = await deps.db
+      .select({ id: uploads.id, received: isNotNull(uploads.data) })
+      .from(uploads)
+      .where(and(eq(uploads.id, String(args.uploadId)), eq(uploads.orgId, actor.orgId)));
+    if (!upload?.received) throw new VDeployError('not_found', 'Upload not found');
+    const [server] = await deps.db
+      .select()
+      .from(servers)
+      .where(and(eq(servers.id, String(args.serverId)), eq(servers.orgId, actor.orgId)));
+    if (!server) throw new VDeployError('not_found', 'Server not found');
+    const buildId = await deps.db.transaction((tx) =>
+      queueBuild(tx, {
+        orgId: actor.orgId,
+        projectId: null,
+        serverId: server.id,
+        uploadId: upload.id,
+        kind: 'detect',
+        strategy: 'railpack',
+        options: { context: '.', args: {} },
+        secrets: [],
+      }),
+    );
+    return { buildId };
+  },
   'server.add': async (context) => {
     const serverId = newId('server');
     await context.deps.db

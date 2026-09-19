@@ -58,6 +58,14 @@ export const OPERATIONS = [
     obj({ ...P, deploymentId: idSchema('deployment') }),
   ),
   query('release.list', 'project', 'deployHistory', 'List releases of a project', obj(P)),
+  query('build.list', 'project', 'deployHistory', 'List the builds of a project', obj(P)),
+  query(
+    'build.get',
+    'org',
+    'deployHistory',
+    'Show one build or detection: status, what was detected, and the end of its log',
+    obj({ buildId: idSchema('build') }),
+  ),
   query(
     'secret.list',
     'project',
@@ -109,6 +117,20 @@ export const OPERATIONS = [
   operation('backup.trigger', 'safe', 'project', 'Take a backup now', obj(P)),
 
   // ── Tier 2 · sensitive ──────────────────────────────────────────────────
+  operation(
+    'source.upload',
+    'sensitive',
+    'org',
+    'Upload source code (a .tar.gz) to build and deploy',
+    obj({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive() }),
+  ),
+  operation(
+    'source.detect',
+    'safe',
+    'org',
+    'Preview how uploaded source would be built, before deploying it',
+    obj({ serverId, uploadId: idSchema('upload') }),
+  ),
   operation(
     'server.set_address',
     'sensitive',

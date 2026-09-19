@@ -220,6 +220,7 @@ func serve(configPath string, log *slog.Logger) error {
 			},
 			Images: images,
 			Log:    log,
+			Open:   sealed.Opener{Key: box, ServerID: id.ServerID}.Open,
 		}
 		client := &transport.Client{
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
