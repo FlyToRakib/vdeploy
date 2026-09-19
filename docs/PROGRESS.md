@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.11a — persistent-folder detection at build time
+**Task:** 2.11b — runtime watch, deploy-time guard, in-place conversion
 **Status:** in progress
-**Updated:** 2026-09-19 18:30 UTC
+**Updated:** 2026-09-20 00:30 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -28,10 +28,9 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.8 direct upload deploy: .zip as well as .tar.gz uploads (sniffed by content, unpacked by the agent under the same rules; links in ZIPs refused; entries never larger than they claim); `project.deploy_upload` builds and deploys an upload as the next version in one step (an image project switches to auto-detect); public GitHub branches (`source.type: git`) fetched as tarballs by the worker, stored like uploads and built with their wrapping folder stripped — private repositories wait for the GitHub App (2.15). Verified in local dind: a .zip deployed as v2 of the built Node app (e2e)
 - [x] 2.9 release command (`deploy.releaseCommand`, `deploy.releaseTimeout` default 10m): the agent runs it once per release in a one-shot container with the release's image, environment, secrets, network and folders, before any of its replicas start, while the old release keeps serving; success is recorded on the agent's disk so self-heals, restarts and rollbacks never rerun it; failure or timeout starts nothing and reports the end of the output, and the worker rolls back with that reason. Verified in local dind: a failing migration kept nginx 1.28 serving with the error shown; a passing one let the release go live (e2e)
 - [x] 2.10 live logs and deploy history: the agent streams a project's own containers' output on request (tail ≤ 1000 per container, then follow up to 30 min; lines capped at 8 KB; batched every 300 ms; at most 8 streams per connection; a slow viewer gets a "lines skipped" marker instead of unbounded buffering); the gateway multiplexes requests by id, accepts answers only from the server asked, and strips terminal control codes; `project.logs` (recent lines, through the gate) and `GET /api/v1/projects/:id/logs/stream` (SSE: recent, then live, with heartbeats); agent events stored as a per-project timeline (`project.events`, only for projects on the reporting server, repeats collapsed, 30-day retention); releases remember their build, so `deployment.logs` shows the build log and outcome; gateway handles each agent's frames strictly in order. Verified in local dind (e2e)
+- [x] 2.11a persistent folders at build time (§17.2): every build and detection preview scans the source — WordPress, Laravel, Django, Rails, Strapi, Ghost, n8n, SQLite files anywhere, generic uploads/media/attachments/data/files — and places findings in the container under the image's working directory; `storage.status` shows each flagged folder as permanent, temporary (a person said so, `storage.ignore_path`) or unprotected; `storage.make_persistent` adds a permanent folder as a planned spec change (readable volume names, refused for multi-replica apps). Verified in local dind: a .zip with an uploads folder is flagged unprotected (e2e)
 
 ## Doing
-
-- [ ] 2.11a persistent-folder detection at build time (framework-aware scan, container paths from the image's working directory), `storage.make_persistent`, `storage.ignore_path`
 - [ ] 2.11b runtime writable-layer watch, deploy-time guard (data at risk → explicit confirmation), in-place conversion copying existing files
 
 ## Next (M2)

@@ -2,6 +2,7 @@ import { newId, Plan, VDeployError } from '@vdeploy/contracts';
 import { describe, expect, it } from 'vitest';
 import { makeProject, makeSpec } from './fixtures.test-helpers.js';
 import { buildPlan } from './plan.js';
+import { volumeNameFor } from './spec-edit.js';
 
 function codeOf(fn: () => unknown): string | undefined {
   try {
@@ -202,6 +203,53 @@ describe('the resource governor at plan time', () => {
       { project, server: server(800) },
     );
     expect(a.planHash).toBe(b.planHash);
+  });
+});
+
+describe('permanent folders', () => {
+  it('turns a flagged folder into a permanent one as a spec change', () => {
+    const project = makeProject();
+    const plan = buildPlan(
+      'storage.make_persistent',
+      { projectId: project.id, mountPath: '/app/public/uploads' },
+      { project },
+    );
+    expect(plan.steps.map((s) => s.kind)).toEqual(['update_spec', 'create_release', 'deploy']);
+    expect(plan.changes.find((c) => c.path === 'runtime.volumes')?.after).toEqual([
+      { name: 'uploads', mountPath: '/app/public/uploads' },
+    ]);
+  });
+
+  it('refuses a second copy of the folder and a multi-replica app', () => {
+    const withVolume = makeProject(
+      makeSpec({ runtime: { volumes: [{ name: 'uploads', mountPath: '/app/uploads' }] } }),
+    );
+    expect(
+      codeOf(() =>
+        buildPlan(
+          'storage.make_persistent',
+          { projectId: withVolume.id, mountPath: '/app/uploads' },
+          { project: withVolume },
+        ),
+      ),
+    ).toBe('conflict');
+    const scaled = makeProject(makeSpec({ runtime: { replicas: 3 }, scaling: { max: 3 } }));
+    expect(
+      codeOf(() =>
+        buildPlan(
+          'storage.make_persistent',
+          { projectId: scaled.id, mountPath: '/app/uploads' },
+          { project: scaled },
+        ),
+      ),
+    ).toBe('conflict');
+  });
+
+  it('names volumes readably and never twice', () => {
+    expect(volumeNameFor('/app/wp-content/uploads', [])).toBe('uploads');
+    expect(volumeNameFor('/app/uploads', ['uploads'])).toBe('uploads-2');
+    expect(volumeNameFor('/home/node/.n8n', [])).toBe('n8n');
+    expect(volumeNameFor('/srv/2024_Files', [])).toBe('data-2024-files');
   });
 });
 

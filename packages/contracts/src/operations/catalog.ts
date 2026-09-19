@@ -60,6 +60,13 @@ export const OPERATIONS = [
   query('release.list', 'project', 'deployHistory', 'List releases of a project', obj(P)),
   query('build.list', 'project', 'deployHistory', 'List the builds of a project', obj(P)),
   query(
+    'storage.status',
+    'project',
+    'config',
+    'Show which folders keep their files across deploys, and which would lose them',
+    obj(P),
+  ),
+  query(
     'build.get',
     'org',
     'deployHistory',
@@ -290,6 +297,13 @@ export const OPERATIONS = [
     'project',
     'Add a permanent folder',
     obj({ ...P, volume: Runtime.shape.volumes.unwrap().element }),
+  ),
+  operation(
+    'storage.ignore_path',
+    'sensitive',
+    'project',
+    'Mark a flagged folder as only temporary, so it stops being flagged',
+    obj({ ...P, path: Runtime.shape.volumes.unwrap().element.shape.mountPath }),
   ),
   operation(
     'storage.make_persistent',

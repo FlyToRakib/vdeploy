@@ -585,7 +585,8 @@ function nodeAppArchive(message = 'railpack ok', format = 'tar.gz') {
     }),
     'index.js': `require('http').createServer((q, s) => s.end('${message}\\n')).listen(process.env.PORT || 3000);\n`,
   };
-  if (format === 'zip') return zipOf(files);
+  // The .zip version also has a folder users upload into (§17.2 must flag it).
+  if (format === 'zip') return zipOf({ ...files, 'uploads/.keep': '' });
   const dir = mkdtempSync(join(tmpdir(), 'vdeploy-e2e-app-'));
   for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   const archive = execFileSync('tar', ['-czf', '-', '-C', dir, '.'], { maxBuffer: 64 << 20 });
@@ -680,6 +681,11 @@ async function buildFromSource(serverId) {
     60_000,
   );
   pass('a .zip upload deployed as the next version in one step', 'zip v2 ok');
+
+  const { result: storage } = await op('storage.status', { projectId: nodeApp.id });
+  const uploads = storage.flagged.find((f) => f.path === '/app/uploads');
+  if (uploads?.status !== 'unprotected') throw new Error(JSON.stringify(storage));
+  pass('build flagged a folder whose files a deploy would delete', uploads.path);
 }
 
 const INSTANT_HOST = 'hello.apps.vdeploy.test';

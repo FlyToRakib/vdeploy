@@ -76,6 +76,8 @@ type Result struct {
 	Detection json.RawMessage `json:"detection,omitempty"`
 	// Log is the end of the build output.
 	Log string `json:"log"`
+	// Persistence lists folders the app will write lasting data to (§17.2).
+	Persistence []Finding `json:"persistence,omitempty"`
 }
 
 // Engine is what a build needs from Docker.
@@ -83,6 +85,7 @@ type Engine interface {
 	RunHelper(ctx context.Context, h docker.Helper) (int, string, error)
 	LoadImage(ctx context.Context, tarball io.Reader, name string) (string, error)
 	EnsureBuildCache(ctx context.Context) error
+	ImageWorkdir(ctx context.Context, id string) (string, error)
 	RootDir(ctx context.Context) (string, error)
 }
 
@@ -173,9 +176,10 @@ func (b *Builder) Run(ctx context.Context, req Request) Result {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	result := Result{BuildID: req.BuildID}
-	image, detection, log, err := b.run(ctx, req)
+	image, detection, log, findings, err := b.run(ctx, req)
 	result.Log = log
 	result.Detection = detection
+	result.Persistence = findings
 	if err != nil {
 		var plain failure
 		if errors.As(err, &plain) {
@@ -190,27 +194,27 @@ func (b *Builder) Run(ctx context.Context, req Request) Result {
 	return result
 }
 
-func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage, string, error) {
+func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage, string, []Finding, error) {
 	if err := req.validate(); err != nil {
-		return "", nil, "", err
+		return "", nil, "", nil, err
 	}
 	folder, err := relative(req.Context, "build folder")
 	if err != nil {
-		return "", nil, "", err
+		return "", nil, "", nil, err
 	}
 	dockerfile, err := relative(req.Dockerfile, "Dockerfile")
 	if err != nil {
-		return "", nil, "", err
+		return "", nil, "", nil, err
 	}
 	if err := b.watermarks(ctx); err != nil {
-		return "", nil, "", err
+		return "", nil, "", nil, err
 	}
 	work := filepath.Join(b.Dir, req.BuildID)
 	defer func() { _ = os.RemoveAll(work) }()
 	src, plan, out := filepath.Join(work, "src"), filepath.Join(work, "plan"), filepath.Join(work, "out")
 	for _, dir := range []string{src, plan, out} {
 		if err := os.MkdirAll(dir, 0o755); err != nil { // #nosec G301 -- the builder user reads it
-			return "", nil, "", fmt.Errorf("work dir: %w", err)
+			return "", nil, "", nil, fmt.Errorf("work dir: %w", err)
 		}
 	}
 	// The rootless builder runs as uid 1000 and writes the plan and the image here.
@@ -218,11 +222,11 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	_ = os.Chown(out, 1000, 1000)
 
 	if err := b.fetch(ctx, req.Source, src, req.Strip); err != nil {
-		return "", nil, "", err
+		return "", nil, "", nil, err
 	}
 	buildDir := filepath.Join(src, filepath.FromSlash(folder))
 	if info, err := os.Stat(buildDir); err != nil || !info.IsDir() {
-		return "", nil, "", fail("the build folder %q is not in the source", folder)
+		return "", nil, "", nil, fail("the build folder %q is not in the source", folder)
 	}
 
 	// The whole source is mounted at /repo; the build folder and the
@@ -231,8 +235,12 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	var frontend []string
 	if req.Strategy == "railpack" {
 		info, log, err := b.prepare(ctx, req.BuildID, buildDir, plan)
-		if err != nil || req.DetectOnly {
-			return "", info, log, err
+		if err != nil {
+			return "", info, log, nil, err
+		}
+		if req.DetectOnly {
+			// Railpack images work in /app.
+			return "", info, log, ContainerFindings(ScanPersistence(buildDir), "/app"), nil
 		}
 		detection = info
 		frontend = []string{
@@ -244,7 +252,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 			dockerfile = path.Join(folder, "Dockerfile")
 		}
 		if info, err := os.Stat(filepath.Join(src, filepath.FromSlash(dockerfile))); err != nil || info.IsDir() {
-			return "", nil, "", fail("there is no %s in the source; choose auto-detect to build without one", dockerfile)
+			return "", nil, "", nil, fail("there is no %s in the source; choose auto-detect to build without one", dockerfile)
 		}
 		frontend = []string{
 			"--frontend", "dockerfile.v0",
@@ -268,7 +276,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	binds := []string{src + ":/repo:ro", plan + ":/plan:ro", out + ":/out"}
 	if len(req.Secrets) > 0 {
 		if err := b.writeSecrets(req, secretsDir); err != nil {
-			return "", detection, "", err
+			return "", detection, "", nil, err
 		}
 		binds = append(binds, secretsDir+":/secrets:ro")
 		for _, secret := range req.Secrets {
@@ -277,7 +285,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	}
 
 	if err := b.Engine.EnsureBuildCache(ctx); err != nil {
-		return "", detection, "", fmt.Errorf("build cache: %w", err)
+		return "", detection, "", nil, fmt.Errorf("build cache: %w", err)
 	}
 	name := "vd-build/" + strings.ToLower(strings.TrimPrefix(req.ProjectID, "prj_")) + ":" + strings.ToLower(req.BuildID)
 	args := append([]string{"build"}, frontend...)
@@ -307,24 +315,28 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 		code, log, err = b.Engine.RunHelper(ctx, builder)
 	}
 	if err != nil {
-		return "", detection, log, err
+		return "", detection, log, nil, err
 	}
 	if code != 0 {
-		return "", detection, log, fail("the build failed (exit %d); the end of its output says why", code)
+		return "", detection, log, nil, fail("the build failed (exit %d); the end of its output says why", code)
 	}
 	tarball, err := os.Open(filepath.Join(out, "image.tar")) // #nosec G304 -- our own work dir
 	if err != nil {
-		return "", detection, log, fmt.Errorf("built image: %w", err)
+		return "", detection, log, nil, fmt.Errorf("built image: %w", err)
 	}
 	defer func() { _ = tarball.Close() }()
 	id, err := b.Engine.LoadImage(ctx, tarball, name)
 	if err != nil {
-		return "", detection, log, err
+		return "", detection, log, nil, err
+	}
+	workdir, err := b.Engine.ImageWorkdir(ctx, id)
+	if err != nil {
+		return "", detection, log, nil, err
 	}
 	if err := b.Images.Add(id, req.BuildID, req.ProjectID); err != nil {
-		return "", detection, log, err
+		return "", detection, log, nil, err
 	}
-	return id, detection, log, nil
+	return id, detection, log, ContainerFindings(ScanPersistence(buildDir), workdir), nil
 }
 
 func (b *Builder) logf(msg string, args ...any) {

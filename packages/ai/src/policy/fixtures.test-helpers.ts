@@ -154,6 +154,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'source.detect': { serverId: newId('server'), uploadId: newId('upload') },
   'build.get': { buildId: newId('build') },
   'project.deploy_upload': { uploadId: newId('upload') },
+  'storage.ignore_path': { path: '/app/tmp' },
 };
 
 /** A valid input for any operation, naming the given target. */

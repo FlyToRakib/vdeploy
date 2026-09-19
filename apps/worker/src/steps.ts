@@ -109,6 +109,7 @@ const SPEC_EDITS = new Set([
   'env.set',
   'env.unset',
   'project.deploy_upload',
+  'storage.make_persistent',
 ]);
 
 async function updateSpec(deps: StepDeps, state: ApplyState) {
@@ -116,12 +117,7 @@ async function updateSpec(deps: StepDeps, state: ApplyState) {
     throw new VDeployError('internal', `${state.operation} does not change the spec`);
   }
   const current = state.projectId === null ? null : (await project(deps, state)).spec;
-  const spec = specAfter(
-    state.operation as
-      'project.create' | 'project.update_spec' | 'env.set' | 'env.unset' | 'project.deploy_upload',
-    state.args,
-    current,
-  );
+  const spec = specAfter(state.operation as Parameters<typeof specAfter>[0], state.args, current);
   // Refuse a reference to a missing secret before the spec is written, not after.
   if (state.projectId !== null) {
     await pinSecrets(deps, state.projectId, spec);

@@ -278,6 +278,19 @@ func (c *Client) ImageID(ctx context.Context, ref string) (string, error) {
 	return image.ID, nil
 }
 
+// ImageWorkdir is the working directory an image's containers start in.
+func (c *Client) ImageWorkdir(ctx context.Context, id string) (string, error) {
+	var image struct {
+		Config struct {
+			WorkingDir string `json:"WorkingDir"`
+		} `json:"Config"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/images/"+id+"/json", nil, nil, &image); err != nil {
+		return "", err
+	}
+	return image.Config.WorkingDir, nil
+}
+
 // RootDir is where the daemon keeps images and volumes, to check free disk before a build.
 func (c *Client) RootDir(ctx context.Context) (string, error) {
 	var info struct {

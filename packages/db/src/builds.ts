@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { newId, type BuildResult, type BuildView } from '@vdeploy/contracts';
+import { newId, type ApplicationSpec, type BuildResult, type BuildView } from '@vdeploy/contracts';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
 import { builds, uploads } from './schema/index.js';
@@ -99,6 +99,7 @@ export async function finishBuild(
       image: result.ok ? (result.image ?? null) : null,
       error: result.ok ? null : (result.error ?? 'the build failed'),
       detection,
+      persistence: result.persistence ?? [],
       log: result.log,
       finishedAt: now,
       tokenHash: null,
@@ -140,6 +141,7 @@ export function buildView(row: BuildRow): BuildView {
     error: row.error,
     detection: row.detection ?? null,
     log: row.log,
+    persistence: row.persistence,
     createdAt: row.createdAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
   };
@@ -161,4 +163,36 @@ export async function listBuilds(db: Executor, projectId: string): Promise<Build
     .orderBy(desc(builds.createdAt))
     .limit(50);
   return rows.map(buildView);
+}
+
+/**
+ * Where a project keeps data (§17.2): every folder its latest build flagged,
+ * and whether it is a permanent folder, only temporary by a person's say, or
+ * unprotected — its files deleted on every deploy.
+ */
+export async function storageStatus(
+  db: Executor,
+  project: { id: string; spec: ApplicationSpec; ignoredPaths: string[] },
+) {
+  const [latest] = await db
+    .select({ persistence: builds.persistence })
+    .from(builds)
+    .where(and(eq(builds.projectId, project.id), eq(builds.status, 'succeeded')))
+    .orderBy(desc(builds.createdAt))
+    .limit(1);
+  const volumes = project.spec.runtime.volumes;
+  const inside = (path: string, mount: string) => path === mount || path.startsWith(`${mount}/`);
+  const flagged = (latest?.persistence ?? []).map((finding) => {
+    const volume = volumes.find((v) => inside(finding.path, v.mountPath));
+    const status = volume
+      ? ('permanent' as const)
+      : project.ignoredPaths.some((p) => inside(finding.path, p))
+        ? ('temporary' as const)
+        : ('unprotected' as const);
+    return { ...finding, status, volume: volume?.name ?? null };
+  });
+  return {
+    folders: volumes.map((v) => ({ name: v.name, path: v.mountPath })),
+    flagged,
+  };
 }

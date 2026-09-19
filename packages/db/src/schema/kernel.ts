@@ -81,6 +81,8 @@ export const projects = pgTable(
     instantHost: text('instant_host'),
     /** Earlier instant hosts, newest first; each redirects to the current one. */
     previousHosts: jsonb('previous_hosts').$type<string[]>().notNull().default([]),
+    /** Flagged folders a person marked as only temporary (§17.2). */
+    ignoredPaths: jsonb('ignored_paths').$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

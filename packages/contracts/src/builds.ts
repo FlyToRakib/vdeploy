@@ -10,6 +10,13 @@ export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 export const BuildStatus = z.enum(['queued', 'running', 'succeeded', 'failed']);
 export type BuildStatus = z.infer<typeof BuildStatus>;
 
+/** A folder an app will keep lasting data in (§17.2), found in its source. */
+export const StorageFinding = z.strictObject({
+  path: z.string().max(1024),
+  why: z.string().max(300),
+});
+export type StorageFinding = z.infer<typeof StorageFinding>;
+
 /** What an agent reports when a build or a detection finishes. */
 export const BuildResult = z.strictObject({
   buildId: idSchema('build'),
@@ -20,6 +27,8 @@ export const BuildResult = z.strictObject({
   detection: z.unknown().optional(),
   /** The end of the build output. */
   log: z.string().max(300_000),
+  /** Folders the app will keep lasting data in. */
+  persistence: z.array(StorageFinding).max(50).optional(),
 });
 export type BuildResult = z.infer<typeof BuildResult>;
 
@@ -34,6 +43,7 @@ export const BuildView = z.strictObject({
   error: z.string().nullable(),
   detection: z.unknown().nullable(),
   log: z.string(),
+  persistence: z.array(StorageFinding),
   createdAt: z.iso.datetime(),
   finishedAt: z.iso.datetime().nullable(),
 });

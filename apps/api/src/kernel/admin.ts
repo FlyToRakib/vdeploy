@@ -188,6 +188,15 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
     ),
   'secret.read_value': async ({ deps, args }) =>
     readSecret(deps.db, deps.secretsKey, String(args.projectId), String(args.secretId)),
+  'storage.ignore_path': async ({ deps, args }) => {
+    const projectId = String(args.projectId);
+    const path = String(args.path);
+    const [row] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    const ignoredPaths = [...new Set([...row.ignoredPaths, path])].slice(-100);
+    await deps.db.update(projects).set({ ignoredPaths }).where(eq(projects.id, projectId));
+    return { ignoredPaths };
+  },
   'source.upload': async ({ deps, actor, args }) => {
     const uploadId = newId('upload');
     await deps.db.insert(uploads).values({

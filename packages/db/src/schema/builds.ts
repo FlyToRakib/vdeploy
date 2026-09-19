@@ -1,4 +1,4 @@
-import type { BuildStatus } from '@vdeploy/contracts';
+import type { BuildStatus, StorageFinding } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
 import { customType, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { organization } from './identity.js';
@@ -67,6 +67,11 @@ export const builds = pgTable(
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     image: text('image'),
     detection: jsonb('detection'),
+    /** Folders the app will keep lasting data in, found in its source. */
+    persistence: jsonb('persistence')
+      .$type<StorageFinding[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     log: text('log').notNull().default(''),
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

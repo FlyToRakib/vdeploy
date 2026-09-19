@@ -149,6 +149,8 @@ func (f *fakeEngine) LoadImage(_ context.Context, r io.Reader, name string) (str
 
 func (f *fakeEngine) EnsureBuildCache(context.Context) error { return nil }
 
+func (f *fakeEngine) ImageWorkdir(context.Context, string) (string, error) { return "/srv/app", nil }
+
 func (f *fakeEngine) RootDir(context.Context) (string, error) { return "/var/lib/docker", nil }
 
 const testBuild = "bld_01J9Z3Q8S7M2K4X6V1B5N0C9D8"
@@ -382,5 +384,44 @@ func TestAGitHubTarballLosesItsWrappingFolder(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
 		t.Fatalf("package.json not at the top: %v", err)
+	}
+}
+
+func TestScanFlagsWhatAppsKeep(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel, body string) {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		_ = os.MkdirAll(filepath.Dir(full), 0o750)
+		_ = os.WriteFile(full, []byte(body), 0o600)
+	}
+	write("wp-config.php", "<?php")
+	write("manage.py", "")
+	write("package.json", `{"dependencies":{"n8n":"1.0.0"}}`)
+	write("uploads/.keep", "")
+	write("db/app.sqlite3", "")
+	write("dev.db", "")
+	write("node_modules/x/cache.db", "")
+	got := ContainerFindings(ScanPersistence(dir), "/srv/app")
+	paths := make([]string, 0, len(got))
+	for _, f := range got {
+		paths = append(paths, f.Path)
+	}
+	want := []string{
+		"/home/node/.n8n", "/srv/app/db", "/srv/app/dev.db", "/srv/app/media", "/srv/app/uploads",
+		"/srv/app/wp-content/plugins", "/srv/app/wp-content/themes", "/srv/app/wp-content/uploads",
+	}
+	if !slices.Equal(paths, want) {
+		t.Fatalf("paths = %v", paths)
+	}
+}
+
+func TestABuildReportsWhereTheAppKeepsData(t *testing.T) {
+	builder, _, req := setup(t, archive(t,
+		entry{name: "Dockerfile", body: "FROM alpine"},
+		entry{name: "uploads/.keep", body: ""},
+	))
+	result := builder.Run(context.Background(), req)
+	if !result.OK || len(result.Persistence) != 1 || result.Persistence[0].Path != "/srv/app/uploads" {
+		t.Fatalf("result = %+v", result)
 	}
 }

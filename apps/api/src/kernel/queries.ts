@@ -7,6 +7,7 @@ import {
   eventsFor,
   getBuild,
   listBuilds,
+  storageStatus,
   domainChecksFor,
   listSecrets,
   projects,
@@ -150,6 +151,14 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
   'domain.status': async ({ deps, args }) => domainChecksFor(deps.db, [id(args, 'projectId')]),
   'secret.list': async ({ deps, args }) => listSecrets(deps.db, id(args, 'projectId')),
   'build.list': async ({ deps, args }) => listBuilds(deps.db, id(args, 'projectId')),
+  'storage.status': async ({ deps, args }) => {
+    const [row] = await deps.db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, id(args, 'projectId')));
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    return storageStatus(deps.db, { ...row, spec: readSpec(row.spec) });
+  },
   'build.get': async ({ deps, actor, args }) => {
     const row = await getBuild(deps.db, actor.orgId, id(args, 'buildId'));
     if (!row) throw new VDeployError('not_found', 'Build not found');

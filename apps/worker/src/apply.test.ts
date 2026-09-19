@@ -23,6 +23,7 @@ import {
   readSecret,
   releases,
   servers,
+  storageStatus,
   uploads,
   user,
 } from '@vdeploy/db';
@@ -80,7 +81,16 @@ async function builderTick() {
             error: 'npm install failed',
             log: 'npm ERR!',
           }
-        : { buildId: build.id as Id<'build'>, ok: true, image: BUILT, log: 'done' },
+        : {
+            buildId: build.id as Id<'build'>,
+            ok: true,
+            image: BUILT,
+            log: 'done',
+            persistence: [
+              { path: '/app/uploads', why: 'a folder named uploads usually holds data people add' },
+              { path: '/app/cache', why: 'a folder named data usually holds data people add' },
+            ],
+          },
       new Date(),
     );
   }
@@ -472,6 +482,40 @@ describe('building from uploaded source', () => {
     } finally {
       delete deps.fetch;
     }
+  });
+
+  it('flags where a built app keeps data, and makes a folder permanent on request', async () => {
+    const uploadId = await upload();
+    const row = await plan('project.create', {
+      spec: spec({ source: { type: 'archive', uploadId }, build: { strategy: 'railpack' } }),
+      serverId,
+    });
+    expect(await applyPlan(deps, row.id)).toBe('applied');
+    const [created] = await t.db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.name, 'blog'), isNull(projects.deletedAt)));
+    const statusOf = async () => {
+      const current = await project(created!.id);
+      return storageStatus(t.db, current);
+    };
+    expect((await statusOf()).flagged.map((f) => f.status)).toEqual(['unprotected', 'unprotected']);
+
+    const keep = await plan('storage.make_persistent', {
+      projectId: created!.id,
+      mountPath: '/app/uploads',
+    });
+    expect(await applyPlan(deps, keep.id)).toBe('applied');
+    await t.db
+      .update(projects)
+      .set({ ignoredPaths: ['/app/cache'] })
+      .where(eq(projects.id, created!.id));
+    const after = await statusOf();
+    expect(after.folders).toEqual([{ name: 'uploads', path: '/app/uploads' }]);
+    expect(after.flagged.map((f) => [f.path, f.status])).toEqual([
+      ['/app/uploads', 'permanent'],
+      ['/app/cache', 'temporary'],
+    ]);
   });
 
   it('needs the build secrets it names', async () => {
