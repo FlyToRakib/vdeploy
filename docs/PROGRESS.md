@@ -1,23 +1,23 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.4 — versioned spec schemas with forward-migration
+**Task:** 1.5 — operation catalog with risk tiers
 **Status:** in progress
-**Updated:** 2026-09-19
+**Updated:** 2026-09-19 12:13 UTC
 
 ## Done
 
 - [x] 1.1 monorepo scaffold (pnpm + turborepo, TS strict, ESLint, Prettier, Vitest, CI) + VPS baseline tool
 - [x] 1.2 packages/contracts — prefixed ULID ids, typed errors, env parsing
 - [x] 1.3 Application spec schema — strict, defaults, cross-field + stateful guards (ADR 0001)
+- [x] 1.4 versioned spec schemas — readSpec() forward-migrates stored docs, refuses newer/unknown versions
 
 ## Doing
 
-- [ ] 1.4 versioned spec schemas with forward-migration on read (§30 ⑧)
+- [ ] 1.5 operation catalog with risk tiers (§24)
 
 ## Next (M1)
 
-- [ ] 1.5 operation catalog with risk tiers (§24)
 - [ ] 1.6 packages/core — spec diff, Plan, plan_hash, Release, risk, blast radius
 - [ ] 1.7 packages/db — Drizzle schema + migrations (orgs, users, projects, releases, plans, approvals, audit)
 - [ ] 1.8 policy engine L0 identity / RBAC ceiling
