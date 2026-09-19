@@ -4,3 +4,5 @@ export * from './env.js';
 export * from './spec/application.js';
 export * from './spec/quantities.js';
 export * from './spec/versions.js';
+export * from './operations/define.js';
+export * from './operations/catalog.js';
