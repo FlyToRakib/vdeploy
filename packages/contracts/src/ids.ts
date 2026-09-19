@@ -28,6 +28,7 @@ export const ID_PREFIXES = {
   changeProposal: 'chg',
   invitation: 'inv',
   enrollment: 'enr',
+  upload: 'upl',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

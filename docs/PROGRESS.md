@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.3 — Application spec schema + validation
+**Task:** 1.4 — versioned spec schemas with forward-migration
 **Status:** in progress
 **Updated:** 2026-09-19
 
@@ -9,14 +9,14 @@
 
 - [x] 1.1 monorepo scaffold (pnpm + turborepo, TS strict, ESLint, Prettier, Vitest, CI) + VPS baseline tool
 - [x] 1.2 packages/contracts — prefixed ULID ids, typed errors, env parsing
+- [x] 1.3 Application spec schema — strict, defaults, cross-field + stateful guards (ADR 0001)
 
 ## Doing
 
-- [ ] 1.3 Application spec schema + validation (§5)
+- [ ] 1.4 versioned spec schemas with forward-migration on read (§30 ⑧)
 
 ## Next (M1)
 
-- [ ] 1.4 versioned spec schemas with forward-migration on read (§30 ⑧)
 - [ ] 1.5 operation catalog with risk tiers (§24)
 - [ ] 1.6 packages/core — spec diff, Plan, plan_hash, Release, risk, blast radius
 - [ ] 1.7 packages/db — Drizzle schema + migrations (orgs, users, projects, releases, plans, approvals, audit)
@@ -40,6 +40,7 @@
 
 ## Decisions made
 
+- 2026-09-19 Spec identity lives on the envelope — docs/adr/0001-spec-identity-on-envelope.md
 - 2026-09-19 TypeScript 6.0 (not 7.x): typescript-eslint supports `<6.1`.
 
 ## Flags for the user
