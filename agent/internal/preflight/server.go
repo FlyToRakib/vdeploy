@@ -8,8 +8,9 @@ import (
 )
 
 // The checks here answer §30 ①–②: is this the kind of machine VDeploy can
-// run on, and is anything already on it that would collide. Only what would
-// break sites refuses; an old or untested system is a warning with advice.
+// run on, and is anything already on it that would collide. An old or
+// unusual system is refused rather than half-installed (§30); a test machine
+// can allow it explicitly, and is then warned instead.
 
 // Machine is what the server checks read about the machine.
 type Machine interface {
@@ -46,10 +47,22 @@ var distroNames = map[string]string{
 
 const supportedList = "Ubuntu 22.04 or newer, Debian 11 or newer, Rocky Linux / AlmaLinux 9"
 
+// Options change what the server checks accept.
+type Options struct {
+	// AllowUnsupportedOS turns a refused system into a warning: for test
+	// machines only, never a server that hosts sites.
+	AllowUnsupportedOS bool
+}
+
 // RunServer executes the checks about the machine itself.
-func RunServer(ctx context.Context, m Machine) []Result {
+func RunServer(ctx context.Context, m Machine, opts Options) []Result {
+	distro := checkDistro(m)
+	if opts.AllowUnsupportedOS && distro.Status == Fail {
+		distro.Status = Warn
+		distro.Message += " (allowed by allowUnsupportedOS in the agent config)"
+	}
 	return []Result{
-		checkDistro(m),
+		distro,
 		checkPanels(m),
 		checkChassis(m),
 		checkAddresses(m),
@@ -65,20 +78,20 @@ func checkDistro(m Machine) Result {
 	}
 	switch minimum, known := supported[id]; {
 	case id == "centos":
-		return Result{ID: "distro", Status: Warn,
-			Message: "CentOS no longer receives security updates: VDeploy can run here, but the server itself will not be patched.",
+		return Result{ID: "distro", Status: Fail,
+			Message: "CentOS no longer receives security updates.",
 			Fix:     "Reinstall the server with " + supportedList + "."}
 	case id == "alpine":
-		return Result{ID: "distro", Status: Warn,
-			Message: "Alpine Linux is not a tested server system: it has no systemd, so the agent will not restart by itself after a reboot.",
-			Fix:     "For a server that looks after itself, use " + supportedList + "."}
+		return Result{ID: "distro", Status: Fail,
+			Message: "Alpine Linux is not supported: it has no systemd, so the agent would not start again after a reboot.",
+			Fix:     "Reinstall the server with " + supportedList + "."}
 	case !known:
 		return Result{ID: "distro", Status: Warn,
 			Message: fmt.Sprintf("%s %s has not been tested with VDeploy.", name, version),
 			Fix:     "It may work; the tested systems are " + supportedList + "."}
 	case compareVersions(version, minimum) < 0:
-		return Result{ID: "distro", Status: Warn,
-			Message: fmt.Sprintf("%s %s is too old: it no longer receives security updates, so the server itself will not be patched.", name, version),
+		return Result{ID: "distro", Status: Fail,
+			Message: fmt.Sprintf("%s %s is too old: it no longer receives security updates.", name, version),
 			Fix:     fmt.Sprintf("Reinstall the server with %s %s or newer (most providers can do this from their dashboard).", name, minimum)}
 	}
 	return pass("distro", fmt.Sprintf("%s %s is supported", name, version))

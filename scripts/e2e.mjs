@@ -290,20 +290,22 @@ async function run() {
     reconcileSeconds: 5,
     storageScanSeconds: 5,
     acmeServer: 'https://127.0.0.1:14000/dir',
+    // The testbed is Alpine (docker:dind): allowed here, refused on a real server.
+    allowUnsupportedOS: true,
   };
   inTestbed(
     `mkdir -p /etc/vdeploy && echo '${JSON.stringify(agentConfig)}' > /etc/vdeploy/agent.json`,
   );
-  // The testbed is Alpine (docker:dind): preflight warns, says why, and goes on.
+  // Preflight refuses Alpine on a real server; the testbed's config allows it, with a warning.
   const doctor = inTestbed('vd-agent preflight 2>&1 || true');
   for (const expected of [
-    /Alpine Linux is not a tested server system/,
+    /Alpine Linux is not supported.*allowed by allowUnsupportedOS/,
     /hosting control panel/,
     /containers/,
   ]) {
     if (!expected.test(doctor)) throw new Error(`preflight did not report ${expected}: ${doctor}`);
   }
-  pass('preflight names what it checked', 'warns about Alpine, with what to use instead');
+  pass('preflight names what it checked', 'Alpine refused unless the config allows it');
   const enrolled = inTestbed(
     `vd-agent enroll --url ${PUBLIC_URL} --token ${server.token} 2>&1 | tail -3`,
   );

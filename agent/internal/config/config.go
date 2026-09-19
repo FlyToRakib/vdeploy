@@ -44,6 +44,9 @@ type Config struct {
 	BuildMinFreeMemoryMB int64 `json:"buildMinFreeMemoryMB"`
 	// StorageScanSeconds is how often containers are checked for files a deploy would delete.
 	StorageScanSeconds int `json:"storageScanSeconds"`
+	// AllowUnsupportedOS lets preflight pass an old or unusual system with a
+	// warning. For test machines only.
+	AllowUnsupportedOS bool `json:"allowUnsupportedOS"`
 }
 
 // Defaults are safe for a fresh server.

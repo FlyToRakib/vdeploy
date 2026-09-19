@@ -127,7 +127,7 @@ func cleanServer() *fakeMachine {
 }
 
 func TestACleanServerPassesTheServerChecks(t *testing.T) {
-	for _, r := range RunServer(context.Background(), cleanServer()) {
+	for _, r := range RunServer(context.Background(), cleanServer(), Options{}) {
 		if r.Status != Pass {
 			t.Errorf("%s: %s %s", r.ID, r.Status, r.Message)
 		}
@@ -142,9 +142,9 @@ func TestServerProblemsAreNamed(t *testing.T) {
 		status Status
 		says   string
 	}{
-		{"old ubuntu", func(m *fakeMachine) { m.version = "20.04" }, "distro", Warn, "Ubuntu 20.04 is too old"},
-		{"centos", func(m *fakeMachine) { m.id, m.version = "centos", "7" }, "distro", Warn, "CentOS"},
-		{"alpine", func(m *fakeMachine) { m.id, m.version = "alpine", "3.20" }, "distro", Warn, "Alpine"},
+		{"old ubuntu", func(m *fakeMachine) { m.version = "20.04" }, "distro", Fail, "Ubuntu 20.04 is too old"},
+		{"centos", func(m *fakeMachine) { m.id, m.version = "centos", "7" }, "distro", Fail, "CentOS"},
+		{"alpine", func(m *fakeMachine) { m.id, m.version = "alpine", "3.20" }, "distro", Fail, "Alpine"},
 		{"untested distro", func(m *fakeMachine) { m.id, m.version = "arch", "" }, "distro", Warn, "not been tested"},
 		{"cpanel", func(m *fakeMachine) { m.panels = []string{"cPanel"} }, "panel", Fail, "already runs cPanel"},
 		{"a laptop", func(m *fakeMachine) { m.laptop = true }, "machine", Fail, "laptop"},
@@ -155,7 +155,7 @@ func TestServerProblemsAreNamed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := cleanServer()
 			tc.spoil(m)
-			for _, r := range RunServer(context.Background(), m) {
+			for _, r := range RunServer(context.Background(), m, Options{}) {
 				if r.ID != tc.id {
 					continue
 				}
@@ -172,7 +172,7 @@ func TestServerProblemsAreNamed(t *testing.T) {
 func TestExistingContainersAreNotAProblem(t *testing.T) {
 	m := cleanServer()
 	m.foreign = 13
-	for _, r := range RunServer(context.Background(), m) {
+	for _, r := range RunServer(context.Background(), m, Options{}) {
 		if r.ID == "containers" && (r.Status != Pass || !strings.Contains(r.Message, "never touches")) {
 			t.Fatalf("%+v", r)
 		}
@@ -193,6 +193,15 @@ func TestPortConflictNamesTheProgram(t *testing.T) {
 	h.busy[80] = true
 	r := checkPorts(namingHost{h})
 	if r.Status != Fail || !strings.Contains(r.Message, "used by nginx") || !strings.Contains(r.Fix, "systemctl disable --now nginx") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestATestMachineCanAllowAnUnsupportedSystem(t *testing.T) {
+	m := cleanServer()
+	m.id, m.version = "alpine", "3.20"
+	r := RunServer(context.Background(), m, Options{AllowUnsupportedOS: true})[0]
+	if r.Status != Warn || !strings.Contains(r.Message, "allowUnsupportedOS") {
 		t.Fatalf("%+v", r)
 	}
 }

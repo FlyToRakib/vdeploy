@@ -116,7 +116,7 @@ func doctor(configPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	host := preflight.LinuxHost{Docker: docker.New(cfg.DockerSocket)}
-	results := append(preflight.Run(ctx, host, cfg.StateDir), preflight.RunServer(ctx, host)...)
+	results := append(preflight.Run(ctx, host, cfg.StateDir), preflight.RunServer(ctx, host, preflight.Options{AllowUnsupportedOS: cfg.AllowUnsupportedOS})...)
 	marks := map[preflight.Status]string{preflight.Pass: "✓", preflight.Warn: "!", preflight.Fail: "✗"}
 	for _, r := range results {
 		fmt.Printf("%s %s\n", marks[r.Status], r.Message)
