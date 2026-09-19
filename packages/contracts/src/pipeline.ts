@@ -36,6 +36,8 @@ export const PlanView = z.strictObject({
   /** Why a person must approve it, in plain words; empty when it may run now. */
   reasons: z.array(z.string()),
   plan: Plan,
+  /** Why it failed, in plain words, once it has. */
+  error: z.strictObject({ code: z.string(), message: z.string() }).nullable(),
 });
 export type PlanView = z.infer<typeof PlanView>;
 

@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+.git
+.vdeploy-local
+.claude
+agent
+apps/web
+**/.env
+**/.env.*
+!**/.env.example

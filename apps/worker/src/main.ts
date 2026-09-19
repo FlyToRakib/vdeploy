@@ -26,6 +26,9 @@ const deps = {
   registry: publicRegistries,
   now: () => new Date(),
   pollMs: 1000,
+  logError: (err: unknown, planId: string) => {
+    log.error({ err, planId }, 'plan failed unexpectedly');
+  },
 };
 
 // One plan at a time: two changes to one project never race (§33 deploy lock).

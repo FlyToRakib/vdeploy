@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.24 — end-to-end deploy of a prebuilt image in the testbed (M1 exit)
+**Task:** 1.25 — control-plane backup/restore drill
 **Status:** in progress
-**Updated:** 2026-09-19 14:06 UTC
+**Updated:** 2026-09-19 14:27 UTC
 
 ## Done
 
@@ -30,14 +30,15 @@
 - [x] 1.21 agent — preflight doctor (OS/desktop refusal, arch, root, Docker ≥25, memory/swap, disk, ports 80/443, clock sync via adjtimex, cgroup v2), plain-language messages with fixes, runs before enroll and refuses to continue on failure; vd-agent preflight
 - [x] 1.22 control plane — POST /api/v1/operations/:name runs every op through one pipeline (resolve target → evaluate gate → plan (re-gated at the plan's real tier) → persist → queue or hold for approval; reads → handlers; admin ops → handlers), audit of every decision, idempotency keys, approve (checkApprover + re-plan hash check → stale, HMAC-signed approval, single winner) / reject, plan listing; admin ops (invite, remove, set_role ends sessions, org.update, server.add + one-time hashed enrollment token, api_key create/revoke, audit.export with chain verification); BullMQ apply queue on Postgres (ADR 0005)
 - [x] 1.23 control plane — agent enrollment + signed wss gateway (NOTIFY-driven desired-state push, validated acks/observed state, refusals audited); apps/worker applies queued plans: approval signature + re-plan hash re-checked at apply time, steps (create/update spec, digest-pinned releases via registry token flow, deploy with convergence wait + auto-rollback, restart via revision, scale, stop/start, delete), state change + generation bump + NOTIFY in one tx, exactly-once
+- [x] 1.24 M1 exit — scripts/e2e.mjs runs Postgres + API + worker + agent inside an isolated dind testbed and drives the real API: setup, server.add, preflight+enroll, signed channel, deploy from spec (digest-pinned, 2 replicas), agent restart (no duplicates), self-heal of a killed container, audit chain verified. PASSED locally and on the VPS testbed (2026-09-19), baseline verified unchanged before/after. control-plane image (deploy/control-plane.Dockerfile); PlanView carries the failure reason; worker logs unexpected errors
 
 ## Doing
 
-- [ ] 1.24 end-to-end deploy of a prebuilt image in the testbed (M1 exit)
+- [ ] 1.25 control-plane backup/restore drill
 
 ## Next (M1)
 
-- [ ] 1.25 control-plane backup/restore drill
+
 
 ## Known gaps (tracked, not forgotten)
 

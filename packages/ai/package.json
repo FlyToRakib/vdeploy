@@ -20,5 +20,8 @@
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.1"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

@@ -134,7 +134,16 @@ beforeAll(async () => {
     status: 'online',
     agentPublicKey: 'x'.repeat(44),
   });
-  deps = { db: t.db, approvalKey: KEY, registry: offline, now: () => new Date(), pollMs: 50 };
+  deps = {
+    db: t.db,
+    approvalKey: KEY,
+    registry: offline,
+    now: () => new Date(),
+    pollMs: 50,
+    logError: (error) => {
+      throw error;
+    },
+  };
   agentTimer = setInterval(() => void agentTick(), 50);
 }, 120_000);
 

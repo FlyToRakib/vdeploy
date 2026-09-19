@@ -16,5 +16,8 @@
   },
   "dependencies": {
     "@vdeploy/contracts": "workspace:*"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

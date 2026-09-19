@@ -47,6 +47,7 @@ export function planView(row: typeof plans.$inferSelect): PlanView {
     expiresAt: row.expiresAt.toISOString(),
     reasons: row.reasons,
     plan: row.plan,
+    error: row.error ?? null,
   };
 }
 

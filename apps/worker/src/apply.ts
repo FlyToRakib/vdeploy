@@ -7,6 +7,8 @@ import { runStep, type ApplyState, type StepDeps } from './steps.js';
 
 export interface WorkerDeps extends StepDeps {
   approvalKey: Buffer;
+  /** Where unexpected failures go in full; users only ever see a safe message. */
+  logError: (error: unknown, planId: string) => void;
 }
 
 export type ApplyOutcome = 'applied' | 'failed' | 'stale' | 'skipped';
@@ -97,6 +99,7 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
     await checkApproval(deps, row, fresh);
     for (const step of row.plan.steps) await runStep(deps, state, step);
   } catch (error) {
+    if (!(error instanceof VDeployError)) deps.logError(error, row.id);
     const code = error instanceof VDeployError ? error.code : 'internal';
     const message =
       error instanceof VDeployError ? error.message : 'The change could not be applied';
