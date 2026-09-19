@@ -19,6 +19,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/config"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
+	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/transport"
 )
@@ -36,7 +37,7 @@ func main() {
 
 func run(args []string, log *slog.Logger) error {
 	if len(args) == 0 {
-		return errors.New("usage: vd-agent run|enroll|version [flags]")
+		return errors.New("usage: vd-agent run|preflight|enroll|version [flags]")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	configPath := flags.String("config", "/etc/vdeploy/agent.json", "local agent configuration")
@@ -44,11 +45,19 @@ func run(args []string, log *slog.Logger) error {
 	case "version":
 		fmt.Println(version)
 		return nil
+	case "preflight":
+		if err := flags.Parse(args[1:]); err != nil {
+			return fmt.Errorf("flags: %w", err)
+		}
+		return doctor(*configPath)
 	case "enroll":
 		url := flags.String("url", "", "control plane URL (https://…)")
 		token := flags.String("token", "", "one-time enrollment token")
 		if err := flags.Parse(args[1:]); err != nil {
 			return fmt.Errorf("flags: %w", err)
+		}
+		if err := doctor(*configPath); err != nil {
+			return err
 		}
 		return enroll(*configPath, *url, *token, log)
 	case "run":
@@ -67,6 +76,29 @@ func facts(memoryBytes int64) identity.Facts {
 		Hostname: hostname, Arch: runtime.GOARCH, OS: runtime.GOOS,
 		AgentVersion: version, CPUs: runtime.NumCPU(), MemoryBytes: memoryBytes,
 	}
+}
+
+// doctor prints every preflight check and refuses to continue on a failure.
+func doctor(configPath string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	host := preflight.LinuxHost{Docker: docker.New(cfg.DockerSocket)}
+	results := preflight.Run(ctx, host, cfg.StateDir)
+	marks := map[preflight.Status]string{preflight.Pass: "✓", preflight.Warn: "!", preflight.Fail: "✗"}
+	for _, r := range results {
+		fmt.Printf("%s %s\n", marks[r.Status], r.Message)
+		if r.Fix != "" && r.Status != preflight.Pass {
+			fmt.Printf("    → %s\n", r.Fix)
+		}
+	}
+	if preflight.Failed(results) {
+		return errors.New("this server is not ready; nothing was installed or changed")
+	}
+	return nil
 }
 
 func enroll(configPath, url, token string, log *slog.Logger) error {

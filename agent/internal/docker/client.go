@@ -106,12 +106,21 @@ func labelFilter(labels ...string) url.Values {
 	return url.Values{"filters": {string(filters)}}
 }
 
-// Ping checks that the Engine answers.
-func (c *Client) Ping(ctx context.Context) error {
+// APIVersion returns the highest Engine API version the daemon speaks.
+func (c *Client) APIVersion(ctx context.Context) (string, error) {
 	var v struct {
 		APIVersion string `json:"ApiVersion"`
 	}
-	return c.do(ctx, http.MethodGet, "/version", nil, nil, &v)
+	if err := c.do(ctx, http.MethodGet, "/version", nil, nil, &v); err != nil {
+		return "", err
+	}
+	return v.APIVersion, nil
+}
+
+// Ping checks that the Engine answers.
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.APIVersion(ctx)
+	return err
 }
 
 // IsNotFound reports whether err means the Engine has no such object.

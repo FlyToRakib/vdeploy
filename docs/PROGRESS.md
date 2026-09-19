@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.21 — agent — preflight doctor
+**Task:** 1.22 — control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
 **Status:** in progress
-**Updated:** 2026-09-19 13:35 UTC
+**Updated:** 2026-09-19 13:38 UTC
 
 ## Done
 
@@ -27,14 +27,14 @@
 - [x] 1.18 agent — Go module; frames validated against JSON Schema generated from contracts (drift-checked); L6 guard (digest-pinned + allowlisted registry, memory/CPU bounds, mount paths, stateful replicas, secrets refused until delivery exists); compose plans hardened replicas (own labels, project network, pids/log limits, no privilege fields at all); adversarial suite: 38 hostile frames all refused; golangci-lint clean
 - [x] 1.19 agent — stdlib Docker Engine client (ADR 0003; request types cannot express privileges/binds), reconciler (create/heal/stop/replace, new release starts before old stops, deleted projects keep volumes, only labelled containers touched, per-project failure isolation), loop (atomic persisted state, stale generations ignored, tampered disk state refused, pass never cut by shutdown), local config/policy, vd-agent binary. Verified in local dind: deploy, hardening, self-heal, restart convergence, bystander untouched
 - [x] 1.20 agent — enrollment (one-time token → local Ed25519 key, pinned control-plane key, https-only except loopback, idempotent), signed-frame protocol (ADR 0004: sig over exact body bytes, per-connection nonce, strict seq, clock skew), outbound wss client (challenge → hello → desired_state/ack/observed_state, backoff reconnect, strict decode, any bad frame closes the connection); tests incl. forged/replayed/cross-connection/impostor; race detector on
+- [x] 1.21 agent — preflight doctor (OS/desktop refusal, arch, root, Docker ≥25, memory/swap, disk, ports 80/443, clock sync via adjtimex, cgroup v2), plain-language messages with fixes, runs before enroll and refuses to continue on failure; vd-agent preflight
 
 ## Doing
 
-- [ ] 1.21 agent — preflight doctor
+- [ ] 1.22 control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
 
 ## Next (M1)
 
-- [ ] 1.22 control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
 - [ ] 1.23 control plane — agent gateway (wss) + worker applying plans + observed state
 - [ ] 1.24 end-to-end deploy of a prebuilt image in the testbed (M1 exit)
 - [ ] 1.25 control-plane backup/restore drill
@@ -52,6 +52,10 @@
 - 2026-09-19 "2nd approver for T3" governs AI-proposed changes — docs/adr/0002-second-approver-for-ai-destructive.md
 - 2026-09-19 Better Auth's org/API-key endpoints are not public; those actions go through VDeploy routes and the policy engine (one authorization path).
 - 2026-09-19 Session idle timeout 7 days, absolute lifetime 30 days; step-up window 10 minutes; approvals 15 minutes.
+- 2026-09-19 Next.js 16 (current stable) instead of the 15 named in §21; Better Auth supports it.
+- 2026-09-19 Agent speaks the Docker Engine API over stdlib HTTP — docs/adr/0003-agent-docker-api-over-stdlib.md
+- 2026-09-19 Agent identity = Ed25519 keys + signed frames, not mTLS — docs/adr/0004-agent-identity-signed-frames.md
+- 2026-09-19 Agent frames are validated against JSON Schema generated from contracts (drift-checked), so Go never hand-copies the spec shape.
 
 ## Flags for the user
 
