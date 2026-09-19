@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Auth } from '../auth/auth.js';
+import { webHeaders } from './headers.js';
 
 /** However active a session is, it ends this long after sign-in (§20.2). */
 export const SESSION_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -24,14 +25,6 @@ export interface ResolvedActor {
   actor: HumanActor;
   /** Set for cookie sessions; API-key requests have no session to manage. */
   sessionId: string | null;
-}
-
-function headerHeaders(req: FastifyRequest): Headers {
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (typeof value === 'string') headers.set(key, value);
-  }
-  return headers;
 }
 
 async function roleIn(db: Database, userId: string, orgId: string): Promise<Role> {
@@ -87,7 +80,7 @@ export async function resolveSession(
   db: Database,
   publicOrigin: string,
 ): Promise<SignedIn> {
-  const found = await auth.api.getSession({ headers: headerHeaders(req) });
+  const found = await auth.api.getSession({ headers: webHeaders(req) });
   if (!found) throw new VDeployError('unauthenticated', 'Please sign in');
   if (Date.now() - found.session.createdAt.getTime() > SESSION_ABSOLUTE_MS) {
     await db.delete(sessionTable).where(eq(sessionTable.id, found.session.id));

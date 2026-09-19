@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { newId, VDeployError } from '@vdeploy/contracts';
+import { newId, SetupRequest, VDeployError } from '@vdeploy/contracts';
 import {
   appendAudit,
   instanceSettings,
@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { Auth } from '../auth/auth.js';
 import { notMeSignature } from '../auth/hooks.js';
 import { resolveSession } from '../http/actor.js';
+import { webHeaders } from '../http/headers.js';
 
 export interface AccountDeps {
   auth: Auth;
@@ -22,13 +23,6 @@ export interface AccountDeps {
   secret: string;
   publicUrl: string;
 }
-
-const SetupBody = z.strictObject({
-  name: z.string().trim().min(1).max(100),
-  email: z.email().max(254),
-  password: z.string().min(12).max(128),
-  organization: z.string().trim().min(1).max(100),
-});
 
 function slugify(name: string): string {
   const base = name
@@ -68,7 +62,7 @@ export const accountRoutes =
      * exactly once. Claiming the settings row first makes a race between two
      * setup attempts impossible to win twice.
      */
-    app.post('/api/v1/setup', { schema: { body: SetupBody } }, async (req, reply) => {
+    app.post('/api/v1/setup', { schema: { body: SetupRequest } }, async (req, reply) => {
       const [claimed] = await db
         .insert(instanceSettings)
         .values({ id: 1 })
@@ -80,6 +74,7 @@ export const accountRoutes =
       try {
         response = await auth.api.signUpEmail({
           body: { name: req.body.name, email: req.body.email, password: req.body.password },
+          headers: webHeaders(req),
           asResponse: true,
         });
       } catch (error) {

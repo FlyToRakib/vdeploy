@@ -35,6 +35,8 @@ describe('first-run setup', () => {
     orgId = res.json<{ organizationId: string }>().organizationId;
     expect(orgId).toMatch(/^org_/);
     expect(res.cookies.some((c) => c.httpOnly && c.sameSite === 'Lax')).toBe(true);
+    const [created] = await t.database.db.select().from(session);
+    expect(created).toMatchObject({ userAgent: browser.userAgent, ipAddress: browser.ip });
 
     const again = await new Browser(t.app).request('POST', '/api/v1/setup', {
       ...OWNER,

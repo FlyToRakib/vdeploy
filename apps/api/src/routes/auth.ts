@@ -1,6 +1,7 @@
 import { VDeployError } from '@vdeploy/contracts';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { Auth } from '../auth/auth.js';
+import { webHeaders } from '../http/headers.js';
 
 /**
  * Better Auth endpoints a browser may call directly. Everything else it
@@ -29,15 +30,10 @@ export function isPublicAuthPath(path: string): boolean {
 }
 
 function toRequest(req: FastifyRequest, publicUrl: string): Request {
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (value === undefined) continue;
-    for (const item of Array.isArray(value) ? value : [value]) headers.append(key, item);
-  }
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD' && req.body !== undefined;
   return new Request(new URL(req.url, publicUrl), {
     method: req.method,
-    headers,
+    headers: webHeaders(req),
     ...(hasBody ? { body: JSON.stringify(req.body) } : {}),
   });
 }

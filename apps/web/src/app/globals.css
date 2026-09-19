@@ -1,0 +1,112 @@
+@import 'tailwindcss';
+
+/*
+ * Semantic design tokens (§20.1). Components use these names only — never a
+ * raw palette value — so both themes stay consistent. Each theme is designed
+ * on its own and contrast-checked by tokens.test.ts, not derived.
+ */
+:root {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #0b0d12;
+  --surface: #f6f7f9;
+  --surface-raised: #ffffff;
+  --border: #dfe3e8;
+  --muted-foreground: #525a67;
+  --accent: #3552c8;
+  --accent-foreground: #ffffff;
+  --focus-ring: #3552c8;
+  --status-healthy: #11734f;
+  --status-healthy-bg: #e7f6ef;
+  --status-warning: #8a5300;
+  --status-warning-bg: #fdf3e2;
+  --status-failed: #b8261b;
+  --status-failed-bg: #fdecea;
+  --status-neutral: #525a67;
+  --status-neutral-bg: #eef0f3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --background: #0b0d12;
+    --foreground: #e8eaf0;
+    --surface: #11141b;
+    --surface-raised: #171b24;
+    --border: #272c38;
+    --muted-foreground: #a0a8b6;
+    --accent: #93a6ff;
+    --accent-foreground: #0b0d12;
+    --focus-ring: #93a6ff;
+    --status-healthy: #52c992;
+    --status-healthy-bg: #10261c;
+    --status-warning: #f1b458;
+    --status-warning-bg: #2b2111;
+    --status-failed: #ff8078;
+    --status-failed-bg: #2e1513;
+    --status-neutral: #a0a8b6;
+    --status-neutral-bg: #1c212b;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #0b0d12;
+  --foreground: #e8eaf0;
+  --surface: #11141b;
+  --surface-raised: #171b24;
+  --border: #272c38;
+  --muted-foreground: #a0a8b6;
+  --accent: #93a6ff;
+  --accent-foreground: #0b0d12;
+  --focus-ring: #93a6ff;
+  --status-healthy: #52c992;
+  --status-healthy-bg: #10261c;
+  --status-warning: #f1b458;
+  --status-warning-bg: #2b2111;
+  --status-failed: #ff8078;
+  --status-failed-bg: #2e1513;
+  --status-neutral: #a0a8b6;
+  --status-neutral-bg: #1c212b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-focus-ring: var(--focus-ring);
+  --color-status-healthy: var(--status-healthy);
+  --color-status-healthy-bg: var(--status-healthy-bg);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-failed: var(--status-failed);
+  --color-status-failed-bg: var(--status-failed-bg);
+  --color-status-neutral: var(--status-neutral);
+  --color-status-neutral-bg: var(--status-neutral-bg);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

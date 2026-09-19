@@ -1,4 +1,6 @@
 import js from '@eslint/js';
+import nextPlugin from '@next/eslint-plugin-next';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -11,7 +13,7 @@ export default tseslint.config(
     extends: [...tseslint.configs.strictTypeChecked, ...tseslint.configs.stylisticTypeChecked],
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ['packages/*/*.config.ts', 'apps/*/*.config.ts'] },
+        projectService: { allowDefaultProject: ['packages/*/*.config.ts'] },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -28,6 +30,16 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    plugins: { '@next/next': nextPlugin, 'react-hooks': reactHooks },
+    rules: {
+      ...nextPlugin.configs.recommended.rules,
+      ...nextPlugin.configs['core-web-vitals'].rules,
+      ...reactHooks.configs.recommended.rules,
+    },
+    settings: { next: { rootDir: 'apps/web' } },
   },
   {
     files: ['**/*.test.ts', '**/*.test.tsx'],

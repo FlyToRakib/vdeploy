@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.17 — apps/web — §20.1 shell (sidebar, theming, ⌘K, tokens)
+**Task:** 1.18 — agent — Go scaffold + L6 spec validation + adversarial suite
 **Status:** in progress
-**Updated:** 2026-09-19 12:51 UTC
+**Updated:** 2026-09-19 13:09 UTC
 
 ## Done
 
@@ -23,14 +23,14 @@
 - [x] 1.14 L7 — appendAudit (per-org hash chain, advisory-lock serialized, transactional) + verifyAuditChain; checkSpend pre-request cap; kill switch already in L1
 - [x] 1.15 apps/api — Fastify 5 + zod provider, validated env (.env.example), helmet (strict CSP/HSTS), rate limit, structured error model that never leaks internals, redacted logs, /healthz /readyz, graceful shutdown
 - [x] 1.16 auth — Better Auth: argon2id, HIBP, server-side sessions (idle 7d + absolute 30d), TOTP + recovery codes, passkeys, scoped API keys, invite-only registration + first-run setup, per-email progressive lockout, enumeration-safe, new-device alert + not-me link, step-up (password), session list/revoke, CSRF origin check, auth audit; public auth surface is an allowlist
+- [x] 1.17 apps/web — Next 16 shell: sidebar (collapsible, org, theme, account), deep-linked sections + breadcrumbs, docked AI panel (honest AI-off state), ⌘K palette, semantic tokens contrast-tested in both themes, no-flash theming under nonce CSP, error/loading boundaries, phone layout; sign-in (password/2FA/passkey), first-run setup (shared Zod schema), forgot/reset, security settings (sessions, passkeys, TOTP + recovery codes). Verified live in the browser.
 
 ## Doing
 
-- [ ] 1.17 apps/web — §20.1 shell (sidebar, theming, ⌘K, tokens)
+- [ ] 1.18 agent — Go scaffold + L6 spec validation + adversarial suite
 
 ## Next (M1)
 
-- [ ] 1.18 agent — Go scaffold + L6 spec validation + adversarial suite
 - [ ] 1.19 agent — Docker composition + reconciliation loop
 - [ ] 1.20 agent — enrollment, Ed25519-signed frames, wss transport
 - [ ] 1.21 agent — preflight doctor
