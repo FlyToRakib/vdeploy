@@ -91,14 +91,22 @@ async function agentTick() {
   const state = await desiredStateFor(t.db, serverId);
   const report = {
     generation: state.generation,
-    projects: state.projects.map((p) => ({
-      projectId: p.projectId,
-      replicas: Array.from({ length: p.spec.runtime.replicas }, (_, i) => ({
-        name: `vd-${p.projectId}-v${p.releaseVersion}-r${p.revision}-${i}`,
-        state: !p.running ? 'exited' : p.releaseVersion < crashFrom ? 'ready' : 'unhealthy',
-        release: p.releaseId,
-      })),
-    })),
+    projects: state.projects.map((p) =>
+      p.spec.deploy.releaseCommand?.includes('fail')
+        ? {
+            projectId: p.projectId,
+            replicas: [],
+            error: 'the release command failed (exit 1): relation "users" already exists',
+          }
+        : {
+            projectId: p.projectId,
+            replicas: Array.from({ length: p.spec.runtime.replicas }, (_, i) => ({
+              name: `vd-${p.projectId}-v${p.releaseVersion}-r${p.revision}-${i}`,
+              state: !p.running ? 'exited' : p.releaseVersion < crashFrom ? 'ready' : 'unhealthy',
+              release: p.releaseId,
+            })),
+          },
+    ),
     events: null,
   };
   await t.db
@@ -224,6 +232,18 @@ describe('applyPlan', () => {
       .from(deployments)
       .where(eq(deployments.planId, update.id));
     expect(deployment?.status).toBe('rolled_back');
+  });
+
+  it('keeps the old release when the release command fails, and says why', async () => {
+    const created = await createProject();
+    const next = spec({ deploy: { releaseCommand: ['npm', 'run', 'fail'] } });
+    const update = await plan('project.update_spec', { projectId: created.id, spec: next });
+    expect(await applyPlan(deps, update.id)).toBe('failed');
+    expect((await project(created.id)).currentReleaseId).toBe(created.currentReleaseId);
+    const [failed] = await t.db.select().from(plans).where(eq(plans.id, update.id));
+    expect(failed?.error?.message).toBe(
+      'the release command failed (exit 1): relation "users" already exists. The previous release was restored.',
+    );
   });
 
   it('restarts, scales, stops and starts through the same convergence path', async () => {

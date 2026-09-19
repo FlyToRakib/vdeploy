@@ -91,6 +91,9 @@ type Health struct {
 type Deploy struct {
 	Strategy    string `json:"strategy"`
 	DrainPeriod string `json:"drainPeriod"`
+	// ReleaseCommand runs once per release before its replicas start.
+	ReleaseCommand []string `json:"releaseCommand,omitempty"`
+	ReleaseTimeout string   `json:"releaseTimeout"`
 }
 
 // Runtime is how the application's containers run.

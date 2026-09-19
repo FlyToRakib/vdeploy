@@ -195,6 +195,13 @@ export const Deploy = z.strictObject({
     })
     .optional(),
   drainPeriod: Duration.default('30s'),
+  /**
+   * Runs once per release, before its replicas start, with the app's own
+   * image, settings and secrets — database migrations, typically. The old
+   * release keeps serving meanwhile; if it fails, the release never starts.
+   */
+  releaseCommand: z.array(z.string().max(4096)).min(1).max(64).optional(),
+  releaseTimeout: Duration.default('10m'),
   timeout: Duration.default('10m'),
   autoRollback: z.boolean().default(true),
 });

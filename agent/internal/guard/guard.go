@@ -143,6 +143,11 @@ func Check(p spec.DesiredProject, policy Policy) error {
 			refuse("command contains a NUL byte")
 		}
 	}
+	for _, arg := range p.Spec.Deploy.ReleaseCommand {
+		if strings.ContainsRune(arg, 0) {
+			refuse("release command contains a NUL byte")
+		}
+	}
 
 	if len(reasons) > 0 {
 		return &Refusal{ProjectID: p.ProjectID, Reasons: reasons}

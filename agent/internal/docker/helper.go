@@ -117,6 +117,20 @@ func (c *Client) RunHelper(ctx context.Context, h Helper) (int, string, error) {
 	return waited.StatusCode, logs, nil
 }
 
+// Finished is a stopped container's exit code and the end of its output.
+func (c *Client) Finished(ctx context.Context, id string) (int, string, error) {
+	var state struct {
+		State struct {
+			ExitCode int `json:"ExitCode"`
+		} `json:"State"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(id)+"/json", nil, nil, &state); err != nil {
+		return -1, "", err
+	}
+	output, err := c.logs(ctx, id)
+	return state.State.ExitCode, output, err
+}
+
 // logs reads a stopped container's combined output from the Engine's
 // multiplexed stream, keeping only the last maxHelperLog bytes.
 func (c *Client) logs(ctx context.Context, id string) (string, error) {

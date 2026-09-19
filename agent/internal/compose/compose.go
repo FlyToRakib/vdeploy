@@ -154,3 +154,28 @@ func SecretEnv(p spec.DesiredProject, open func(secretID string, version int, se
 	}
 	return env, nil
 }
+
+// RoleLabel marks what a container is for; unset means an app replica.
+const RoleLabel = "io.vdeploy.role"
+
+// ReleaseName is the one-shot container that runs a release's release command.
+func ReleaseName(p spec.DesiredProject) string {
+	return fmt.Sprintf("vd-%s-v%d-release", ProjectKey(p.ProjectID), p.ReleaseVersion)
+}
+
+// ReleaseJob is the release command's container: a replica's image,
+// environment, network, folders and limits, running the command once.
+func ReleaseJob(p spec.DesiredProject, replica Container) Container {
+	job := replica
+	job.Name = ReleaseName(p)
+	job.Cmd = p.Spec.Deploy.ReleaseCommand
+	job.RestartPolicy = "no"
+	job.Port = 0
+	job.Labels = map[string]string{
+		ManagedLabel: "true",
+		ProjectLabel: p.ProjectID,
+		ReleaseLabel: p.ReleaseID,
+		RoleLabel:    "release",
+	}
+	return job
+}

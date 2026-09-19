@@ -329,6 +329,7 @@ async function run() {
   await blueGreen(hello.id, helloSpec);
   await instantUrl();
   await secrets(hello.id);
+  await releaseCommand(hello.id);
   await buildFromSource(server.serverId);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
@@ -427,6 +428,51 @@ async function secrets(projectId) {
   const listed = JSON.stringify(await op('secret.list', { projectId }));
   if (listed.includes(value)) throw new Error('secret.list returned a value');
   pass('secret delivered sealed: in the container, never in frames or on disk', name);
+}
+
+/** Waits for a plan to finish and returns it. */
+async function settled(planId, timeoutMs = 300_000) {
+  return until(
+    'plan finished',
+    async () => {
+      const plan = await call('GET', `/api/v1/plans/${planId}`);
+      return ['applied', 'failed', 'stale'].includes(plan.status) ? plan : null;
+    },
+    timeoutMs,
+  );
+}
+
+/**
+ * The release command (M2 2.9): it runs before a release's replicas start.
+ * When it fails, the old release keeps serving and the reason is reported;
+ * when it passes, the release goes live.
+ */
+async function releaseCommand(projectId) {
+  const { result: project } = await op('project.get', { projectId });
+  const withCommand = (command) => ({
+    ...project.spec,
+    source: { type: 'image', image: 'nginx:1.28-alpine' },
+    deploy: { ...project.spec.deploy, releaseCommand: command },
+  });
+  const failing = await op('project.update_spec', {
+    projectId,
+    spec: withCommand(['sh', '-c', 'echo "migration 042 failed: column exists" >&2; exit 3']),
+  });
+  const failed = await settled(failing.plan.id);
+  if (failed.status !== 'failed' || !/exit 3.*migration 042 failed/s.test(failed.error?.message)) {
+    throw new Error(`a failing release command was not reported: ${JSON.stringify(failed)}`);
+  }
+  if (!served()?.startsWith('1.28')) throw new Error('the old release stopped serving');
+  pass('failed release command: old version kept serving', failed.error.message.slice(0, 60));
+
+  const passing = await op('project.update_spec', {
+    projectId,
+    spec: withCommand(['sh', '-c', 'echo migrated']),
+  });
+  const applied = await settled(passing.plan.id);
+  if (applied.status !== 'applied') throw new Error(JSON.stringify(applied));
+  await until('old release drained', async () => managedContainers().length === 2, 60_000);
+  pass('release command ran before the new version started');
 }
 
 /** Sends a .tar.gz as the body of a request, with the session like `call`. */

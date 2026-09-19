@@ -878,6 +878,20 @@
                     "type": "string",
                     "pattern": "^([1-9]\\d{0,6})(ms|s|m|h)$"
                   },
+                  "releaseCommand": {
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 4096
+                    }
+                  },
+                  "releaseTimeout": {
+                    "default": "10m",
+                    "type": "string",
+                    "pattern": "^([1-9]\\d{0,6})(ms|s|m|h)$"
+                  },
                   "timeout": {
                     "default": "10m",
                     "type": "string",
@@ -891,6 +905,7 @@
                 "required": [
                   "strategy",
                   "drainPeriod",
+                  "releaseTimeout",
                   "timeout",
                   "autoRollback"
                 ],

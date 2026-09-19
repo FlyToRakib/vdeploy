@@ -28,6 +28,8 @@ type Engine interface {
 	Start(ctx context.Context, id string) error
 	Stop(ctx context.Context, id string, timeoutSeconds int) error
 	Remove(ctx context.Context, id string) error
+	// Finished is a stopped container's exit code and the end of its output.
+	Finished(ctx context.Context, id string) (int, string, error)
 }
 
 // Event is one thing the reconciler did, reported to the control plane.
@@ -80,10 +82,13 @@ type Reconciler struct {
 	Secrets SecretSource
 	// Built says whether this agent built a local image for a project; nil runs none.
 	Built func(imageID, projectID string) bool
-	Now   func() time.Time
+	// Releases remembers which releases ran their release command.
+	Releases *ReleaseLog
+	Now      func() time.Time
 
-	ready    map[string]*readiness
-	draining map[string]time.Time
+	ready         map[string]*readiness
+	draining      map[string]time.Time
+	releaseStarts map[string]time.Time
 }
 
 func (r *Reconciler) now() time.Time {
@@ -200,6 +205,10 @@ func (p *pass) converge(ctx context.Context, project spec.DesiredProject, contai
 		for _, c := range p.old(project.ProjectID) {
 			p.remove(ctx, c)
 		}
+	}
+	// A new release's replicas start only after its release command succeeded.
+	if ready, err := p.released(ctx, project, containers); err != nil || !ready {
+		return err
 	}
 	var errs []error
 	for _, c := range containers {

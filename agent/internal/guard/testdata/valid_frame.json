@@ -89,6 +89,7 @@
         "deploy": {
           "strategy": "blueGreen",
           "drainPeriod": "30s",
+          "releaseTimeout": "10m",
           "timeout": "10m",
           "autoRollback": true
         },

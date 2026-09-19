@@ -190,6 +190,7 @@ func serve(configPath string, log *slog.Logger) error {
 	// Local image IDs run only if this agent built them (ADR 0008).
 	images := &build.Images{Path: filepath.Join(cfg.StateDir, "built-images.json")}
 	reconciler.Built = images.Built
+	reconciler.Releases = &reconcile.ReleaseLog{Path: filepath.Join(cfg.StateDir, "releases.json")}
 	loop := &reconcile.Loop{
 		Reconciler: reconciler,
 		StateDir:   cfg.StateDir,

@@ -26,7 +26,9 @@ type fakeEngine struct {
 	images     map[string]bool
 	calls      []string
 	env        map[string][]string // by container name, as created
-	failCreate string              // container name whose create fails
+	exitCodes  map[string]int      // by id, once a container has exited
+	outputs    map[string]string
+	failCreate string // container name whose create fails
 	nextID     int
 }
 
@@ -96,6 +98,23 @@ func (f *fakeEngine) Remove(_ context.Context, id string) error {
 	f.calls = append(f.calls, "remove "+f.containers[id].Name)
 	delete(f.containers, id)
 	return nil
+}
+
+func (f *fakeEngine) Finished(_ context.Context, id string) (int, string, error) {
+	return f.exitCodes[id], "migrating...\n" + f.outputs[id], nil
+}
+
+// finish makes a running container exit with code, as a one-shot command would.
+func (f *fakeEngine) finish(name string, code int, output string) {
+	for id, c := range f.containers {
+		if c.Name == name {
+			c.State = "exited"
+			if f.exitCodes == nil {
+				f.exitCodes, f.outputs = map[string]int{}, map[string]string{}
+			}
+			f.exitCodes[id], f.outputs[id] = code, output
+		}
+	}
 }
 
 func (f *fakeEngine) running() []string {
@@ -645,5 +664,93 @@ func TestALocalImageRunsOnlyIfThisAgentBuiltItForThisProject(t *testing.T) {
 	report = reconcile(t, r, desired(2, p))
 	if len(engine.running()) != 1 || slices.Contains(engine.calls, "pull") {
 		t.Fatalf("running = %v calls = %v error = %q", engine.running(), engine.calls, report.Projects[0].Error)
+	}
+}
+
+func releaseProject(version int) spec.DesiredProject {
+	p := testProject(idA, version, 1)
+	p.Spec.Deploy.ReleaseCommand = []string{"npm", "run", "migrate"}
+	return p
+}
+
+func TestTheReleaseCommandRunsOnceBeforeAnyReplicaStarts(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	job := compose.ReleaseName(releaseProject(1))
+
+	report := reconcile(t, r, desired(1, releaseProject(1)))
+	if !slices.Equal(engine.running(), []string{job}) || !report.Settling {
+		t.Fatalf("running = %v, settling = %v", engine.running(), report.Settling)
+	}
+	// Still migrating: nothing else starts.
+	reconcile(t, r, desired(1, releaseProject(1)))
+	if !slices.Equal(engine.running(), []string{job}) {
+		t.Fatalf("running = %v", engine.running())
+	}
+
+	engine.finish(job, 0, "done")
+	report = reconcile(t, r, desired(1, releaseProject(1)))
+	if len(engine.running()) != 1 || strings.Contains(engine.running()[0], "release") {
+		t.Fatalf("running = %v", engine.running())
+	}
+	if !slices.Contains(kinds(report.Events), "released") {
+		t.Fatalf("events = %v", report.Events)
+	}
+
+	// Self-healing a replica never runs the command again.
+	for _, c := range engine.containers {
+		c.State = "exited"
+	}
+	engine.calls = nil
+	reconcile(t, r, desired(1, releaseProject(1)))
+	if slices.ContainsFunc(engine.calls, func(c string) bool { return strings.Contains(c, "release") }) {
+		t.Fatalf("release command ran twice: %v", engine.calls)
+	}
+}
+
+func TestAFailedReleaseCommandKeepsTheOldReleaseServing(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	reconcile(t, r, desired(1, releaseProject(1)))
+	engine.finish(compose.ReleaseName(releaseProject(1)), 0, "")
+	settle(t, r, desired(1, releaseProject(1)))
+	v1 := engine.running()
+
+	job := compose.ReleaseName(releaseProject(2))
+	reconcile(t, r, desired(2, releaseProject(2)))
+	engine.finish(job, 1, "relation users already exists")
+	report := reconcile(t, r, desired(2, releaseProject(2)))
+	if !slices.Equal(engine.running(), v1) {
+		t.Fatalf("running = %v, want the old release %v", engine.running(), v1)
+	}
+	if !strings.Contains(report.Projects[0].Error, "the release command failed (exit 1)") ||
+		!strings.Contains(report.Projects[0].Error, "relation users already exists") {
+		t.Fatalf("error = %q", report.Projects[0].Error)
+	}
+	// It is not retried on its own: the next pass reports the same failure.
+	engine.calls = nil
+	report = reconcile(t, r, desired(2, releaseProject(2)))
+	if report.Projects[0].Error == "" || len(engine.calls) != 0 {
+		t.Fatalf("calls = %v error = %q", engine.calls, report.Projects[0].Error)
+	}
+
+	// Rolling back to v1, which is already running, runs nothing.
+	settle(t, r, desired(3, releaseProject(1)))
+	if !slices.Equal(engine.running(), v1) {
+		t.Fatalf("running = %v", engine.running())
+	}
+}
+
+func TestAReleaseCommandThatHangsIsStoppedAtItsTimeout(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	p := releaseProject(1)
+	p.Spec.Deploy.ReleaseTimeout = "1m"
+	reconcile(t, r, desired(1, p))
+	reconcile(t, r, desired(1, p))
+	advance(2 * time.Minute)
+	report := reconcile(t, r, desired(1, p))
+	if len(engine.running()) != 0 || !strings.Contains(report.Projects[0].Error, "did not finish within 1m0s") {
+		t.Fatalf("running = %v error = %q", engine.running(), report.Projects[0].Error)
 	}
 }
