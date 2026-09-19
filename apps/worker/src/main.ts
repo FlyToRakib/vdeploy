@@ -5,6 +5,7 @@ import { createPostgresBackend, Worker } from 'bullmq';
 import { pino } from 'pino';
 import { z } from 'zod';
 import { applyPlan } from './apply.js';
+import { publicDns, runDomainChecks } from './dns-check.js';
 import { publicRegistries } from './registry.js';
 
 const config = parseEnv(
@@ -15,6 +16,16 @@ const config = parseEnv(
       .regex(/^[0-9a-f]{64}$/, 'must be 32 bytes as 64 hex characters')
       .transform((hex) => Buffer.from(hex, 'hex')),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+    /** Resolvers for domain checks (ip or ip:port, comma-separated); the system's when unset. */
+    DNS_SERVERS: z
+      .string()
+      .default('')
+      .transform((list) =>
+        list
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
   }),
   process.env,
 );
@@ -51,9 +62,33 @@ worker.on('failed', (job, err) => {
   log.error({ job: job?.id, err }, 'plan job failed');
 });
 
+// DNS verification before any certificate request (§13): a few seconds
+// between rounds, never two rounds at once.
+const dnsDeps = {
+  db,
+  dns: publicDns(config.DNS_SERVERS),
+  now: () => new Date(),
+  logError: (err: unknown, host: string) => {
+    log.warn({ err, host }, 'DNS lookup failed; will look again');
+  },
+};
+let checking = false;
+const dnsTimer = setInterval(() => {
+  if (checking) return;
+  checking = true;
+  runDomainChecks(dnsDeps)
+    .catch((err: unknown) => {
+      log.error({ err }, 'domain check round failed');
+    })
+    .finally(() => {
+      checking = false;
+    });
+}, 5000);
+
 // Finish the plan in progress, then stop.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
+    clearInterval(dnsTimer);
     void worker.close().then(close, close);
   });
 }

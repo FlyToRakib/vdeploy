@@ -1,5 +1,12 @@
 import { VDeployError, type OperationName } from '@vdeploy/contracts';
-import { deployments, projects, releases, servers, urlSettingsFor } from '@vdeploy/db';
+import {
+  deployments,
+  domainChecksFor,
+  projects,
+  releases,
+  servers,
+  urlSettingsFor,
+} from '@vdeploy/db';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Handler } from './context.js';
 
@@ -85,6 +92,9 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         agentVersion: servers.agentVersion,
         arch: servers.arch,
         lastSeenAt: servers.lastSeenAt,
+        publicIpv4: servers.publicIpv4,
+        publicIpv6: servers.publicIpv6,
+        addressManual: servers.addressManual,
       })
       .from(servers)
       .where(eq(servers.id, id(args, 'serverId')));
@@ -105,6 +115,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)))
       .orderBy(projects.name),
   }),
+  'domain.status': async ({ deps, args }) => domainChecksFor(deps.db, [id(args, 'projectId')]),
   'project.logs': notYet,
   'project.metrics': notYet,
   'project.events': notYet,

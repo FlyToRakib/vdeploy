@@ -43,6 +43,13 @@
       "when": 1789831169459,
       "tag": "0005_instant_urls",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789832167040,
+      "tag": "0006_domain_checks",
+      "breakpoints": true
     }
   ]
 }

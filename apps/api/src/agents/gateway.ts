@@ -8,6 +8,7 @@ import {
   listen,
   observedState,
   refreshInstantHosts,
+  resetDomainChecks,
   serverEnrollments,
   servers,
   type Database,
@@ -146,12 +147,14 @@ export class Gateway {
     hello: Extract<AgentFrame, { type: 'hello' }>,
     remote: string | undefined,
   ) {
-    const address = publicAddress(hello.addresses ?? [], remote);
+    const ipv4 = publicAddress(hello.addresses ?? [], remote);
+    const ipv6 = hello.addresses?.find((a) => a.includes(':')) ?? null;
     await this.deps.db.transaction(async (tx) => {
-      const [before] = await tx
-        .select({ publicIpv4: servers.publicIpv4 })
-        .from(servers)
-        .where(eq(servers.id, serverId));
+      const [before] = await tx.select().from(servers).where(eq(servers.id, serverId));
+      // An address a person set is never overwritten by detection.
+      const detect = before?.addressManual !== true;
+      const ipv4Moved = ipv4 !== null && ipv4 !== before?.publicIpv4;
+      const moved = detect && (ipv4Moved || ipv6 !== (before?.publicIpv6 ?? null));
       await tx
         .update(servers)
         .set({
@@ -160,12 +163,14 @@ export class Gateway {
           agentVersion: hello.agentVersion,
           arch: hello.arch,
           capacity: { cpus: hello.cpus, memoryBytes: hello.memoryBytes, diskBytes: 0 },
-          ...(address ? { publicIpv4: address } : {}),
+          ...(moved ? { publicIpv6: ipv6, ...(ipv4 ? { publicIpv4: ipv4 } : {}) } : {}),
         })
         .where(eq(servers.id, serverId));
-      // A new address moves this server's zero-domain URLs (§13.1).
-      if (address && address !== before?.publicIpv4) {
+      // A new address moves this server's zero-domain URLs (§13.1), and its
+      // domains are checked again before any certificate is requested.
+      if (moved) {
         await refreshInstantHosts(tx, { orgId, serverId });
+        await resetDomainChecks(tx, serverId, this.deps.now());
       }
     });
   }

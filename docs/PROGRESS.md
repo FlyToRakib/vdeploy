@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.4 — DNS verification before any ACME request
+**Task:** 2.5 — env vars + versioned secrets
 **Status:** in progress
-**Updated:** 2026-09-19 15:40 UTC
+**Updated:** 2026-09-19 15:50 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -19,14 +19,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.1 agent-managed Traefik v3.7.13 (digest-pinned, built from constants, only container with host ports/bind, OOM-protected), routing files per project (write-temp + rename, pruned), Traefik joins only routed project networks, traffic moves to new replicas before old ones are removed; verified in local dind (Host routing → nginx, unknown host → 404)
 - [x] 2.2 health-gated blue/green: the agent probes each new replica (HTTP path from `health.startup`, else TCP) until it passes or its startup window closes; traffic stays on the old release until every new replica is ready, then switches in one routing-file rename; old replicas drain (`deploy.drainPeriod`, default 30s) before removal; `recreate` stops the old first; unhealthy replicas are reported and the worker rolls back at once instead of waiting out the deploy timeout; the loop passes every 2s while settling. Verified in local dind: nginx 1.27 → 1.28 under 10 req/s through Traefik, 0 of 125 requests failed (new e2e check)
 - [x] 2.3 instant URLs: org URL settings (`urls.configure` / `urls.get`) — zero-domain fallback `{project}.{ip-dashed}.sslip.io` by default (nip.io selectable), or a wildcard base domain with a one-label `{project}` pattern, or off; each project stores its host (unique among live projects, numbered around collisions, stable), earlier hosts 301 to the new one; server public IPv4 from agent interface addresses or a public connection address; agent routes the instant host with HTTP-01 TLS, redirects old hosts, and refuses frames where two projects claim one hostname (+3 adversarial cases). Verified in local dind: `hello.apps.vdeploy.test` served over HTTPS, plain HTTP redirected (new e2e check). ADR 0006
+- [x] 2.4 DNS verified before any certificate: the worker checks every certificate host (Let's Encrypt domains, instant and redirecting hosts) — A/AAAA against the server's IPv4/IPv6, Cloudflare proxy ranges, CNAME on the apex, zone from SOA for registrar-ready "name" values — re-checking on a doubling countdown (15 s → 5 min), never a retry button; the agent attaches the ACME resolver only to verified hosts and serves the rest on plain HTTP; `domain.status` shows status, what DNS returned, and copy-paste records; `server.set_address` sets a NAT'd server's address by hand (detection never overwrites it); an address change re-verifies everything. Verified in local dind with a CoreDNS resolver: host verified, then HTTPS served (e2e check)
 
 ## Doing
 
-- [ ] 2.4 DNS verification before any ACME request (A/AAAA vs server IP, Cloudflare proxy detection, registrar guidance)
+- [ ] 2.5 env vars + versioned secrets (AES-256-GCM envelope, per-project DEK), delivery to the agent, build-time vs runtime split
 
 ## Next (M2)
 
-- [ ] 2.5 env vars + versioned secrets (AES-256-GCM envelope, per-project DEK), delivery to the agent, build-time vs runtime split
 - [ ] 2.6 resource governor at plan time (capacity, requests, headroom) + capacity in plain words
 - [ ] 2.7 builds on the server: Dockerfile + Nixpacks via BuildKit, registry cache, build caps, detection preview
 - [ ] 2.8 direct upload deploy (folder/ZIP → archive source)
@@ -48,6 +48,7 @@ verified unchanged before, after, and after testbed teardown.
 - The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.
 - Liveness/readiness probes after startup (§ health.liveness/readiness) are not run by the agent yet; startup probes gate traffic (2.2). Snapshots before destructive steps arrive with backups (M4); until then the agent never deletes volumes at all.
 - Instant URLs: settings are per org only (not per server); `{env}`/`{team}` patterns wait for environments and teams; no automatic sslip.io ↔ nip.io failover on Let's Encrypt rate limits (needs ACME outcomes from the agent, 2.12); a custom domain added later is not yet checked against other projects' instant hosts (2.4). The agent reads its interface addresses at start only.
+- DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale); `domain.add` does not yet refuse a host another project routes (the agent refuses such a frame).
 
 ## Decisions made
 
@@ -60,6 +61,7 @@ verified unchanged before, after, and after testbed teardown.
 - 2026-09-19 Agent speaks the Docker Engine API over stdlib HTTP — docs/adr/0003-agent-docker-api-over-stdlib.md
 - 2026-09-19 Agent identity = Ed25519 keys + signed frames, not mTLS — docs/adr/0004-agent-identity-signed-frames.md
 - 2026-09-19 Agent frames are validated against JSON Schema generated from contracts (drift-checked), so Go never hand-copies the spec shape.
+- 2026-09-19 DNS verification runs in the worker (system resolvers, or `DNS_SERVERS`); the desired state lists verified hosts and the agent requests certificates only for those.
 - 2026-09-19 Instant URLs: sslip.io default (neither it nor nip.io is on the PSL; both run on a raised LE limit), single-label patterns, stored hosts with redirects — docs/adr/0006-instant-urls.md
 
 ## Flags for the user

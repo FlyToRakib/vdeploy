@@ -142,7 +142,9 @@ func TestHostileFramesAreRefused(t *testing.T) {
 			raw, _ := json.Marshal(project(f))
 			_ = json.Unmarshal(raw, &twin)
 			twin["projectId"] = "prj_01J9Z3Q8S7M2K4X6V1B5N0C9ZZ"
-			twin["hosts"] = map[string]any{"instant": "evil.8-8-4-4.sslip.io", "redirects": []any{"blog.8-8-4-4.sslip.io"}}
+			twin["hosts"] = map[string]any{
+				"instant": "evil.8-8-4-4.sslip.io", "redirects": []any{"blog.8-8-4-4.sslip.io"}, "verified": []any{},
+			}
 			f["projects"] = append(f["projects"].([]any), twin)
 		}, "already routed"},
 

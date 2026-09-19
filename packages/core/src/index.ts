@@ -4,3 +4,4 @@ export * from './risk.js';
 export * from './plan.js';
 export * from './release.js';
 export * from './instant.js';
+export * from './dns.js';

@@ -50,6 +50,8 @@ type DesiredProject struct {
 type Hosts struct {
 	Instant   string   `json:"instant"`
 	Redirects []string `json:"redirects"`
+	// Verified hosts point here in DNS: the only ones a certificate may be requested for.
+	Verified []string `json:"verified"`
 }
 
 // Application is the subset of the Application spec the agent acts on.

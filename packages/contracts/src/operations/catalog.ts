@@ -74,6 +74,13 @@ export const OPERATIONS = [
   query('server.resources', 'server', 'metrics', 'Show server CPU, memory and disk usage', obj(S)),
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
+  query(
+    'domain.status',
+    'project',
+    'config',
+    'Show whether each domain points to the server, and exactly what to change if not',
+    obj(P),
+  ),
   operation('project.restart', 'safe', 'project', 'Restart the app containers', obj(P)),
   operation('project.redeploy', 'safe', 'project', 'Deploy the current release again', obj(P)),
   operation('project.rebuild', 'safe', 'project', 'Rebuild from source and deploy', obj(P)),
@@ -94,6 +101,14 @@ export const OPERATIONS = [
   operation('backup.trigger', 'safe', 'project', 'Take a backup now', obj(P)),
 
   // ── Tier 2 · sensitive ──────────────────────────────────────────────────
+  operation(
+    'server.set_address',
+    'sensitive',
+    'server',
+    'Set the public address a server is reached at, when it cannot be detected; empty goes back to detection',
+    obj({ ...S, ipv4: z.ipv4().nullable(), ipv6: z.ipv6().nullable().default(null) }),
+    { minRole: 'admin' },
+  ),
   operation(
     'project.create',
     'sensitive',

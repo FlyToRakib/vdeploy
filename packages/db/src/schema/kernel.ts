@@ -2,6 +2,8 @@ import type {
   AiGrants,
   ApplicationSpec,
   BlastRadius,
+  DnsInstruction,
+  DomainStatus,
   ObservedReport,
   Plan,
   UrlSettings,
@@ -42,6 +44,9 @@ export const servers = pgTable('servers', {
   desiredGeneration: integer('desired_generation').notNull().default(0),
   /** Where the internet reaches this server; backs its zero-domain URLs (§13.1). */
   publicIpv4: text('public_ipv4'),
+  publicIpv6: text('public_ipv6'),
+  /** Set by a person: detection never overwrites it. */
+  addressManual: boolean('address_manual').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -152,6 +157,35 @@ export const aiGrants = pgTable('ai_grants', {
   grants: jsonb('grants').$type<AiGrants>().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * DNS checks for every hostname a server would request a certificate for
+ * (§13, §30 ⑤). The agent asks Let's Encrypt only for verified ones.
+ */
+export const domainChecks = pgTable(
+  'domain_checks',
+  {
+    host: text('host').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    status: text('status').$type<DomainStatus>().notNull().default('pending'),
+    message: text('message').notNull().default(''),
+    seen: jsonb('seen')
+      .$type<{ a: string[]; aaaa: string[] }>()
+      .notNull()
+      .default({ a: [], aaaa: [] }),
+    instructions: jsonb('instructions').$type<DnsInstruction[]>().notNull().default([]),
+    attempts: integer('attempts').notNull().default(0),
+    checkedAt: timestamp('checked_at', { withTimezone: true }),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    nextCheckAt: timestamp('next_check_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('domain_checks_due').on(t.nextCheckAt)],
+);
 
 /** How an org's projects get instant URLs (§13.1); no row means the defaults. */
 export const urlSettings = pgTable('url_settings', {

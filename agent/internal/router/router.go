@@ -23,8 +23,10 @@ const CertResolver = "letsencrypt"
 type object = map[string]any
 
 // Redirect sends an old hostname, permanently, to the same path on a new one.
+// Secure also answers on HTTPS, which needs a certificate for the old name.
 type Redirect struct {
 	From, To string
+	Secure   bool
 }
 
 // Backend is one running replica Traefik may send traffic to.
@@ -125,9 +127,11 @@ func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Re
 			"regex": "^https?://[^/]+(.*)$", "replacement": "https://" + r.To + "${1}", "permanent": true,
 		}}
 		old := "Host(" + quote(r.From) + ")"
-		routers[name] = object{
-			"rule": old, "service": key, "entryPoints": []string{"websecure"},
-			"middlewares": []string{name}, "tls": object{"certResolver": CertResolver},
+		if r.Secure {
+			routers[name] = object{
+				"rule": old, "service": key, "entryPoints": []string{"websecure"},
+				"middlewares": []string{name}, "tls": object{"certResolver": CertResolver},
+			}
 		}
 		routers[name+"-http"] = object{
 			"rule": old, "service": key, "entryPoints": []string{"web"}, "middlewares": []string{name},

@@ -24,6 +24,7 @@ const TESTBED = vps ? 'vdeploy-test-testbed' : 'vdeploy-test-dind';
 const API = 'http://127.0.0.1:18090';
 const PUBLIC_URL = 'http://127.0.0.1:8080';
 const IMAGE = 'vdeploy-test/control-plane:e2e';
+const COREDNS = 'coredns/coredns:1.14.7';
 
 const env = vps
   ? Object.fromEntries(
@@ -106,6 +107,19 @@ function resetTestbed() {
   );
 }
 
+// The testbed's own DNS: every *.vdeploy.test name points at TEST_ADDRESS,
+// the address the test gives the server, so domain checks run for real.
+const DNS_IP = '10.203.0.53';
+const TEST_ADDRESS = '1.2.3.4';
+const COREFILE = `vdeploy.test:53 {
+  template IN A {
+    answer "{{ .Name }} 60 IN A ${TEST_ADDRESS}"
+  }
+  template ANY ANY {
+    rcode NOERROR
+  }
+}`;
+
 // The control plane's secrets for this run. A real install keeps them outside
 // the database backup, and a restore needs both (docs/runbooks/control-plane-restore.md).
 const secret = () => randomBytes(32).toString('hex');
@@ -118,6 +132,7 @@ const controlPlaneEnv = [
   `-e PUBLIC_URL=${PUBLIC_URL}`,
   '-e BREACHED_PASSWORD_CHECK=false',
   '-e LOG_LEVEL=warn',
+  `-e DNS_SERVERS=${DNS_IP}`,
 ].join(' ');
 
 function startDatabase() {
@@ -142,7 +157,14 @@ function startApiAndWorker() {
 function startControlPlane() {
   log('starting Postgres, the API and the worker inside the testbed');
   inTestbed(
-    'docker rm -f cp-db cp-api cp-worker >/dev/null 2>&1; docker network rm cp >/dev/null 2>&1; docker network create cp >/dev/null',
+    [
+      'docker rm -f cp-db cp-api cp-worker cp-dns >/dev/null 2>&1',
+      'docker network rm cp >/dev/null 2>&1',
+      'docker network create --subnet 10.203.0.0/24 cp >/dev/null',
+      'mkdir -p /opt/cp && cat > /opt/cp/Corefile',
+      `docker run -d --name cp-dns --network cp --ip ${DNS_IP} -v /opt/cp/Corefile:/Corefile:ro ${COREDNS} -conf /Corefile >/dev/null`,
+    ].join('; '),
+    COREFILE,
   );
   startDatabase();
   startApiAndWorker();
@@ -392,8 +414,20 @@ async function instantUrl() {
     mode: 'wildcard',
     baseDomain: INSTANT_HOST.split('.').slice(1).join('.'),
   });
-  const host = result.projects.find((p) => p.name === 'hello')?.instantHost;
-  if (host !== INSTANT_HOST) throw new Error(`instant host is ${host}`);
+  const hello = result.projects.find((p) => p.name === 'hello');
+  if (hello?.instantHost !== INSTANT_HOST) throw new Error(`instant host is ${hello?.instantHost}`);
+  // Inside the testbed the server has only private addresses; set it by hand.
+  const [{ serverId }] = (await op('project.list', {})).result;
+  await op('server.set_address', { serverId, ipv4: TEST_ADDRESS });
+  const { result: checks } = await until('DNS verified before any certificate', async () => {
+    const status = await op('domain.status', { projectId: hello.id });
+    return status.result.some((c) => c.host === INSTANT_HOST && c.status === 'verified')
+      ? status
+      : null;
+  });
+  if (!checks.every((c) => c.status === 'verified')) {
+    throw new Error(`unverified hosts: ${JSON.stringify(checks)}`);
+  }
   await until(
     'instant URL served over https',
     async () => /^server: nginx/im.test(overTls(INSTANT_HOST)),
@@ -405,7 +439,10 @@ async function instantUrl() {
   if (!new RegExp(`location: https://${INSTANT_HOST}`, 'i').test(redirect)) {
     throw new Error(`plain http is not redirected: ${redirect}`);
   }
-  pass('instant URL on the wildcard domain: https, http redirected', `https://${INSTANT_HOST}`);
+  pass(
+    'instant URL: DNS verified first, then https with http redirected',
+    `https://${INSTANT_HOST}`,
+  );
 }
 
 /**

@@ -9,12 +9,14 @@ import {
   organization,
   projects,
   refreshInstantHosts,
+  resetDomainChecks,
   serverEnrollments,
   servers,
   session,
   urlSettings,
   verifyAuditChain,
 } from '@vdeploy/db';
+import { isPublicIpv4 } from '@vdeploy/core';
 import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
 import type { Handler, HandlerContext } from './context.js';
 
@@ -132,6 +134,32 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
         .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)));
       return { settings, projects: hosts };
     });
+  },
+  'server.set_address': async ({ deps, actor, args }) => {
+    const serverId = String(args.serverId);
+    const ipv4 = (args.ipv4 as string | null) ?? null;
+    const ipv6 = (args.ipv6 as string | null) ?? null;
+    if (ipv4 && !isPublicIpv4(ipv4)) {
+      throw new VDeployError(
+        'invalid_input',
+        `${ipv4} is a private or reserved address; visitors on the internet cannot reach it`,
+      );
+    }
+    const manual = ipv4 !== null || ipv6 !== null;
+    await deps.db.transaction(async (tx) => {
+      await tx
+        .update(servers)
+        .set(
+          manual
+            ? { publicIpv4: ipv4, publicIpv6: ipv6, addressManual: true }
+            : { addressManual: false },
+        )
+        .where(eq(servers.id, serverId));
+      // URLs follow the address, and DNS is confirmed again before any certificate.
+      await refreshInstantHosts(tx, { orgId: actor.orgId, serverId });
+      await resetDomainChecks(tx, serverId, deps.now());
+    });
+    return { serverId, ipv4, ipv6, detected: !manual };
   },
   'server.add': async (context) => {
     const serverId = newId('server');

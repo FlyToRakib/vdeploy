@@ -510,7 +510,11 @@ func TestInstantHostIsRoutedWithTLSAndOldHostsRedirect(t *testing.T) {
 	r := newReconciler(engine)
 	r.Routing = routing
 	p := routedProject(1)
-	p.Hosts = spec.Hosts{Instant: "blog.apps.example.com", Redirects: []string{"blog.8-8-4-4.sslip.io", "blog.example.com"}}
+	p.Hosts = spec.Hosts{
+		Instant:   "blog.apps.example.com",
+		Redirects: []string{"blog.8-8-4-4.sslip.io", "blog.example.com"},
+		Verified:  []string{"blog.apps.example.com", "blog.8-8-4-4.sslip.io"},
+	}
 
 	reconcile(t, r, desired(1, p))
 	file := routing.files[compose.ProjectKey("prj_"+idA)]
@@ -527,5 +531,31 @@ func TestInstantHostIsRoutedWithTLSAndOldHostsRedirect(t *testing.T) {
 	// A redirect never shadows a domain the project itself serves.
 	if strings.Contains(file, "moved-1") {
 		t.Fatalf("own domain turned into a redirect:\n%s", file)
+	}
+}
+
+func TestNoCertificateIsRequestedBeforeDNSIsVerified(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+	p := routedProject(1) // blog.example.com on Let's Encrypt, not verified
+	p.Hosts = spec.Hosts{Instant: "blog.apps.example.com", Redirects: []string{"old.apps.example.com"}}
+	key := compose.ProjectKey("prj_" + idA)
+
+	reconcile(t, r, desired(1, p))
+	file := routing.files[key]
+	if strings.Contains(file, "certResolver") || strings.Contains(file, "websecure") {
+		t.Fatalf("a certificate would be requested before DNS is verified:\n%s", file)
+	}
+	if !strings.Contains(file, "Host(`blog.example.com`)") || !strings.Contains(file, "Host(`old.apps.example.com`)") {
+		t.Fatalf("hosts are not served on plain HTTP meanwhile:\n%s", file)
+	}
+
+	p.Hosts.Verified = []string{"blog.example.com"}
+	reconcile(t, r, desired(2, p))
+	file = routing.files[key]
+	if strings.Count(file, "certResolver") != 1 {
+		t.Fatalf("only the verified host may get a certificate:\n%s", file)
 	}
 }

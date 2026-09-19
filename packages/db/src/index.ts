@@ -6,3 +6,4 @@ export * from './notify.js';
 export * from './desired.js';
 export * from './plan-context.js';
 export * from './instant.js';
+export * from './domains.js';

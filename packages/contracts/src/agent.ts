@@ -28,6 +28,11 @@ export const DesiredProject = z.strictObject({
   hosts: z.strictObject({
     instant: Hostname.nullable(),
     redirects: z.array(Hostname).max(8),
+    /**
+     * Hosts whose DNS was verified to point here (§13): the only ones the
+     * agent may request a certificate for. The rest are served on plain HTTP.
+     */
+    verified: z.array(Hostname).max(64),
   }),
 });
 export type DesiredProject = z.infer<typeof DesiredProject>;

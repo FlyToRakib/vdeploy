@@ -1,5 +1,6 @@
 import { AGENT_PROTOCOL, DesiredState, readSpec } from '@vdeploy/contracts';
 import type { Database } from './client.js';
+import { certificateHosts, verifiedHosts } from './domains.js';
 import { projects, releases, servers } from './schema/index.js';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 
@@ -11,6 +12,7 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm';
  */
 export async function desiredStateFor(db: Database, serverId: string): Promise<DesiredState> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  const verified = await verifiedHosts(db, serverId);
   const rows = await db
     .select({ project: projects, release: releases })
     .from(projects)
@@ -41,6 +43,7 @@ export async function desiredStateFor(db: Database, serverId: string): Promise<D
         hosts: {
           instant: project.instantHost,
           redirects: project.instantHost ? project.previousHosts : [],
+          verified: certificateHosts({ ...project, spec }).filter((h) => verified.has(h)),
         },
       };
     }),

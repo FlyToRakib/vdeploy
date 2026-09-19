@@ -68,7 +68,7 @@ func TestFileRoutesEveryHostToEveryReplica(t *testing.T) {
 
 func TestOldHostsRedirectToTheNewOne(t *testing.T) {
 	raw, ok := File("abc", network(), []spec.Domain{domain("blog.apps.example.com", "letsencrypt", "/")},
-		[]Redirect{{From: "blog.8-8-4-4.sslip.io", To: "blog.apps.example.com"}},
+		[]Redirect{{From: "blog.8-8-4-4.sslip.io", To: "blog.apps.example.com", Secure: true}},
 		[]Backend{{"vd-abc-v1-r0-0", 3000}})
 	if !ok {
 		t.Fatal("no routing produced")

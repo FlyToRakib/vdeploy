@@ -2,7 +2,6 @@ package reconcile
 
 import (
 	"context"
-	"slices"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
@@ -74,25 +73,39 @@ func (p *pass) backends(project spec.DesiredProject, containers []compose.Contai
 
 // routes are the hostnames a project answers on: its own domains and its
 // instant URL, plus earlier instant URLs that redirect to the current one.
+// A certificate is requested only for hosts the control plane verified in
+// DNS (§13); until then a host is served on plain HTTP, so an early request
+// can never count toward Let's Encrypt's failed-validation lockout.
 func routes(project spec.DesiredProject) ([]spec.Domain, []router.Redirect) {
-	hosts := project.Spec.Network.Domains
+	verified := map[string]bool{}
+	for _, host := range project.Hosts.Verified {
+		verified[host] = true
+	}
+	var hosts []spec.Domain
+	own := map[string]bool{}
+	for _, d := range project.Spec.Network.Domains {
+		if d.TLS.Provider == router.CertResolver && !verified[d.Host] {
+			d.TLS.Provider = "none"
+		}
+		hosts = append(hosts, d)
+		own[d.Host] = true
+	}
 	instant := project.Hosts.Instant
 	if instant == "" {
 		return hosts, nil
 	}
-	own := map[string]bool{}
-	for _, d := range hosts {
-		own[d.Host] = true
-	}
 	if !own[instant] {
 		d := spec.Domain{Host: instant, Paths: []string{"/"}}
-		d.TLS.Provider = router.CertResolver
-		hosts = append(slices.Clip(hosts), d)
+		d.TLS.Provider = "none"
+		if verified[instant] {
+			d.TLS.Provider = router.CertResolver
+		}
+		hosts = append(hosts, d)
 	}
 	var redirects []router.Redirect
 	for _, old := range project.Hosts.Redirects {
 		if old != instant && !own[old] {
-			redirects = append(redirects, router.Redirect{From: old, To: instant})
+			redirects = append(redirects, router.Redirect{From: old, To: instant, Secure: verified[old]})
 		}
 	}
 	return hosts, redirects

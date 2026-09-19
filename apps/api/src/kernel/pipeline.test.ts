@@ -7,6 +7,7 @@ import {
   plans,
   projects,
   serverEnrollments,
+  servers,
   session,
 } from '@vdeploy/db';
 import { and, eq } from 'drizzle-orm';
@@ -136,6 +137,21 @@ describe('administrative operations', () => {
     }>().result;
     expect(settings.mode).toBe('wildcard');
     expect(hosts.find((p) => p.id === projectId)?.instantHost).toBe('docs.apps.acme.dev');
+    const domains = await op(owner, 'domain.status', { projectId });
+    expect(domains.statusCode).toBe(200);
+    expect(domains.json<{ result: unknown[] }>().result).toEqual([]);
+  });
+
+  it('takes a server address by hand, refusing private ones', async () => {
+    const serverId = newId('server');
+    await t.database.db.insert(servers).values({ id: serverId, orgId, name: 'natted' });
+    const privateAddress = await op(owner, 'server.set_address', { serverId, ipv4: '10.0.0.4' });
+    expect(privateAddress.statusCode).toBe(400);
+    const res = await op(owner, 'server.set_address', { serverId, ipv4: '8.8.4.4' });
+    expect(res.statusCode).toBe(200);
+    const [row] = await t.database.db.select().from(servers).where(eq(servers.id, serverId));
+    expect(row).toMatchObject({ publicIpv4: '8.8.4.4', addressManual: true });
+    expect(row?.desiredGeneration).toBeGreaterThan(0);
   });
 });
 
