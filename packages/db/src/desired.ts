@@ -1,5 +1,6 @@
 import { AGENT_PROTOCOL, DesiredState, readSpec } from '@vdeploy/contracts';
-import { projects, releases, servers, type Database } from '@vdeploy/db';
+import type { Database } from './client.js';
+import { projects, releases, servers } from './schema/index.js';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 
 /**

@@ -3,6 +3,7 @@ import { AgentFrame, EnrollRequest, VDeployError } from '@vdeploy/contracts';
 import {
   appendAudit,
   DESIRED_STATE_CHANNEL,
+  desiredStateFor,
   listen,
   observedState,
   serverEnrollments,
@@ -14,7 +15,6 @@ import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { WebSocket } from 'ws';
 import { hashToken } from '../kernel/admin.js';
-import { desiredStateFor } from './desired.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
 
 const HELLO_TIMEOUT_MS = 10_000;

@@ -1,13 +1,7 @@
 import type { Target } from '@vdeploy/ai';
-import {
-  readSpec,
-  SCOPE_FIELD,
-  VDeployError,
-  type Id,
-  type OperationDefinition,
-} from '@vdeploy/contracts';
+import { SCOPE_FIELD, VDeployError, type Id, type OperationDefinition } from '@vdeploy/contracts';
 import type { PlanContext } from '@vdeploy/core';
-import { projects, releases, servers, type Database } from '@vdeploy/db';
+import { loadPlanWorld, projects, servers, type Database } from '@vdeploy/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
 const NOT_FOUND = () => new VDeployError('not_found', 'Resource not found');
@@ -71,29 +65,11 @@ export async function resolveTarget(
 }
 
 /** What the planner needs to know about the world, read at the moment of planning. */
-export async function loadPlanContext(
+export function loadPlanContext(
   db: Database,
   target: Target,
   args: Record<string, unknown>,
 ): Promise<PlanContext> {
-  if (target.kind !== 'project' || target.id === null) return { project: null };
-  const [row] = await db.select().from(projects).where(eq(projects.id, target.id));
-  if (!row) return { project: null };
-  const context: PlanContext = {
-    project: {
-      id: row.id as Id<'project'>,
-      spec: readSpec(row.spec),
-      currentReleaseId: row.currentReleaseId as Id<'release'> | null,
-    },
-  };
-  if (typeof args.releaseId === 'string') {
-    const [release] = await db
-      .select()
-      .from(releases)
-      .where(and(eq(releases.id, args.releaseId), eq(releases.projectId, row.id)));
-    if (release) {
-      context.targetRelease = { id: release.id as Id<'release'>, spec: readSpec(release.spec) };
-    }
-  }
-  return context;
+  const projectId = target.kind === 'project' ? target.id : null;
+  return loadPlanWorld(db, projectId, args.releaseId);
 }

@@ -3,3 +3,5 @@ export * from './schema/index.js';
 export * from './audit.js';
 export * from './queue.js';
 export * from './notify.js';
+export * from './desired.js';
+export * from './plan-context.js';
