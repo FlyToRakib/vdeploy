@@ -18,6 +18,8 @@ import {
   observedState,
   readSecret,
   recordEvents,
+  notifyFromReport,
+  notifyUnreachable,
   refreshInstantHosts,
   resetDomainChecks,
   serverEnrollments,
@@ -344,7 +346,9 @@ export class Gateway implements LogSource {
         .then((result) => {
           if (result.status === 'blocked' || result.status === 'partly') {
             log.warn({ serverId, ports: result.ports }, 'server web ports are not reachable');
+            return notifyUnreachable(db, serverId, result, now());
           }
+          return undefined;
         })
         .catch((err: unknown) => {
           log.error({ err, serverId }, 'could not check reachability');
@@ -365,6 +369,7 @@ export class Gateway implements LogSource {
           set: { generation: frame.report.generation, report: frame.report, receivedAt: now() },
         });
       await recordEvents(db, serverId, frame.report.events ?? [], now());
+      await notifyFromReport(db, serverId, frame.report, now());
     } else if (frame.type === 'build_result') {
       await finishBuild(db, serverId, frame.result, now());
     } else if (frame.type === 'logs_chunk' || frame.type === 'logs_end') {

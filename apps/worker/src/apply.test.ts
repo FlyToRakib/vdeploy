@@ -11,6 +11,9 @@ import {
   approvals,
   auditLog,
   builds,
+  createChannel,
+  deleteChannel,
+  listDeliveries,
   finishBuild,
   deployments,
   desiredStateFor,
@@ -259,6 +262,30 @@ describe('applyPlan', () => {
       .from(deployments)
       .where(eq(deployments.planId, update.id));
     expect(deployment?.status).toBe('rolled_back');
+  });
+
+  it('tells the channels that want it when a deploy fails, once', async () => {
+    const { channel } = await createChannel(
+      t.db,
+      SECRETS,
+      {
+        orgId,
+        name: 'ops',
+        config: { kind: 'email', to: ['ops@example.com'] },
+        triggers: ['deploy_failed'],
+      },
+      new Date(),
+    );
+    const created = await createProject();
+    const next = spec({ source: { type: 'image', image: `nginx@${digest('c')}` } });
+    const update = await plan('project.update_spec', { projectId: created.id, spec: next });
+    crashFrom = 2;
+    expect(await applyPlan(deps, update.id)).toBe('failed');
+    const told = await listDeliveries(t.db, orgId, channel.id);
+    // The successful create is not mailed: this channel asked only for failures.
+    expect(told.map((d) => d.trigger)).toEqual(['deploy_failed']);
+    expect(told[0]?.title).toBe('project.update_spec on blog failed');
+    await deleteChannel(t.db, orgId, channel.id);
   });
 
   it('keeps the old release when the release command fails, and says why', async () => {

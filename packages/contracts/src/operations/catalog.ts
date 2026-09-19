@@ -10,6 +10,7 @@ import {
   Scaling,
   Schedule,
 } from '../spec/sections.js';
+import { ChannelConfig, NotificationTrigger } from '../notifications.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
 import { operation, query, Role, type OperationDefinition } from './define.js';
@@ -105,6 +106,20 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'notification.channels',
+    'org',
+    'config',
+    'List where notifications go: email lists and webhooks, and what each is told about',
+    obj({}),
+  ),
+  query(
+    'notification.deliveries',
+    'org',
+    'config',
+    'Show recent notifications and whether each was delivered',
+    obj({ channelId: idSchema('notificationChannel').optional() }),
+  ),
+  query(
     'domain.status',
     'project',
     'config',
@@ -129,6 +144,13 @@ export const OPERATIONS = [
     obj(S),
   ),
   operation(
+    'notification.channel_test',
+    'safe',
+    'org',
+    'Send a test notification to a channel',
+    obj({ channelId: idSchema('notificationChannel') }),
+  ),
+  operation(
     'server.reclaim_safe',
     'safe',
     'server',
@@ -151,6 +173,39 @@ export const OPERATIONS = [
     'org',
     'Preview how uploaded source would be built, before deploying it',
     obj({ serverId, uploadId: idSchema('upload') }),
+  ),
+  operation(
+    'notification.channel_create',
+    'sensitive',
+    'org',
+    'Add an email list or a webhook that is told about failures (a webhook gets a signing secret, shown once)',
+    obj({
+      name: z.string().min(1).max(80),
+      config: ChannelConfig,
+      triggers: z.array(NotificationTrigger).max(20).optional(),
+    }),
+    { minRole: 'admin' },
+  ),
+  operation(
+    'notification.channel_update',
+    'sensitive',
+    'org',
+    'Rename a notification channel, change what it is told about, or pause it',
+    obj({
+      channelId: idSchema('notificationChannel'),
+      name: z.string().min(1).max(80).optional(),
+      triggers: z.array(NotificationTrigger).max(20).optional(),
+      enabled: z.boolean().optional(),
+    }),
+    { minRole: 'admin' },
+  ),
+  operation(
+    'notification.channel_delete',
+    'sensitive',
+    'org',
+    'Remove a notification channel',
+    obj({ channelId: idSchema('notificationChannel') }),
+    { minRole: 'admin' },
   ),
   operation(
     'server.set_address',

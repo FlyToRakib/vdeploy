@@ -1,11 +1,20 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { parseEnv } from '@vdeploy/contracts';
-import { APPLY_QUEUE, connect, pruneEvents, queueConnection, type ApplyJob } from '@vdeploy/db';
+import {
+  APPLY_QUEUE,
+  connect,
+  notifyOfflineServers,
+  pruneEvents,
+  queueConnection,
+  type ApplyJob,
+} from '@vdeploy/db';
 import { createPostgresBackend, Worker } from 'bullmq';
+import { createTransport } from 'nodemailer';
 import { pino } from 'pino';
 import { z } from 'zod';
 import { applyPlan } from './apply.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
+import { safePoster, sendDueNotifications } from './notifications.js';
 import { publicRegistries } from './registry.js';
 
 const config = parseEnv(
@@ -20,6 +29,13 @@ const config = parseEnv(
       .regex(/^[0-9a-f]{64}$/, 'must be 32 bytes as 64 hex characters')
       .transform((hex) => Buffer.from(hex, 'hex')),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+    /** smtp(s)://user:pass@host:port — email notifications need it. */
+    SMTP_URL: z.url({ protocol: /^smtps?$/ }).optional(),
+    MAIL_FROM: z.string().min(3).default('VDeploy <no-reply@localhost>'),
+    /** The dashboard's address, for links in notifications. */
+    PUBLIC_URL: z.url({ protocol: /^https?$/ }).optional(),
+    /** Let webhooks reach private addresses (a LAN-only install); off, they reach only the internet. */
+    WEBHOOK_ALLOW_PRIVATE: z.stringbool().default(false),
     /** Resolvers for domain checks (ip or ip:port, comma-separated); the system's when unset. */
     DNS_SERVERS: z
       .string()
@@ -97,11 +113,48 @@ const pruneTimer = setInterval(() => {
   });
 }, 60 * 60_000);
 
+// Notifications (§18): the outbox is sent every few seconds; servers silent
+// for five minutes are reported every half minute.
+const transport = config.SMTP_URL ? createTransport(config.SMTP_URL) : null;
+const notifier = {
+  db,
+  secretsKey: config.SECRETS_KEY,
+  now: () => new Date(),
+  mailer: transport
+    ? {
+        send: async (mail: { to: string; subject: string; text: string }) => {
+          await transport.sendMail({ from: config.MAIL_FROM, ...mail });
+        },
+      }
+    : null,
+  post: safePoster(config.WEBHOOK_ALLOW_PRIVATE),
+  publicUrl: config.PUBLIC_URL ?? null,
+};
+let sending = false;
+const notifyTimer = setInterval(() => {
+  if (sending) return;
+  sending = true;
+  sendDueNotifications(notifier)
+    .catch((err: unknown) => {
+      log.error({ err }, 'could not send notifications');
+    })
+    .finally(() => {
+      sending = false;
+    });
+}, 5000);
+const offlineTimer = setInterval(() => {
+  notifyOfflineServers(db, new Date()).catch((err: unknown) => {
+    log.error({ err }, 'could not check for offline servers');
+  });
+}, 30_000);
+
 // Finish the plan in progress, then stop.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     clearInterval(dnsTimer);
     clearInterval(pruneTimer);
+    clearInterval(notifyTimer);
+    clearInterval(offlineTimer);
     void worker.close().then(close, close);
   });
 }

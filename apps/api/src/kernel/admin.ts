@@ -23,6 +23,7 @@ import {
 import { generateSecret, isPublicIpv4 } from '@vdeploy/core';
 import { and, asc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
 import { checkReachability } from '../agents/reachability.js';
+import { NOTIFICATION_ADMIN } from './notifications.js';
 import type { Handler, HandlerContext } from './context.js';
 
 /** Enrollment tokens work once, within an hour (§25). */
@@ -63,6 +64,7 @@ async function memberRole({ deps, actor }: HandlerContext, userId: string) {
  * other operation — there is no side door through Better Auth's endpoints.
  */
 export const ADMIN: Partial<Record<OperationName, Handler>> = {
+  ...NOTIFICATION_ADMIN,
   'user.invite': async ({ deps, actor, args }) => {
     const id = newId('invitation');
     const email = String(args.email).toLowerCase();

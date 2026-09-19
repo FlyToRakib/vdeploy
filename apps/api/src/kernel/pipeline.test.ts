@@ -485,3 +485,45 @@ describe('the gate', () => {
     expect(csrf.statusCode).toBe(403);
   });
 });
+
+describe('notification channels', () => {
+  it('adds a webhook with a secret shown once, tests it, and removes it', async () => {
+    await stepUp(owner);
+    const created = await op(owner, 'notification.channel_create', {
+      name: 'ops',
+      config: { kind: 'webhook', url: 'https://hooks.example.com/vdeploy' },
+    });
+    expect(created.statusCode).toBe(200);
+    const { result } = created.json<{
+      result: { channel: { id: string; triggers: string[] }; signingSecret: string };
+    }>();
+    expect(result.signingSecret).toMatch(/^whsec_/);
+    expect(result.channel.triggers).not.toContain('deploy_succeeded');
+
+    const listed = await op(owner, 'notification.channels', {});
+    expect(JSON.stringify(listed.json())).not.toContain(result.signingSecret);
+
+    const tested = await op(owner, 'notification.channel_test', { channelId: result.channel.id });
+    expect(tested.json<{ result: { queued: boolean } }>().result.queued).toBe(true);
+    const deliveries = await op(owner, 'notification.deliveries', {
+      channelId: result.channel.id,
+    });
+    expect(
+      deliveries.json<{ result: { trigger: string; status: string }[] }>().result,
+    ).toMatchObject([{ trigger: 'test', status: 'pending' }]);
+
+    const removed = await op(owner, 'notification.channel_delete', {
+      channelId: result.channel.id,
+    });
+    expect(removed.statusCode).toBe(200);
+  });
+
+  it('refuses a channel from someone below admin', async () => {
+    const developer = await member('developer', 'dev-notify@example.com');
+    const res = await op(developer, 'notification.channel_create', {
+      name: 'mine',
+      config: { kind: 'email', to: ['me@example.com'] },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});

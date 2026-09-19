@@ -56,6 +56,15 @@ export function openSecret(dek: Buffer, secretId: string, version: number, seale
   return decrypt(requireKey(dek), sealed, valueAad(secretId, version)).toString('utf8');
 }
 
+/** Seals a value under a key, bound to where it belongs (the associated data). */
+export function sealValue(key: Buffer, aad: string, value: string): string {
+  return encrypt(requireKey(key), Buffer.from(value, 'utf8'), aad);
+}
+
+export function openValue(key: Buffer, aad: string, sealed: string): string {
+  return decrypt(requireKey(key), sealed, aad).toString('utf8');
+}
+
 const ALPHABETS = {
   alphanumeric: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
   hex: '0123456789abcdef',

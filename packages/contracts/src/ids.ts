@@ -36,6 +36,8 @@ export const ID_PREFIXES = {
   passkey: 'psk',
   teamMember: 'tmm',
   rateLimit: 'rtl',
+  notificationChannel: 'nch',
+  notification: 'ntf',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

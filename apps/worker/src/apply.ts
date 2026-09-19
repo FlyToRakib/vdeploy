@@ -1,7 +1,7 @@
 import { verifyApproval } from '@vdeploy/ai';
 import { VDeployError, type OperationName } from '@vdeploy/contracts';
 import { buildPlan } from '@vdeploy/core';
-import { appendAudit, approvals, loadPlanWorld, plans } from '@vdeploy/db';
+import { appendAudit, approvals, loadPlanWorld, notify, plans, projects } from '@vdeploy/db';
 import { and, desc, eq } from 'drizzle-orm';
 import { runStep, type ApplyState, type StepDeps } from './steps.js';
 
@@ -34,6 +34,60 @@ async function finish(
     outcome: status === 'applied' ? 'succeeded' : 'failed',
     details: { planId: row.id, operation: row.operation, status, ...details, ...(error ?? {}) },
   });
+}
+
+/**
+ * Tells the org's notification channels (§18) how a change to a project
+ * ended, and when the AI was the one who asked for it.
+ */
+async function tell(
+  deps: WorkerDeps,
+  row: PlanRow,
+  projectId: string | null,
+  error?: { message: string },
+) {
+  if (!projectId) return;
+  const [project] = await deps.db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const name = project?.name ?? 'a project';
+  const now = deps.now();
+  await notify(
+    deps.db,
+    row.orgId,
+    error
+      ? {
+          trigger: 'deploy_failed',
+          key: `plan:${row.id}`,
+          title: `${row.operation} on ${name} failed`,
+          message: `${error.message}\n\nWhat was running before keeps running.`,
+          projectId,
+        }
+      : {
+          trigger: 'deploy_succeeded',
+          key: `plan:${row.id}`,
+          title: `${row.operation} on ${name} is live`,
+          message: `${row.operation} on ${name} finished and is serving.`,
+          projectId,
+        },
+    now,
+  );
+  if (!error && (row.actor.origin === 'ai' || row.actor.origin === 'mcp')) {
+    const model = row.actor.model ? ` (${row.actor.model})` : '';
+    await notify(
+      deps.db,
+      row.orgId,
+      {
+        trigger: 'ai_change_applied',
+        key: `ai:${row.id}`,
+        title: `The AI changed ${name}`,
+        message: `The AI${model} applied ${row.operation} to ${name}. Every step is in the audit log.`,
+        projectId,
+      },
+      now,
+    );
+  }
 }
 
 /** A plan that needed a person must carry a valid signature for exactly this plan. */
@@ -106,8 +160,10 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
     const message =
       error instanceof VDeployError ? error.message : 'The change could not be applied';
     await finish(deps, row, 'failed', { notes: state.notes }, { code, message });
+    await tell(deps, row, state.projectId, { message });
     return 'failed';
   }
   await finish(deps, row, 'applied', { notes: state.notes, projectId: state.projectId });
+  await tell(deps, row, state.projectId);
   return 'applied';
 }

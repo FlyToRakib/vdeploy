@@ -9,7 +9,9 @@
 //   node scripts/e2e.mjs --vps     testbed = vdeploy-test-testbed on the test VPS
 //   add --teardown to remove the testbed afterwards
 //
-// Build first: the vdeploy-test/control-plane:e2e image and agent/bin/vd-agent.
+// Build first: the vdeploy-test/control-plane:e2e image and agent/bin/vd-agent —
+//   (cd agent && node ../scripts/go.mjs build -trimpath -o bin/vd-agent ./cmd/vd-agent)
+//   docker build -f deploy/control-plane.Dockerfile -t vdeploy-test/control-plane:e2e .
 // VPS mode verifies the production baseline before and after, and aborts on
 // any change. Nothing outside the testbed is ever created or touched.
 
@@ -140,6 +142,8 @@ const controlPlaneEnv = [
   '-e BREACHED_PASSWORD_CHECK=false',
   // The test address belongs to someone else: never probe it.
   '-e REACHABILITY_CHECK=false',
+  // The test webhook receiver lives on the testbed's private network.
+  '-e WEBHOOK_ALLOW_PRIVATE=true',
   '-e LOG_LEVEL=warn',
   `-e DNS_SERVERS=${DNS_IP}`,
 ].join(' ');
@@ -163,17 +167,31 @@ function startApiAndWorker() {
   );
 }
 
+// A webhook receiver: prints each request it gets as one JSON line.
+const HOOK_SERVER = `require('node:http').createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    console.log(JSON.stringify({ headers: req.headers, body }));
+    res.writeHead(204).end();
+  });
+}).listen(9000);`;
+
 function startControlPlane() {
   log('starting Postgres, the API and the worker inside the testbed');
   inTestbed(
     [
-      'docker rm -f cp-db cp-api cp-worker cp-dns >/dev/null 2>&1',
+      'docker rm -f cp-db cp-api cp-worker cp-dns cp-hook >/dev/null 2>&1',
       'docker network rm cp >/dev/null 2>&1',
       'docker network create --subnet 10.203.0.0/24 cp >/dev/null',
       'mkdir -p /opt/cp && cat > /opt/cp/Corefile',
       `docker run -d --name cp-dns --network cp --ip ${DNS_IP} -v /opt/cp/Corefile:/Corefile:ro ${COREDNS} -conf /Corefile >/dev/null`,
     ].join('; '),
     COREFILE,
+  );
+  inTestbed(
+    `cat > /opt/cp/hook.cjs && docker run -d --name cp-hook --network cp -v /opt/cp/hook.cjs:/hook.cjs:ro ${IMAGE} node /hook.cjs >/dev/null`,
+    HOOK_SERVER,
   );
   startDatabase();
   startApiAndWorker();
@@ -297,6 +315,13 @@ async function run() {
     return result.status === 'online';
   });
   pass('agent connected over signed frames');
+
+  const { result: hook } = await op('notification.channel_create', {
+    name: 'e2e hook',
+    config: { kind: 'webhook', url: 'http://cp-hook:9000/vdeploy' },
+    triggers: ['deploy_failed'],
+  });
+  hookSecret = hook.signingSecret;
 
   const helloSpec = (image) => ({
     apiVersion: 'vdeploy/v1',
@@ -598,6 +623,37 @@ async function explainsFailure(serverId) {
   );
 }
 
+/** The webhook channel's signing secret, shown once when it was made. */
+let hookSecret = '';
+
+/** Notifications (M2 2.14): a failed deploy reaches the webhook, signed. */
+async function notified(planId) {
+  const delivery = await until(
+    'deploy failure delivered to the webhook',
+    async () => {
+      const lines = inTestbed('docker logs cp-hook 2>&1').split('\n').filter(Boolean);
+      return (
+        lines
+          .map((l) => JSON.parse(l))
+          .find((d) => d.headers['x-vdeploy-event'] === 'deploy_failed') ?? null
+      );
+    },
+    60_000,
+  );
+  const { createHmac } = await import('node:crypto');
+  const [, t, mac] = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(delivery.headers['x-vdeploy-signature']);
+  const expected = createHmac('sha256', hookSecret).update(`${t}.${delivery.body}`).digest('hex');
+  if (mac !== expected) throw new Error('the webhook signature does not verify');
+  const body = JSON.parse(delivery.body);
+  if (!/migration 042 failed/.test(body.message)) {
+    throw new Error(`the notification does not say why: ${delivery.body}`);
+  }
+  const { result: deliveries } = await op('notification.deliveries', {});
+  if (!deliveries.some((d) => d.status === 'sent'))
+    throw new Error('the delivery is not marked sent');
+  pass('failed deploy told to a webhook, signed, saying why', `${planId} → ${body.title}`);
+}
+
 /** Waits for a plan to finish and returns it. */
 async function settled(planId, timeoutMs = 300_000) {
   return until(
@@ -632,6 +688,7 @@ async function releaseCommand(projectId) {
   }
   if (!served()?.startsWith('1.28')) throw new Error('the old release stopped serving');
   pass('failed release command: old version kept serving', failed.error.message.slice(0, 60));
+  await notified(failed.id);
 
   const passing = await op('project.update_spec', {
     projectId,
