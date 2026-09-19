@@ -34,14 +34,24 @@
 - [ ] 1.19 agent — Docker composition + reconciliation loop
 - [ ] 1.20 agent — enrollment, Ed25519-signed frames, wss transport
 - [ ] 1.21 agent — preflight doctor
-- [ ] 1.22 control plane — agent gateway, apply pipeline, worker
-- [ ] 1.23 end-to-end deploy of a prebuilt image in the testbed (M1 exit)
-- [ ] 1.24 control-plane backup/restore drill
+- [ ] 1.22 control plane — operation pipeline over HTTP (intent → plan → gate → approve → queue), org member ops and API-key creation through it
+- [ ] 1.23 control plane — agent gateway (wss) + worker applying plans + observed state
+- [ ] 1.24 end-to-end deploy of a prebuilt image in the testbed (M1 exit)
+- [ ] 1.25 control-plane backup/restore drill
+
+## Known gaps (tracked, not forgotten)
+
+- Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
+- Session list shows IP, not approximate location (needs a GeoIP source).
+- Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
 
 ## Decisions made
 
 - 2026-09-19 Spec identity lives on the envelope — docs/adr/0001-spec-identity-on-envelope.md
 - 2026-09-19 TypeScript 6.0 (not 7.x): typescript-eslint supports `<6.1`.
+- 2026-09-19 "2nd approver for T3" governs AI-proposed changes — docs/adr/0002-second-approver-for-ai-destructive.md
+- 2026-09-19 Better Auth's org/API-key endpoints are not public; those actions go through VDeploy routes and the policy engine (one authorization path).
+- 2026-09-19 Session idle timeout 7 days, absolute lifetime 30 days; step-up window 10 minutes; approvals 15 minutes.
 
 ## Flags for the user
 
