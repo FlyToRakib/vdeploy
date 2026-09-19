@@ -6,3 +6,13 @@
 .env
 .env.*
 !.env.example
+
+# Build and tool output
+node_modules/
+dist/
+coverage/
+.next/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+agent/bin/

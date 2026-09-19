@@ -1,0 +1,96 @@
+{
+  "capturedAt": "2026-09-19T12:06:22.969Z",
+  "state": {
+    "containers": {
+      "castdock-api": {
+        "running": true,
+        "health": "healthy"
+      },
+      "castdock-postgres": {
+        "running": true,
+        "health": "healthy"
+      },
+      "castdock-redis": {
+        "running": true,
+        "health": "healthy"
+      },
+      "castdock-web": {
+        "running": true,
+        "health": "healthy"
+      },
+      "my-docker-hub": {
+        "running": true,
+        "health": "none"
+      },
+      "prompt-share-backend": {
+        "running": true,
+        "health": "healthy"
+      },
+      "prompt-share-frontend": {
+        "running": true,
+        "health": "unhealthy"
+      },
+      "prompt-store-backend": {
+        "running": true,
+        "health": "none"
+      },
+      "prompts-store-frontend": {
+        "running": true,
+        "health": "none"
+      },
+      "revoye-api": {
+        "running": true,
+        "health": "healthy"
+      },
+      "revoye-postgres": {
+        "running": true,
+        "health": "healthy"
+      },
+      "revoye-redis": {
+        "running": true,
+        "health": "healthy"
+      },
+      "revoye-web": {
+        "running": true,
+        "health": "healthy"
+      }
+    },
+    "networks": [
+      "bridge",
+      "castdock_castdock-net",
+      "host",
+      "jellyfin-3s9k_default",
+      "my-docker-hub_default",
+      "nginx-proxy",
+      "none",
+      "prompt-share_default",
+      "prompt-store-backend_default",
+      "prompts-store-frontend_default",
+      "revoye_default",
+      "test-ps-frontend_default"
+    ],
+    "volumes": [
+      "4e6e23841a22b0af29ed3be6eb5a69f2e08a6dce896b526d1030221889d0ae5f",
+      "castdock_api_uploads",
+      "castdock_postgres_data",
+      "castdock_redis_data",
+      "ed8be9c4fb299f2b149d3141a52a6843103ed91742306922e088b6179b7eda08",
+      "f54d1815ef730179aed8591695cde860034bc8a0dcbcf39383eed9ac537856d9",
+      "my-docker-hub_registry_data"
+    ],
+    "services": {
+      "nginx": "active",
+      "docker": "active",
+      "containerd": "active"
+    },
+    "ports80and443": [
+      "<ip>:443",
+      "<ip>:80"
+    ],
+    "memoryMb": {
+      "total": 7937,
+      "available": 6199
+    },
+    "diskUsed": "29%"
+  }
+}

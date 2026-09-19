@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+dist
+coverage
+.next
+.turbo
+drizzle
+docs/vps-baseline.json
+*.md
