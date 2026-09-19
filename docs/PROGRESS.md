@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.15 — GitHub App + webhooks
+**Task:** 2.16a — dashboard: servers
 **Status:** in progress
-**Updated:** 2026-09-20 08:00 UTC
+**Updated:** 2026-09-20 10:00 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -33,14 +33,18 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.12 plain-language diagnostic layer (§32): for replicas that are not serving, the agent reports evidence — running or how it exited, OOM kill, restart count, listening sockets (read from the host's /proc, nothing executed inside the container), last output — refreshed when the replica's state changes; a deterministic rule table in core (no model) names the cause with detected / plain / fix / confidence / risk: listening on localhost, wrong port (with the port to use), not listening, out of memory, missing env var, unreachable database, port in use, case-sensitive module paths, runtime version, and build-log failures (missing script, unresolved import, build out of memory, dependency install); failed deploys and builds now say the cause and the fix; `project.diagnose` on request. Also: the agent removes a deleted project's network once its last container is gone (networks were leaking and eventually exhausted Docker's address pools). Verified in local dind: an app bound to 127.0.0.1 fails with "listen on 0.0.0.0 instead of localhost" (e2e)
 - [x] 2.13 extended preflight (§30 ①–③): the agent's preflight also checks the distribution (Ubuntu 22.04+, Debian 11+, Rocky/Alma/RHEL 9, Fedora 40+, Amazon Linux 2023; CentOS, Alpine, untested and end-of-life systems are warnings with the advice, never a refusal: the agent is a static binary), hosting panels (cPanel, Plesk, aaPanel, CyberPanel, Hestia, Vesta, DirectAdmin, ISPConfig, Webmin), a laptop or desktop session, IPv6-only servers, and existing containers (counted and left alone); a port conflict names the program holding the port (socket inode → process, read from /proc). The agent recognises its hosting provider from firmware and reports it. The control plane checks from outside that ports 80 and 443 answer (plain TCP connect, only the server's stored public IPv4, at most every 10 minutes per server, `REACHABILITY_CHECK`), telling a refused connection from a dropped one, and stores the verdict with provider-specific steps (Oracle's Security List + host iptables, AWS security group, GCP, Azure, Hetzner, DigitalOcean, Vultr, Linode; general advice otherwise); `server.check_reachability` runs it on request and `server.status` shows it. Verified in local dind: preflight in the Alpine testbed warns with the advice and enrollment goes on (e2e)
 - [x] 2.14 notifications (§18, ADR 0009): email lists and webhooks per org (admin only, audited), each subscribed to triggers: deploy failed (with the plain-language reason), deploy succeeded (off by default), app keeps crashing and out of memory (from agent evidence, named by the §32 rules, never the app's own output, at most hourly), server offline for 5 minutes (once per outage), visitors can't reach a server (daily while it lasts), AI applied a change. A Postgres outbox with one delivery per cause per channel, sent by the worker with retries at 1 min → 6 h, then failed with the reason; webhooks are signed (`t=…,v1=HMAC-SHA256`, per-channel secret shown once, stored sealed) and reach only public addresses, checked and pinned against DNS rebinding (`WEBHOOK_ALLOW_PRIVATE` for LAN installs); `notification.channel_test` and `notification.deliveries`. Verified in local dind: a failed deploy reached a webhook receiver, signed and saying why (e2e, 28 checks)
+- [x] 2.15 GitHub App (ADR 0010): an install link carrying a signed state; linking (`github.link`, admin, gated and audited) proved by GitHub OAuth — the person's own token must see the installation, so a guessed installation id links nothing — and one installation belongs to one org; `github.installations`, `github.repositories`, `github.unlink`; uninstall/suspend from GitHub followed. Signed webhooks (raw body, HMAC checked before parsing): a push deploys every project on that repository and branch with autoDeploy, honouring monorepo path filters, as `project.deploy_commit` of the pushed commit, through the gate as the person who linked the account (origin `webhook`, their current role), once per delivery. Private repositories build through short-lived installation tokens at the exact commit; public ones as before; the not-found message names who must approve the app. Key read from a file; half a configuration refuses to start. Verified against a stand-in GitHub with a generated key, and the local e2e still passes (28 checks); **the live check on github.com waits for the app's credentials (see Blocked)**
 
 ## Doing
 
-- [ ] 2.15 GitHub App + webhooks (needs credentials — see Blocked)
+- [ ] 2.16a dashboard: servers — list with health, add + enrollment command, server page (address, reachability, resources)
 
 ## Next (M2)
 
-- [ ] 2.16 dashboard: servers + enrollment, projects, deploys, logs, config (Simple/Advanced), approvals
+- [ ] 2.16b dashboard: projects list and new project (folder/zip upload, GitHub repository, image) with the detection preview
+- [ ] 2.16c dashboard: project page — overview and actions, deployments with build logs, live logs, event timeline
+- [ ] 2.16d dashboard: config with Simple/Advanced (env, write-only secrets, domains, resources, storage, raw spec)
+- [ ] 2.16e dashboard: approvals (plan, blast radius, type-the-name), notification channels, GitHub connection
 - [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright)
 
 ## Known gaps (tracked, not forgotten)
@@ -82,7 +86,8 @@ verified unchanged before, after, and after testbed teardown.
 
 ## Blocked / needs the user
 
-- (none yet) — M2 will need, when it reaches them: a **GitHub App** (app id, private key, webhook secret) for 2.15, and for real HTTPS on the test VPS a way to receive ports 80/443 that does not touch production nginx (the testbed will use a local ACME test server, Pebble, until then).
+- **GitHub App credentials** for the live check of 2.15 (the code is done and tested against a stand-in). Create the app on github.com (webhook URL `<PUBLIC_URL>/api/v1/github/webhook`, content type JSON, callback `<PUBLIC_URL>/api/v1/github/callback`, "Request user authorization (OAuth) during installation" on; permissions: Contents read, Metadata read; events: Push). Then put GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_WEBHOOK_SECRET, GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in `.vdeploy-local/github.env`, and the private key in `.vdeploy-local/github-app.pem`, never in chat.
+- For real HTTPS on the test VPS (2.17): a way to receive ports 80/443 that does not touch production nginx. Until then the testbed uses a local ACME test server (Pebble).
 
 ## Environment
 

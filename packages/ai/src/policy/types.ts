@@ -11,7 +11,8 @@ interface ActorBase {
 
 export interface HumanActor extends ActorBase {
   kind: 'human';
-  origin: 'dashboard' | 'api' | 'cli';
+  /** `webhook`: a push to a connected repository, acting as the person who connected it. */
+  origin: 'dashboard' | 'api' | 'cli' | 'webhook';
   /** When the user last re-authenticated (§20.2 step-up), if ever this session. */
   stepUpAt: Date | null;
 }

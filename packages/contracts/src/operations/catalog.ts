@@ -106,6 +106,20 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'github.installations',
+    'org',
+    'config',
+    'List the GitHub accounts connected through the VDeploy GitHub App',
+    obj({}),
+  ),
+  query(
+    'github.repositories',
+    'org',
+    'config',
+    'List the repositories the connected GitHub accounts let VDeploy read',
+    obj({}),
+  ),
+  query(
     'notification.channels',
     'org',
     'config',
@@ -173,6 +187,38 @@ export const OPERATIONS = [
     'org',
     'Preview how uploaded source would be built, before deploying it',
     obj({ serverId, uploadId: idSchema('upload') }),
+  ),
+  operation(
+    'project.deploy_commit',
+    'sensitive',
+    'project',
+    "Build and deploy a commit of the project's GitHub branch (the latest when none is named)",
+    obj({
+      ...P,
+      commit: z
+        .string()
+        .regex(/^[0-9a-f]{40}$/, 'must be a full commit id')
+        .optional(),
+    }),
+  ),
+  operation(
+    'github.link',
+    'sensitive',
+    'org',
+    'Connect a GitHub account where the VDeploy GitHub App was installed (proved with the code GitHub returns)',
+    obj({
+      installationId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+      code: z.string().min(1).max(256),
+    }),
+    { minRole: 'admin' },
+  ),
+  operation(
+    'github.unlink',
+    'sensitive',
+    'org',
+    'Disconnect a GitHub account from this organization (the app stays installed on GitHub)',
+    obj({ installationId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
+    { minRole: 'admin' },
   ),
   operation(
     'notification.channel_create',

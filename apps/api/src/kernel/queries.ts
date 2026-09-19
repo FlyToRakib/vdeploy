@@ -18,6 +18,7 @@ import {
   urlSettingsFor,
 } from '@vdeploy/db';
 import { and, desc, eq, isNull } from 'drizzle-orm';
+import { GITHUB_QUERIES } from './github.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
 import type { Handler } from './context.js';
 
@@ -43,6 +44,7 @@ const notYet: Handler = () =>
  */
 export const QUERIES: Partial<Record<OperationName, Handler>> = {
   ...NOTIFICATION_QUERIES,
+  ...GITHUB_QUERIES,
   'project.list': async ({ deps, actor }) =>
     deps.db
       .select({

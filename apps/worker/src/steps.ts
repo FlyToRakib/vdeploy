@@ -9,13 +9,24 @@ import {
   type Id,
   type PlanStep,
 } from '@vdeploy/contracts';
-import { createRelease, diagnoseBuild, generateSecret, hashOf, specAfter } from '@vdeploy/core';
+import {
+  branchHead,
+  createRelease,
+  diagnoseBuild,
+  generateSecret,
+  hashOf,
+  installationToken,
+  specAfter,
+  tarballPath,
+  type GithubAppConfig,
+} from '@vdeploy/core';
 import {
   abandonBuild,
   currentSecretVersions,
   diagnoseProject,
   deployments,
   getBuild,
+  installationForRepo,
   projects,
   queueBuild,
   readSecret,
@@ -39,6 +50,8 @@ export interface StepDeps {
   buildTimeoutMs?: number;
   /** Outbound HTTP for public source (GitHub); the global fetch when unset. */
   fetch?: typeof fetch;
+  /** The VDeploy GitHub App, when this installation has one (private repositories). */
+  github?: GithubAppConfig;
   registry: RegistryAccess;
   /** Opens and writes secrets: rotation makes a new version. */
   secretsKey: Buffer;
@@ -225,22 +238,44 @@ async function rotate(deps: StepDeps, state: ApplyState, secretId: string) {
 }
 
 /**
- * A public GitHub repository's branch as a tarball, stored like an upload.
- * Private repositories need the GitHub App (M2 2.15).
+ * A GitHub repository's branch (or one commit of it) as a tarball, stored
+ * like an upload. Through the GitHub App when the org connected the
+ * repository's owner — private repositories too — otherwise the public
+ * download.
  */
-async function fetchPublicRepo(
+async function fetchRepo(
   deps: StepDeps,
   state: ApplyState,
   repo: string,
   branch: string,
 ): Promise<string> {
-  const ref = branch.split('/').map(encodeURIComponent).join('/');
-  const url = `https://codeload.github.com/${repo}/tar.gz/refs/heads/${ref}`;
-  const res = await (deps.fetch ?? fetch)(url, { redirect: 'follow' });
+  const doFetch = deps.github?.fetch ?? deps.fetch ?? fetch;
+  const commit = typeof state.args.commit === 'string' ? state.args.commit : null;
+  const installation = deps.github ? await installationForRepo(deps.db, state.orgId, repo) : null;
+  let res: Response;
+  let fetched: string;
+  if (deps.github && installation) {
+    const token = await installationToken(deps.github, installation.installationId, deps.now());
+    const sha = commit ?? (await branchHead(deps.github, token, repo, branch));
+    res = await doFetch(`${deps.github.apiUrl}${tarballPath(repo, sha)}`, {
+      redirect: 'follow',
+      headers: { authorization: `Bearer ${token}`, 'user-agent': 'VDeploy' },
+    });
+    fetched = `${repo}@${branch} (${sha.slice(0, 7)}) through the GitHub App`;
+  } else {
+    const ref = commit ?? `refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`;
+    res = await doFetch(`https://codeload.github.com/${repo}/tar.gz/${ref}`, {
+      redirect: 'follow',
+    });
+    fetched = `${repo}@${branch}${commit ? ` (${commit.slice(0, 7)})` : ''} from GitHub`;
+  }
   if (res.status === 404) {
+    const owner = repo.split('/')[0] ?? repo;
     throw new VDeployError(
       'not_found',
-      `GitHub has no public repository ${repo} with a branch ${branch}; private repositories need the GitHub App`,
+      installation
+        ? `The GitHub App cannot see ${repo} with a branch ${branch}: check the name, or give the app access to this repository in ${owner}'s GitHub settings`
+        : `GitHub has no public repository ${repo} with a branch ${branch}. If it is private, connect ${owner} through the VDeploy GitHub App; if ${owner} is an organization you do not administer, one of its owners must approve the app`,
     );
   }
   if (!res.ok) throw new VDeployError('unavailable', `GitHub answered ${res.status}; try again`);
@@ -261,7 +296,7 @@ async function fetchPublicRepo(
     data,
     createdBy: state.actor,
   });
-  state.notes.push(`Fetched ${repo}@${branch} from GitHub.`);
+  state.notes.push(`Fetched ${fetched}.`);
   return id;
 }
 
@@ -368,7 +403,7 @@ async function newRelease(deps: StepDeps, state: ApplyState) {
   } else if (source.type === 'archive') {
     ({ image, buildId } = await buildImage(deps, state, row, source.uploadId));
   } else if (source.type === 'git') {
-    const uploadId = await fetchPublicRepo(deps, state, source.repo, source.branch);
+    const uploadId = await fetchRepo(deps, state, source.repo, source.branch);
     ({ image, buildId } = await buildImage(deps, state, row, uploadId, 1));
   } else {
     throw new VDeployError(

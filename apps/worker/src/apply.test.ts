@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { signApproval } from '@vdeploy/ai';
 import {
   ApplicationSpec,
@@ -13,7 +14,9 @@ import {
   builds,
   createChannel,
   deleteChannel,
+  linkInstallation,
   listDeliveries,
+  unlinkInstallation,
   finishBuild,
   deployments,
   desiredStateFor,
@@ -537,6 +540,76 @@ describe('building from uploaded source', () => {
       expect(failed?.error?.message).toMatch(/no public repository acme\/missing/);
     } finally {
       delete deps.fetch;
+    }
+  });
+
+  it('builds a private repository through the GitHub App, at the pushed commit', async () => {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const asked: { url: string; auth: string | null }[] = [];
+    const sha = 'b'.repeat(40);
+    deps.github = {
+      appId: '99',
+      privateKey: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(),
+      apiUrl: 'https://github.test',
+      fetch: (input, init) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        const auth = new Headers(init?.headers).get('authorization');
+        asked.push({ url, auth });
+        if (url.endsWith('/app/installations/77/access_tokens')) {
+          return Promise.resolve(Response.json({ token: 'ghs_install' }));
+        }
+        if (url.endsWith('/repos/acme/secret/commits/main')) {
+          return Promise.resolve(Response.json({ sha: 'c'.repeat(40) }));
+        }
+        return Promise.resolve(new Response(new Uint8Array([0x1f, 0x8b, 3, 4]), { status: 200 }));
+      },
+    };
+    await linkInstallation(
+      t.db,
+      {
+        installationId: 77,
+        orgId,
+        accountLogin: 'Acme',
+        accountType: 'Organization',
+        repositorySelection: 'selected',
+        linkedBy: userId,
+      },
+      new Date(),
+    );
+    try {
+      const source = { type: 'git', provider: 'github', repo: 'acme/secret', branch: 'main' };
+      const created = await plan('project.create', {
+        spec: spec({ source, build: { strategy: 'dockerfile' } } as never),
+        serverId,
+      });
+      expect(await applyPlan(deps, created.id)).toBe('applied');
+      // The branch head, fetched with an installation token, never the app's own key.
+      expect(asked.map((a) => a.url)).toEqual([
+        'https://github.test/app/installations/77/access_tokens',
+        'https://github.test/repos/acme/secret/commits/main',
+        `https://github.test/repos/acme/secret/tarball/${'c'.repeat(40)}`,
+      ]);
+      expect(asked[0]?.auth).toMatch(/^Bearer ey/);
+      expect(asked[2]?.auth).toBe('Bearer ghs_install');
+
+      asked.length = 0;
+      const [row] = await t.db
+        .select()
+        .from(projects)
+        .where(and(eq(projects.name, 'blog'), isNull(projects.deletedAt)));
+      const push = await plan('project.deploy_commit', { projectId: row!.id, commit: sha });
+      expect(await applyPlan(deps, push.id)).toBe('applied');
+      expect(asked.at(-1)?.url).toBe(`https://github.test/repos/acme/secret/tarball/${sha}`);
+      const [done] = await t.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.target, row!.id))
+        .orderBy(desc(auditLog.seq))
+        .limit(1);
+      expect(JSON.stringify(done?.details)).toContain('bbbbbbb) through the GitHub App');
+    } finally {
+      delete deps.github;
+      await unlinkInstallation(t.db, orgId, 77);
     }
   });
 

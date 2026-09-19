@@ -248,6 +248,29 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       },
     };
   },
+  'project.deploy_commit': (_args, context) => {
+    const project = requireProject(context);
+    if (project.spec.source.type !== 'git') {
+      throw new VDeployError(
+        'conflict',
+        'Only a project deployed from a GitHub repository has commits to deploy',
+      );
+    }
+    // New code, same spec: a new release from the commit, health-gated like any deploy.
+    return guarded(
+      {
+        specHash: null,
+        changes: [],
+        steps: [
+          { kind: 'create_release' },
+          { kind: 'deploy', strategy: project.spec.deploy.strategy },
+        ],
+        tier: 'sensitive',
+        blastRadius: radius(project.spec, { rollbackTo: project.currentReleaseId }),
+      },
+      unsavedAtRisk(context, project.spec.runtime.volumes),
+    );
+  },
   'project.redeploy': (_args, context) => {
     const project = requireProject(context);
     if (!project.currentReleaseId) {

@@ -1,4 +1,5 @@
 import type { HumanActor } from '@vdeploy/ai';
+import type { GithubAppConfig, GithubOAuthConfig } from '@vdeploy/core';
 import type { Database } from '@vdeploy/db';
 import type { Auth } from '../auth/auth.js';
 import type { LogSource } from '../agents/gateway.js';
@@ -25,6 +26,16 @@ export interface KernelDeps {
   logs?: LogSource;
   /** Connects to a server's web ports from here; tests replace it. */
   probe: PortProbe;
+  /** The VDeploy GitHub App, when this installation has one (M2 2.15). */
+  github?: GithubDeps;
+}
+
+export interface GithubDeps {
+  app: GithubAppConfig & GithubOAuthConfig;
+  /** The app's URL name: github.com/apps/<slug>. */
+  slug: string;
+  /** GitHub signs every webhook with it. */
+  webhookSecret: string;
 }
 
 /** What an operation handler receives once the gate has let the request through. */

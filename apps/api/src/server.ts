@@ -21,6 +21,9 @@ import { healthRoutes } from './routes/health.js';
 import { operationRoutes } from './routes/operations.js';
 import { logRoutes } from './routes/logs.js';
 import { tcpProbe, type PortProbe } from './agents/reachability.js';
+import { githubFromConfig } from './github-config.js';
+import type { GithubDeps } from './kernel/context.js';
+import { githubRoutes } from './routes/github.js';
 import { uploadRoutes } from './routes/uploads.js';
 
 /** Log fields that may carry credentials or secret values; never written out. */
@@ -47,6 +50,8 @@ export interface ServerDeps {
   now?: () => Date;
   /** Connects to servers' web ports; tests replace it. */
   probe?: PortProbe;
+  /** The GitHub App; from the environment when unset. Tests point it at a stand-in. */
+  github?: GithubDeps;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -98,6 +103,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   );
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });
   const probe = deps.probe ?? tcpProbe;
+  const github = deps.github ?? githubFromConfig(config);
   const gatewayDeps = {
     db,
     databaseUrl: config.DATABASE_URL,
@@ -124,9 +130,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     now: deps.now ?? (() => new Date()),
     logs: gateway,
     probe,
+    ...(github ? { github } : {}),
   };
   await app.register(operationRoutes(kernel));
   await app.register(logRoutes(kernel));
   await app.register(uploadRoutes(kernel));
+  await app.register(githubRoutes(kernel));
   return app;
 }

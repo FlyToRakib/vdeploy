@@ -27,7 +27,7 @@ export interface ResolvedActor {
   sessionId: string | null;
 }
 
-async function roleIn(db: Database, userId: string, orgId: string): Promise<Role> {
+export async function roleIn(db: Database, userId: string, orgId: string): Promise<Role> {
   const [row] = await db
     .select({ role: member.role })
     .from(member)

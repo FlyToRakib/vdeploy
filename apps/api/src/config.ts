@@ -29,6 +29,16 @@ export const ApiConfig = z.object({
   BREACHED_PASSWORD_CHECK: z.stringbool().default(true),
   /** Check from here that visitors can reach each server's ports 80 and 443, when it connects. */
   REACHABILITY_CHECK: z.stringbool().default(true),
+  /** The VDeploy GitHub App (ADR 0010). All of these, or none: GitHub then works for public repos only. */
+  GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
+  GITHUB_APP_SLUG: z.string().min(1).max(100).optional(),
+  /** Path to the app's private key (.pem): a file, so the key never sits in the environment. */
+  GITHUB_APP_PRIVATE_KEY_FILE: z.string().min(1).optional(),
+  GITHUB_WEBHOOK_SECRET: z.string().min(16).optional(),
+  GITHUB_CLIENT_ID: z.string().min(1).optional(),
+  GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
+  GITHUB_API_URL: z.url().default('https://api.github.com'),
+  GITHUB_WEB_URL: z.url().default('https://github.com'),
 });
 export type ApiConfig = z.output<typeof ApiConfig>;
 

@@ -3,6 +3,7 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { memoryMailer, type Mail } from './auth/mailer.js';
 import { ApiConfig } from './config.js';
 import type { PortReach } from '@vdeploy/contracts';
+import type { GithubDeps } from './kernel/context.js';
 import { buildServer } from './server.js';
 
 export const ORIGIN = 'https://dashboard.example.com';
@@ -33,12 +34,15 @@ export interface TestApp {
   stop: () => Promise<void>;
 }
 
-export async function startTestApp(options: { authRateLimit?: boolean } = {}): Promise<TestApp> {
+export async function startTestApp(
+  options: { authRateLimit?: boolean; github?: GithubDeps } = {},
+): Promise<TestApp> {
   const database = await startTestDatabase();
   const mailer = memoryMailer();
   const queued: string[] = [];
   const ports = new Map<string, PortReach>();
   const app = await buildServer({
+    ...(options.github ? { github: options.github } : {}),
     probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
     config: testConfig(database.url),
     db: database.db,

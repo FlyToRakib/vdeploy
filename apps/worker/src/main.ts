@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { parseEnv } from '@vdeploy/contracts';
 import {
@@ -36,6 +37,10 @@ const config = parseEnv(
     PUBLIC_URL: z.url({ protocol: /^https?$/ }).optional(),
     /** Let webhooks reach private addresses (a LAN-only install); off, they reach only the internet. */
     WEBHOOK_ALLOW_PRIVATE: z.stringbool().default(false),
+    /** The VDeploy GitHub App (ADR 0010), for private repositories. */
+    GITHUB_APP_ID: z.string().optional(),
+    GITHUB_APP_PRIVATE_KEY_FILE: z.string().optional(),
+    GITHUB_API_URL: z.url().default('https://api.github.com'),
     /** Resolvers for domain checks (ip or ip:port, comma-separated); the system's when unset. */
     DNS_SERVERS: z
       .string()
@@ -56,8 +61,17 @@ setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 const log = pino({ level: config.LOG_LEVEL });
 const { db, close } = connect(config.DATABASE_URL);
+const github =
+  config.GITHUB_APP_ID && config.GITHUB_APP_PRIVATE_KEY_FILE
+    ? {
+        appId: config.GITHUB_APP_ID,
+        privateKey: readFileSync(config.GITHUB_APP_PRIVATE_KEY_FILE, 'utf8'),
+        apiUrl: config.GITHUB_API_URL.replace(/\/$/, ''),
+      }
+    : undefined;
 const deps = {
   db,
+  ...(github ? { github } : {}),
   approvalKey: config.APPROVAL_KEY,
   secretsKey: config.SECRETS_KEY,
   registry: publicRegistries,
