@@ -1,0 +1,30 @@
+{
+  "name": "@vdeploy/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/swagger": "^9.8.1",
+    "@vdeploy/ai": "workspace:*",
+    "@vdeploy/contracts": "workspace:*",
+    "@vdeploy/core": "workspace:*",
+    "@vdeploy/db": "workspace:*",
+    "fastify": "^5.12.5",
+    "fastify-type-provider-zod": "^7.0.0",
+    "zod": "^4.6.5",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
+    "tsx": "^4.23.13"
+  }
+}
