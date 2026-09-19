@@ -1,21 +1,21 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.2 — packages/contracts: base primitives
+**Task:** 1.3 — Application spec schema + validation
 **Status:** in progress
 **Updated:** 2026-09-19
 
 ## Done
 
 - [x] 1.1 monorepo scaffold (pnpm + turborepo, TS strict, ESLint, Prettier, Vitest, CI) + VPS baseline tool
+- [x] 1.2 packages/contracts — prefixed ULID ids, typed errors, env parsing
 
 ## Doing
 
-- [ ] 1.2 packages/contracts — ids, typed errors, env parsing
+- [ ] 1.3 Application spec schema + validation (§5)
 
 ## Next (M1)
 
-- [ ] 1.3 Application spec schema + validation (§5)
 - [ ] 1.4 versioned spec schemas with forward-migration on read (§30 ⑧)
 - [ ] 1.5 operation catalog with risk tiers (§24)
 - [ ] 1.6 packages/core — spec diff, Plan, plan_hash, Release, risk, blast radius
