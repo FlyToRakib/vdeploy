@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M2 — Deploy engine (M1 complete 2026-09-19)
-**Task:** 2.16e — dashboard: approvals, notifications, GitHub
+**Task:** 2.16f — one-command bootstrap
 **Status:** in progress
-**Updated:** 2026-09-20 18:00 UTC
+**Updated:** 2026-09-20 20:00 UTC
 
 ## M1 exit — met 2026-09-19
 
@@ -38,14 +38,14 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.16b dashboard: projects — `project.list` now says how each project is doing in one word (live, deploying, needs a look, down, stopped, not deployed yet — from what was asked, the latest deployment and what the agent sees) with its address and replicas; the Projects screen lists them down-first with teaching empty state. New project in three steps: where it runs; where its code is — a folder (zipped in the browser, leaving out node_modules, git history and .env files, which are named so their values go into settings), a .zip/.tar.gz (drop or choose), a GitHub repository (connected accounts' repositories, private ones marked, or any public one; "Connect GitHub" when the app is set up), or an image; then "we think this is a Node.js 22 app; it starts with npm run start" from the server's detection, with name and port, and the plan followed until it is live, waits for approval, or fails in plain words. A create plan now records the project it made. Also: a worker test no longer races its stand-in agent; and the agent sets PORT to the container port unless the app sets its own, so most frameworks listen where traffic is sent. Verified in the browser preview (desktop and phone) and the local e2e
 - [x] 2.16c dashboard: project page — header with status, address and actions (deploy latest for GitHub projects or redeploy, restart, stop/start), each run through the gate and followed to the end with a plain-language toast, waiting for approval when a change needs it; tabs that are real URLs. Overview: when something is wrong, the last failed deploy's reason and the diagnosis rules' causes with what to do (amber when the old version still serves), running copies, version, where the code comes from, port, and a timeline of what the agent did, in words. Deployments: every deploy with its version, outcome and reason, its build log on demand, and "go back to this version". Logs: live over server-sent events with search, pause and download, scrolling only its own box. Also: the gate reads stored specs through readSpec, so a spec written before a field existed gets its default instead of failing. Verified in the browser preview against seeded history (desktop and phone); the live stream through the dashboard is checked end to end in the 2.17 walkthrough
 - [x] 2.16d dashboard: config tab with Simple/Advanced (remembered per device). Settings: environment variables, with "keep it secret" on by default — the value is stored encrypted and referenced, never shown again; plain ones listed with their values; removal. Domains: each with whether its DNS points here and the exact records to add at the registrar. Size: memory from a short list (the request lowered with it) and copies. Files: permanent folders, and folders whose files the next deploy would delete, with "keep these files" or "they are temporary". Advanced adds the whole spec as YAML, parsed with the line of any mistake. Every change goes through the gate like any other. Also: project.get returns the spec with its defaults filled in. Verified in the browser preview
+- [x] 2.16e dashboard: Approvals — every plan waiting for a person, in words ("Restart the app"), why it waits, what it risks one sentence each (data first: "Deletes files in /app/uploads."), its changes field by field, when it expires; a plan that can lose data needs the project's name typed and a fresh password before Approve works; approve follows it to the end, reject changes nothing. Notifications — channels with what each is told about, send a test, pause, remove, and the last deliveries with why one failed; adding an email list or a webhook (URL checked), the webhook's signing secret shown once. GitHub — connected accounts (suspended ones marked), connect another, disconnect, what GitHub's return means in words (an owner must approve, expired, someone else's link, cannot see it, already connected elsewhere), and a plain note when this VDeploy has no GitHub App. All three in the sidebar and the command palette. Verified in the browser preview; the local e2e still passes
 
 ## Doing
 
-- [ ] 2.16e dashboard: approvals (plan, blast radius, type-the-name), notification channels, GitHub connection
+- [ ] 2.16f one-command bootstrap (§25): the connect command installs the agent binary (served by the control plane, checksummed), runs preflight, enrolls and sets up the systemd unit — idempotent, with --dry-run
 
 ## Next (M2)
 
-- [ ] 2.16f one-command bootstrap (§25): the connect command installs the agent binary (served by the control plane, checksummed), runs preflight, enrolls and sets up the systemd unit — idempotent, with --dry-run
 - [ ] 2.17 M2 exit: GitHub + folder-upload deploys to HTTPS, bad deploy auto-rolled-back, non-coder walkthrough (Playwright, including live logs through the dashboard)
 
 ## Known gaps (tracked, not forgotten)

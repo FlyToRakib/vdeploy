@@ -3,6 +3,7 @@
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useCrumbName } from '@/components/breadcrumbs';
+import { CopyCommand } from '@/components/copy-command';
 import { useStepUp } from '@/components/step-up';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -12,7 +13,6 @@ import { Status } from '@/components/ui/status';
 import { formText } from '@/lib/forms';
 import { OperationError, query, runOperation } from '@/lib/operations';
 import { ago, serverHealth, splitCommand } from '@/lib/servers';
-import { CopyCommand } from '../add-server-dialog';
 
 interface Reachability {
   status: 'reachable' | 'partly' | 'blocked' | 'unknown';

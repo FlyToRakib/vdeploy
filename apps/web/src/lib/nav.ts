@@ -1,4 +1,13 @@
-import { FolderKanban, LayoutDashboard, Server, ShieldCheck, type LucideIcon } from 'lucide-react';
+import {
+  Bell,
+  ClipboardCheck,
+  FolderKanban,
+  GitBranch,
+  LayoutDashboard,
+  Server,
+  ShieldCheck,
+  type LucideIcon,
+} from 'lucide-react';
 
 export interface NavItem {
   href: string;
@@ -18,6 +27,24 @@ export const NAV: readonly NavItem[] = [
     keywords: ['apps', 'sites', 'deploy'],
   },
   { href: '/servers', label: 'Servers', icon: Server, keywords: ['vps', 'machines', 'agent'] },
+  {
+    href: '/approvals',
+    label: 'Approvals',
+    icon: ClipboardCheck,
+    keywords: ['approve', 'confirm', 'waiting', 'plans'],
+  },
+  {
+    href: '/settings/notifications',
+    label: 'Notifications',
+    icon: Bell,
+    keywords: ['email', 'webhook', 'alerts'],
+  },
+  {
+    href: '/settings/github',
+    label: 'GitHub',
+    icon: GitBranch,
+    keywords: ['git', 'repository', 'connect', 'push'],
+  },
   {
     href: '/settings/security',
     label: 'Security',

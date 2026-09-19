@@ -85,3 +85,21 @@ export async function followPlan(
   }
   return last;
 }
+
+/** A POST to an API route, refused the same way an operation is. */
+export async function post<T>(path: string, body: unknown = {}): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const code = (data as { error?: { code?: unknown } } | null)?.error?.code;
+    throw new OperationError(
+      messageOf(data, 'That did not work. Please try again.'),
+      typeof code === 'string' ? code : 'internal',
+    );
+  }
+  return data as T;
+}
