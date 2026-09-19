@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/build"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
@@ -44,10 +45,30 @@ type Client struct {
 	Log        *slog.Logger
 	HTTPClient *http.Client
 	Now        func() time.Time
+	// Builder runs builds the control plane asks for; nil refuses them.
+	Builder Builder
+
+	buildMu sync.Mutex
+	builds  map[string]*build.Result // by build id: nil while running
+	results chan build.Result
 }
+
+// Builder runs one build to completion.
+type Builder interface {
+	Run(ctx context.Context, req build.Request) build.Result
+}
+
+// maxBuildTime bounds a build; the builder's own limits apply inside it.
+const maxBuildTime = time.Hour
 
 // Run stays connected until ctx is cancelled.
 func (c *Client) Run(ctx context.Context) {
+	c.buildMu.Lock()
+	if c.results == nil {
+		c.results = make(chan build.Result, 16)
+		c.builds = map[string]*build.Result{}
+	}
+	c.buildMu.Unlock()
 	backoff := time.Second
 	for ctx.Err() == nil {
 		started := time.Now()
@@ -158,6 +179,7 @@ func (c *Client) session(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go c.forwardReports(ctx, k)
+	go c.forwardBuildResults(ctx, k)
 	for {
 		if err := c.receive(ctx, k); err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
@@ -207,6 +229,23 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 	if err != nil {
 		return err
 	}
+	var head struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &head); err != nil {
+		return fmt.Errorf("malformed frame: %w", err)
+	}
+	if head.Type == protocol.TypeBuild {
+		var frame buildFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startBuild(ctx, frame.Build)
+		return nil
+	}
 	var frame desiredState
 	if err := strictDecode(body, &frame); err != nil {
 		return err
@@ -244,6 +283,79 @@ func (c *Client) forwardReports(ctx context.Context, k *conn) {
 			})
 			if err != nil {
 				c.Log.Warn("report not sent", "err", err)
+				return
+			}
+		}
+	}
+}
+
+type buildFrame struct {
+	protocol.Header
+	Build build.Request `json:"build"`
+}
+
+type buildResultFrame struct {
+	protocol.Header
+	Result build.Result `json:"result"`
+}
+
+// startBuild runs a requested build once. A request repeated after a
+// reconnect gets the finished result again instead of a second build.
+func (c *Client) startBuild(ctx context.Context, req build.Request) {
+	c.buildMu.Lock()
+	defer c.buildMu.Unlock()
+	if done, seen := c.builds[req.BuildID]; seen {
+		if done != nil {
+			c.queueResult(*done)
+		}
+		return
+	}
+	refuse := func(reason string) {
+		result := build.Result{BuildID: req.BuildID, Error: reason}
+		c.builds[req.BuildID] = &result
+		c.queueResult(result)
+	}
+	switch {
+	case c.Builder == nil:
+		refuse("this server does not build")
+		return
+	case !strings.HasPrefix(req.Source.URL, strings.TrimRight(c.Identity.ControlPlaneURL, "/")+"/api/v1/agent/sources/"):
+		// Sources come only from this agent's own control plane, never from an arbitrary address.
+		refuse("the source must come from this server's control plane")
+		return
+	}
+	c.builds[req.BuildID] = nil
+	go func() {
+		buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), maxBuildTime)
+		defer cancel()
+		result := c.Builder.Run(buildCtx, req)
+		c.buildMu.Lock()
+		c.builds[req.BuildID] = &result
+		c.buildMu.Unlock()
+		c.queueResult(result)
+	}()
+}
+
+// queueResult hands a result to whichever connection is up; the newest win if the queue is full.
+func (c *Client) queueResult(result build.Result) {
+	select {
+	case c.results <- result:
+	default:
+		c.Log.Warn("build result dropped: queue full", "build", result.BuildID)
+	}
+}
+
+func (c *Client) forwardBuildResults(ctx context.Context, k *conn) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case result := <-c.results:
+			err := k.send(ctx, protocol.TypeBuildResult, func(h protocol.Header) any {
+				return buildResultFrame{Header: h, Result: result}
+			})
+			if err != nil {
+				c.queueResult(result) // the next connection sends it
 				return
 			}
 		}

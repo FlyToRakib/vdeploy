@@ -35,18 +35,27 @@ type Config struct {
 	ACMEEmail string `json:"acmeEmail"`
 	// ACMEServer overrides Let's Encrypt (staging, or a test CA).
 	ACMEServer string `json:"acmeServer"`
+	// BuildMemoryMB caps a build (0: half the usable memory, at most 2 GB).
+	BuildMemoryMB int64 `json:"buildMemoryMB"`
+	// BuildCPUs caps a build (0: half the CPUs, at least one).
+	BuildCPUs float64 `json:"buildCPUs"`
+	// BuildMinFreeDiskMB and BuildMinFreeMemoryMB: below these, builds are refused.
+	BuildMinFreeDiskMB   int64 `json:"buildMinFreeDiskMB"`
+	BuildMinFreeMemoryMB int64 `json:"buildMinFreeMemoryMB"`
 }
 
 // Defaults are safe for a fresh server.
 func Defaults() Config {
 	return Config{
-		DockerSocket:      "/var/run/docker.sock",
-		StateDir:          "/var/lib/vdeploy",
-		AllowedRegistries: []string{"docker.io", "ghcr.io", "quay.io"},
-		ReserveMemoryMB:   256,
-		ReconcileSeconds:  15,
-		Routing:           true,
-		RoutingDir:        "/etc/vdeploy/traefik/dynamic",
+		DockerSocket:         "/var/run/docker.sock",
+		StateDir:             "/var/lib/vdeploy",
+		AllowedRegistries:    []string{"docker.io", "ghcr.io", "quay.io"},
+		ReserveMemoryMB:      256,
+		ReconcileSeconds:     15,
+		Routing:              true,
+		RoutingDir:           "/etc/vdeploy/traefik/dynamic",
+		BuildMinFreeDiskMB:   4096,
+		BuildMinFreeMemoryMB: 256,
 	}
 }
 
@@ -69,6 +78,20 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("config %s: reconcileSeconds must be at least 5", path)
 	}
 	return cfg, nil
+}
+
+// BuildCaps are the limits every build runs under, derived from this
+// machine unless set here. The control plane cannot change them.
+func (c Config) BuildCaps(policy guard.Policy) (memoryBytes, nanoCPUs int64) {
+	memoryBytes = c.BuildMemoryMB << 20
+	if memoryBytes <= 0 {
+		memoryBytes = min(policy.MaxMemoryBytes/2, 2<<30)
+	}
+	cpus := c.BuildCPUs
+	if cpus <= 0 {
+		cpus = max(policy.MaxCPUs/2, 1)
+	}
+	return memoryBytes, int64(cpus * 1e9)
 }
 
 // Interval is the idle reconciliation period.

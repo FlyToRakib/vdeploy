@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
@@ -77,7 +78,9 @@ type Reconciler struct {
 	Prober Prober
 	// Secrets opens sealed secret values; nil (not enrolled) cannot start projects using them.
 	Secrets SecretSource
-	Now     func() time.Time
+	// Built says whether this agent built a local image for a project; nil runs none.
+	Built func(imageID, projectID string) bool
+	Now   func() time.Time
 
 	ready    map[string]*readiness
 	draining map[string]time.Time
@@ -222,7 +225,12 @@ func (p *pass) ensureRunning(ctx context.Context, project spec.DesiredProject, c
 		p.event("healed", projectID, c.Name, "was "+was)
 		return nil
 	}
-	if err := engine.EnsureImage(ctx, c.Image); err != nil {
+	if strings.HasPrefix(c.Image, "sha256:") {
+		// A local image ID could name anything on this host: run it only if we built it.
+		if p.r.Built == nil || !p.r.Built(c.Image, projectID) {
+			return fmt.Errorf("image %s was not built by this agent for this project", c.Image)
+		}
+	} else if err := engine.EnsureImage(ctx, c.Image); err != nil {
 		return fmt.Errorf("image: %w", err)
 	}
 	secretEnv, err := compose.SecretEnv(project, func(id string, version int, sealed string) (string, error) {

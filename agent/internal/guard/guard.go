@@ -39,6 +39,7 @@ func (r *Refusal) Error() string {
 
 var (
 	pinnedImage = regexp.MustCompile(`^(?:([a-z0-9.-]+(?::[0-9]{1,5})?)/)?([a-z0-9]+(?:[._/-][a-z0-9]+)*)@sha256:[0-9a-f]{64}$`)
+	localImage  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	memoryQty   = regexp.MustCompile(`^([1-9][0-9]{0,6})(Ki|Mi|Gi|Ti)$`)
 )
 
@@ -83,10 +84,16 @@ func Check(p spec.DesiredProject, policy Policy) error {
 		reasons = append(reasons, fmt.Sprintf(format, args...))
 	}
 
-	if !pinnedImage.MatchString(p.Image) {
+	switch {
+	case localImage.MatchString(p.Image):
+		// Built on this server: never pulled, and the reconciler runs it only
+		// if its own record says this agent built it for this project.
+	case !pinnedImage.MatchString(p.Image):
 		refuse("image %q is not pinned by digest", p.Image)
-	} else if registry := Registry(p.Image); !slices.Contains(policy.AllowedRegistries, registry) {
-		refuse("registry %q is not allowed on this server", registry)
+	default:
+		if registry := Registry(p.Image); !slices.Contains(policy.AllowedRegistries, registry) {
+			refuse("registry %q is not allowed on this server", registry)
+		}
 	}
 
 	rt := p.Spec.Runtime

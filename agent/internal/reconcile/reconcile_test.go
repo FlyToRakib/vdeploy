@@ -628,3 +628,22 @@ func TestAProjectWhoseSecretsCannotBeOpenedIsNotStarted(t *testing.T) {
 		t.Fatalf("running = %v, error = %q", engine.running(), report.Projects[0].Error)
 	}
 }
+
+func TestALocalImageRunsOnlyIfThisAgentBuiltItForThisProject(t *testing.T) {
+	built := "sha256:" + strings.Repeat("c", 64)
+	p := testProject(idA, 1, 1)
+	p.Image = built
+
+	engine := newFake()
+	r := newReconciler(engine)
+	report := reconcile(t, r, desired(1, p))
+	if len(engine.running()) != 0 || !strings.Contains(report.Projects[0].Error, "was not built by this agent") {
+		t.Fatalf("ran an image it never built: %+v", report.Projects[0])
+	}
+
+	r.Built = func(id, projectID string) bool { return id == built && projectID == "prj_"+idA }
+	report = reconcile(t, r, desired(2, p))
+	if len(engine.running()) != 1 || slices.Contains(engine.calls, "pull") {
+		t.Fatalf("running = %v calls = %v error = %q", engine.running(), engine.calls, report.Projects[0].Error)
+	}
+}

@@ -38,11 +38,10 @@ func (LinuxHost) Arch() string { return runtime.GOARCH }
 // IsRoot implements Host.
 func (LinuxHost) IsRoot() bool { return os.Geteuid() == 0 }
 
-// MemoryBytes implements Host.
-func (LinuxHost) MemoryBytes() (int64, int64, error) {
+func meminfo() (map[string]int64, error) {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0, 0, fmt.Errorf("read /proc/meminfo: %w", err)
+		return nil, fmt.Errorf("read /proc/meminfo: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	values := map[string]int64{}
@@ -55,7 +54,31 @@ func (LinuxHost) MemoryBytes() (int64, int64, error) {
 		}
 	}
 	if values["MemTotal"] == 0 {
-		return 0, 0, errors.New("MemTotal not found")
+		return nil, errors.New("MemTotal not found")
+	}
+	return values, nil
+}
+
+// MemAvailableBytes is the memory the kernel can hand out now without swapping.
+func MemAvailableBytes() (uint64, error) {
+	values, err := meminfo()
+	if err != nil {
+		return 0, err
+	}
+	return uint64(max(values["MemAvailable"], 0)), nil // #nosec G115 -- clamped non-negative
+}
+
+// FreeDisk is the space available to unprivileged writers at path.
+func FreeDisk(path string) (uint64, error) {
+	free, err := LinuxHost{}.FreeDiskBytes(path)
+	return uint64(max(free, 0)), err // #nosec G115 -- clamped non-negative
+}
+
+// MemoryBytes implements Host.
+func (LinuxHost) MemoryBytes() (int64, int64, error) {
+	values, err := meminfo()
+	if err != nil {
+		return 0, 0, err
 	}
 	return values["MemTotal"], values["SwapTotal"], nil
 }

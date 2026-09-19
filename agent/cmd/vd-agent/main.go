@@ -13,10 +13,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/build"
 	"github.com/FlyToRakib/vdeploy/agent/internal/config"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
@@ -185,6 +187,9 @@ func serve(configPath string, log *slog.Logger) error {
 			Dir:     router.Dir(cfg.RoutingDir),
 		}
 	}
+	// Local image IDs run only if this agent built them (ADR 0008).
+	images := &build.Images{Path: filepath.Join(cfg.StateDir, "built-images.json")}
+	reconciler.Built = images.Built
 	loop := &reconcile.Loop{
 		Reconciler: reconciler,
 		StateDir:   cfg.StateDir,
@@ -201,9 +206,25 @@ func serve(configPath string, log *slog.Logger) error {
 			return err //nolint:wrapcheck // names the file already
 		}
 		reconciler.Secrets = sealed.Opener{Key: box, ServerID: id.ServerID}
+		memoryCap, cpuCap := cfg.BuildCaps(policy)
+		builder := &build.Builder{
+			Engine: engine,
+			Dir:    filepath.Join(cfg.StateDir, "builds"),
+			HTTP:   &http.Client{Timeout: 20 * time.Minute},
+			Limits: build.Limits{
+				MemoryBytes: memoryCap, NanoCPUs: cpuCap,
+				MinFreeDisk:     uint64(max(cfg.BuildMinFreeDiskMB, 0)) << 20,   // #nosec G115 -- clamped
+				MinFreeMemory:   uint64(max(cfg.BuildMinFreeMemoryMB, 0)) << 20, // #nosec G115 -- clamped
+				FreeDisk:        preflight.FreeDisk,
+				AvailableMemory: preflight.MemAvailableBytes,
+			},
+			Images: images,
+			Log:    log,
+		}
 		client := &transport.Client{
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
 			BoxKey:  sealed.PublicKey(box),
+			Builder: builder,
 			Updates: updates, Generation: loop.Generation, Reports: reports, Log: log,
 			HTTPClient: &http.Client{}, Now: time.Now,
 		}
