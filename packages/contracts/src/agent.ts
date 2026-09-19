@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
 import { BuildResult } from './builds.js';
+import { LogLine } from './logs.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
 import { Hostname } from './spec/sections.js';
@@ -137,6 +138,18 @@ export const AgentFrame = z.discriminatedUnion('type', [
   }),
   z.strictObject({ ...FrameHeader, type: z.literal('observed_state'), report: ObservedReport }),
   z.strictObject({ ...FrameHeader, type: z.literal('build_result'), result: BuildResult }),
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('logs_chunk'),
+    requestId: z.string().max(64),
+    lines: z.array(LogLine).max(5000),
+  }),
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('logs_end'),
+    requestId: z.string().max(64),
+    error: z.string().max(4096).optional(),
+  }),
 ]);
 export type AgentFrame = z.infer<typeof AgentFrame>;
 

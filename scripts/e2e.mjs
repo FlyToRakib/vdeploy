@@ -331,6 +331,7 @@ async function run() {
   await secrets(hello.id);
   await releaseCommand(hello.id);
   await buildFromSource(server.serverId);
+  await logsAndHistory(hello.id);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
@@ -428,6 +429,49 @@ async function secrets(projectId) {
   const listed = JSON.stringify(await op('secret.list', { projectId }));
   if (listed.includes(value)) throw new Error('secret.list returned a value');
   pass('secret delivered sealed: in the container, never in frames or on disk', name);
+}
+
+/**
+ * Logs and history (M2 2.10): recent lines through the gate, a live SSE
+ * stream, the event timeline, and the build log behind a deployment.
+ */
+async function logsAndHistory(helloId) {
+  served(); // one fresh request, so there is an access log line to find
+  const lines = await until('access log line', async () => {
+    const { result } = await op('project.logs', { projectId: helloId, tail: 50 });
+    return result.some((l) => /"GET \/ HTTP\/1\.1" 200/.test(l.text)) ? result : null;
+  });
+  pass('recent logs through the agent channel', `${lines.length} lines`);
+
+  const viewer = new AbortController();
+  const res = await fetch(`${API}/api/v1/projects/${helloId}/logs/stream?tail=5`, {
+    headers: {
+      origin: PUBLIC_URL,
+      cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join('; '),
+    },
+    signal: viewer.signal,
+  });
+  if (!res.ok || !res.headers.get('content-type')?.startsWith('text/event-stream')) {
+    throw new Error(`log stream → ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const { value } = await reader.read();
+  viewer.abort();
+  const first = new TextDecoder().decode(value);
+  if (!first.startsWith('event: lines')) throw new Error(`log stream began with ${first}`);
+  pass('live log stream over server-sent events');
+
+  const { result: events } = await op('project.events', { projectId: helloId });
+  if (!events.some((e) => e.kind === 'created')) throw new Error(JSON.stringify(events));
+  const [nodeApp] = (await op('project.list', {})).result.filter((p) => p.name === 'node-app');
+  const { result: deployments } = await op('deployment.list', { projectId: nodeApp.id });
+  const { result: deployLog } = await op('deployment.logs', {
+    projectId: nodeApp.id,
+    deploymentId: deployments[0].id,
+  });
+  if (!deployLog.build?.log.includes('exporting'))
+    throw new Error('no build log behind the deploy');
+  pass('deploy history with its build log and the event timeline', `${events.length} events`);
 }
 
 /** Waits for a plan to finish and returns it. */

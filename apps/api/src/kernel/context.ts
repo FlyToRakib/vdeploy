@@ -1,6 +1,7 @@
 import type { HumanActor } from '@vdeploy/ai';
 import type { Database } from '@vdeploy/db';
 import type { Auth } from '../auth/auth.js';
+import type { LogSource } from '../agents/gateway.js';
 import type { Mailer } from '../auth/mailer.js';
 
 /** Hands an approved plan to the worker that applies it. */
@@ -19,6 +20,8 @@ export interface KernelDeps {
   secretsKey: Buffer;
   publicUrl: string;
   now: () => Date;
+  /** Live container output, through the agent channel; absent in tests without agents. */
+  logs?: LogSource;
 }
 
 /** What an operation handler receives once the gate has let the request through. */

@@ -9,3 +9,4 @@ export * from './instant.js';
 export * from './domains.js';
 export * from './secrets.js';
 export * from './builds.js';
+export * from './events.js';

@@ -19,6 +19,7 @@ import { authRoutes } from './routes/auth.js';
 import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
 import { operationRoutes } from './routes/operations.js';
+import { logRoutes } from './routes/logs.js';
 import { uploadRoutes } from './routes/uploads.js';
 
 /** Log fields that may carry credentials or secret values; never written out. */
@@ -116,8 +117,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     secretsKey: config.SECRETS_KEY,
     publicUrl: config.PUBLIC_URL,
     now: deps.now ?? (() => new Date()),
+    logs: gateway,
   };
   await app.register(operationRoutes(kernel));
+  await app.register(logRoutes(kernel));
   await app.register(uploadRoutes(kernel));
   return app;
 }

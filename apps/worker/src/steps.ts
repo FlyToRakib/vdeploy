@@ -286,7 +286,7 @@ async function buildImage(
   row: Awaited<ReturnType<typeof project>>,
   uploadId: string,
   strip = 0,
-): Promise<string> {
+): Promise<{ image: string; buildId: string }> {
   const { spec } = row;
   const strategy =
     spec.build.strategy in AGENT_STRATEGY
@@ -339,7 +339,7 @@ async function buildImage(
   const deadline = Date.now() + (deps.buildTimeoutMs ?? 60 * 60_000);
   for (;;) {
     const build = await getBuild(deps.db, state.orgId, buildId);
-    if (build?.status === 'succeeded' && build.image) return build.image;
+    if (build?.status === 'succeeded' && build.image) return { image: build.image, buildId };
     if (build?.status === 'failed') {
       throw new VDeployError('unavailable', `The build failed: ${build.error ?? 'see its log'}`);
     }
@@ -355,13 +355,14 @@ async function newRelease(deps: StepDeps, state: ApplyState) {
   const row = await project(deps, state);
   const source = row.spec.source;
   let image: string;
+  let buildId: string | null = null;
   if (source.type === 'image') {
     image = await pinImage(source.image, deps.registry);
   } else if (source.type === 'archive') {
-    image = await buildImage(deps, state, row, source.uploadId);
+    ({ image, buildId } = await buildImage(deps, state, row, source.uploadId));
   } else if (source.type === 'git') {
     const uploadId = await fetchPublicRepo(deps, state, source.repo, source.branch);
-    image = await buildImage(deps, state, row, uploadId, 1);
+    ({ image, buildId } = await buildImage(deps, state, row, uploadId, 1));
   } else {
     throw new VDeployError(
       'unavailable',
@@ -382,7 +383,9 @@ async function newRelease(deps: StepDeps, state: ApplyState) {
     secretVersions: await pinSecrets(deps, row.id, row.spec),
     now: deps.now(),
   });
-  await deps.db.insert(releases).values({ ...release, createdAt: new Date(release.createdAt) });
+  await deps.db
+    .insert(releases)
+    .values({ ...release, buildId, createdAt: new Date(release.createdAt) });
   state.releaseId = release.id;
 }
 

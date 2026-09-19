@@ -10,6 +10,7 @@ import type {
 } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
 import {
+  bigserial,
   boolean,
   index,
   integer,
@@ -108,6 +109,8 @@ export const releases = pgTable(
     image: text('image').notNull(),
     secretVersions: jsonb('secret_versions').$type<Record<string, number>>().notNull(),
     sourceCommit: text('source_commit'),
+    /** The build that produced the image, when it was built on a server. */
+    buildId: text('build_id'),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('releases_project_version').on(t.projectId, t.version)],
@@ -235,6 +238,23 @@ export const projectKeys = pgTable('project_keys', {
   wrapped: text('wrapped').notNull(),
   createdAt: createdAt(),
 });
+
+/** What agents reported doing, per project: the timeline behind deploy history. */
+export const projectEvents = pgTable(
+  'project_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    serverId: text('server_id').notNull(),
+    kind: text('kind').notNull(),
+    container: text('container'),
+    message: text('message').notNull().default(''),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('project_events_project_at').on(t.projectId, t.at)],
+);
 
 /** How an org's projects get instant URLs (§13.1); no row means the defaults. */
 export const urlSettings = pgTable('url_settings', {

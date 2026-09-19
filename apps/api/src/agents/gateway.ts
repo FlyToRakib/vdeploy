@@ -1,5 +1,11 @@
 import { randomBytes, type KeyObject } from 'node:crypto';
-import { AgentFrame, EnrollRequest, VDeployError } from '@vdeploy/contracts';
+import {
+  AgentFrame,
+  cleanLogText,
+  EnrollRequest,
+  VDeployError,
+  type LogLine,
+} from '@vdeploy/contracts';
 import { deliveryContext, isPublicIpv4, sealTo } from '@vdeploy/core';
 import {
   appendAudit,
@@ -11,6 +17,7 @@ import {
   finishBuild,
   observedState,
   readSecret,
+  recordEvents,
   refreshInstantHosts,
   resetDomainChecks,
   serverEnrollments,
@@ -55,14 +62,35 @@ interface Connection {
   session: FrameSession;
 }
 
+interface LogRequest {
+  serverId: string;
+  onLines: (lines: LogLine[]) => void;
+  done: (error?: string) => void;
+}
+
+/** Where live logs come from: the agent holding the project's containers. */
+export interface LogSource {
+  /**
+   * Streams a project's output: the last `tail` lines, then new ones while
+   * `follow` is set and `signal` has not aborted. Resolves when it ends.
+   */
+  stream(
+    serverId: string,
+    projectId: string,
+    options: { tail: number; follow: boolean; signal?: AbortSignal },
+    onLines: (lines: LogLine[]) => void,
+  ): Promise<void>;
+}
+
 /**
  * The control plane's side of the agent channel (§25). Agents dial in; the
  * gateway pushes desired state when the worker changes it (via NOTIFY) and
  * records acks and observed state. Agent input is validated like any other
  * untrusted input: a compromised server cannot hurt the control plane.
  */
-export class Gateway {
+export class Gateway implements LogSource {
   private readonly connections = new Map<string, Connection>();
+  private readonly logRequests = new Map<string, LogRequest>();
   private stopListening: (() => Promise<void>) | null = null;
   private stopBuildListening: (() => Promise<void>) | null = null;
 
@@ -129,6 +157,45 @@ export class Gateway {
     }
   }
 
+  stream(
+    serverId: string,
+    projectId: string,
+    options: { tail: number; follow: boolean; signal?: AbortSignal },
+    onLines: (lines: LogLine[]) => void,
+  ): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      return Promise.reject(
+        new VDeployError('unavailable', 'The server is offline, so its logs cannot be read now'),
+      );
+    }
+    const requestId = randomBytes(16).toString('base64url');
+    return new Promise<void>((resolve, reject) => {
+      const finish = (error?: string) => {
+        this.logRequests.delete(requestId);
+        options.signal?.removeEventListener('abort', abort);
+        if (error) reject(new VDeployError('unavailable', error));
+        else resolve();
+      };
+      const abort = () => {
+        const open = this.connections.get(serverId);
+        open?.socket.send(seal(this.deps.key, { ...open.session.next('logs_stop'), requestId }));
+        finish();
+      };
+      this.logRequests.set(requestId, { serverId, onLines, done: finish });
+      options.signal?.addEventListener('abort', abort, { once: true });
+      connection.socket.send(
+        seal(this.deps.key, {
+          ...connection.session.next('logs'),
+          requestId,
+          projectId,
+          tail: options.tail,
+          follow: options.follow,
+        }),
+      );
+    });
+  }
+
   async stop(): Promise<void> {
     for (const { socket } of this.connections.values())
       socket.close(1001, 'control plane stopping');
@@ -175,28 +242,36 @@ export class Gateway {
       socket.close(1008, 'frame refused');
     };
 
+    // Frames are handled one at a time, in the order they arrived: a log's
+    // end must never overtake its last lines, nor a report its predecessor.
+    let queue = Promise.resolve();
     socket.on('message', (data: Buffer) => {
-      void (async () => {
-        const frame = AgentFrame.parse(open(agentKey, data.toString('utf8')));
-        session.check(frame);
-        if (!hello) {
-          if (frame.type !== 'hello') throw new VDeployError('forbidden', 'Expected hello');
-          hello = true;
-          clearTimeout(helloTimer);
-          await this.online(serverId, server.orgId, frame, remote);
-          this.connections.get(serverId)?.socket.close(1000, 'replaced by a newer connection');
-          this.connections.set(serverId, { socket, session });
-          await this.push(serverId);
-          await this.dispatchBuilds(serverId);
-          return;
-        }
-        await this.receive(serverId, server.orgId, frame);
-      })().catch(refuse);
+      queue = queue
+        .then(async () => {
+          const frame = AgentFrame.parse(open(agentKey, data.toString('utf8')));
+          session.check(frame);
+          if (!hello) {
+            if (frame.type !== 'hello') throw new VDeployError('forbidden', 'Expected hello');
+            hello = true;
+            clearTimeout(helloTimer);
+            await this.online(serverId, server.orgId, frame, remote);
+            this.connections.get(serverId)?.socket.close(1000, 'replaced by a newer connection');
+            this.connections.set(serverId, { socket, session });
+            await this.push(serverId);
+            await this.dispatchBuilds(serverId);
+            return;
+          }
+          await this.receive(serverId, server.orgId, frame);
+        })
+        .catch(refuse);
     });
 
     socket.on('close', () => {
       clearTimeout(helloTimer);
       clearInterval(pinger);
+      for (const request of this.logRequests.values()) {
+        if (request.serverId === serverId) request.done('The connection to the server was lost');
+      }
       if (this.connections.get(serverId)?.socket === socket) {
         this.connections.delete(serverId);
         void db
@@ -256,8 +331,18 @@ export class Gateway {
           target: observedState.serverId,
           set: { generation: frame.report.generation, report: frame.report, receivedAt: now() },
         });
+      await recordEvents(db, serverId, frame.report.events ?? [], now());
     } else if (frame.type === 'build_result') {
       await finishBuild(db, serverId, frame.result, now());
+    } else if (frame.type === 'logs_chunk' || frame.type === 'logs_end') {
+      // Only the server a request went to may answer it.
+      const request = this.logRequests.get(frame.requestId);
+      if (request?.serverId !== serverId) return;
+      if (frame.type === 'logs_end') {
+        request.done(frame.error);
+        return;
+      }
+      request.onLines(frame.lines.map((line) => ({ ...line, text: cleanLogText(line.text) })));
     } else if (frame.type === 'ack' && !frame.accepted) {
       // The agent refused a desired state (L6). That is a security event, recorded as such.
       await appendAudit(db, {

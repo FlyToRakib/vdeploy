@@ -28,6 +28,10 @@ const (
 	TypeObserved     = "observed_state"
 	TypeBuild        = "build"
 	TypeBuildResult  = "build_result"
+	TypeLogs         = "logs"
+	TypeLogsStop     = "logs_stop"
+	TypeLogsChunk    = "logs_chunk"
+	TypeLogsEnd      = "logs_end"
 )
 
 // MaxClockSkew bounds how far a frame's timestamp may be from ours.

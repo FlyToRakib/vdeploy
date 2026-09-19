@@ -277,6 +277,75 @@ describe('agent channel', () => {
     expect(offline?.status).toBe('offline');
   });
 
+  it('relays logs, cleaned of terminal codes, and keeps the event timeline', async () => {
+    const agent = await enroll('server-logs');
+    const fake = new FakeAgent(agent);
+    await fake.connect();
+    await fake.next(); // desired state
+    const [org] = await t.database.db
+      .select({ orgId: servers.orgId })
+      .from(servers)
+      .where(eq(servers.id, agent.serverId));
+    const spec = ApplicationSpec.parse({
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'logs-app' },
+      source: { type: 'image', image: 'nginx:1.27' },
+      build: { strategy: 'image' },
+    });
+    const projectId = newId('project');
+    await t.database.db.insert(projects).values({
+      id: projectId,
+      orgId: org!.orgId,
+      serverId: agent.serverId,
+      name: 'logs-app',
+      spec,
+      specHash: hashOf(spec),
+    });
+
+    const reading = owner.request('POST', '/api/v1/operations/project.logs', {
+      input: { projectId, tail: 5 },
+    });
+    const request = await fake.next();
+    expect(request).toMatchObject({ type: 'logs', projectId, tail: 5, follow: false });
+    const requestId = String(request.requestId);
+    fake.send({
+      ...fake.session.next('logs_chunk'),
+      requestId,
+      lines: [
+        { container: 'vd-a', stream: 'out', time: '2026-09-19T12:00:02Z', text: 'second' },
+        {
+          container: 'vd-a',
+          stream: 'err',
+          time: '2026-09-19T12:00:01Z',
+          text: '\u001b[31mred\u001b[0m alert\u0007',
+        },
+      ],
+    });
+    fake.send({ ...fake.session.next('logs_end'), requestId });
+    const res = await reading;
+    expect(res.json<{ result: { text: string }[] }>().result.map((l) => l.text)).toEqual([
+      'red alert',
+      'second',
+    ]);
+
+    // Events for its own project are kept (once per repeat window); others are not.
+    const event = { projectId, kind: 'created', container: 'vd-a', message: '' };
+    const foreign = { projectId: newId('project'), kind: 'created', container: 'x', message: '' };
+    for (let i = 0; i < 2; i++) {
+      fake.send({
+        ...fake.session.next('observed_state'),
+        report: { generation: 0, projects: [], events: [event, foreign] },
+      });
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    const events = await owner.request('POST', '/api/v1/operations/project.events', {
+      input: { projectId },
+    });
+    expect(events.json<{ result: { kind: string }[] }>().result).toHaveLength(1);
+    fake.close();
+  });
+
   it('closes the connection on a forged, replayed or out-of-place frame', async () => {
     const { privateKey: stranger } = generateKeyPairSync('ed25519');
     const cases: [string, (fake: FakeAgent) => void][] = [

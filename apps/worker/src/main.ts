@@ -1,6 +1,6 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { parseEnv } from '@vdeploy/contracts';
-import { APPLY_QUEUE, connect, queueConnection, type ApplyJob } from '@vdeploy/db';
+import { APPLY_QUEUE, connect, pruneEvents, queueConnection, type ApplyJob } from '@vdeploy/db';
 import { createPostgresBackend, Worker } from 'bullmq';
 import { pino } from 'pino';
 import { z } from 'zod';
@@ -90,10 +90,18 @@ const dnsTimer = setInterval(() => {
     });
 }, 5000);
 
+// The project timeline keeps 30 days; pruned hourly.
+const pruneTimer = setInterval(() => {
+  pruneEvents(db, new Date()).catch((err: unknown) => {
+    log.error({ err }, 'could not prune old events');
+  });
+}, 60 * 60_000);
+
 // Finish the plan in progress, then stop.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     clearInterval(dnsTimer);
+    clearInterval(pruneTimer);
     void worker.close().then(close, close);
   });
 }

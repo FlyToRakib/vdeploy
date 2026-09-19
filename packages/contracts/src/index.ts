@@ -16,3 +16,4 @@ export * from './urls.js';
 export * from './dns.js';
 export * from './secrets.js';
 export * from './builds.js';
+export * from './logs.js';

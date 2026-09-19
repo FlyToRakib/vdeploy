@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -116,6 +117,66 @@ func (c *Client) RunHelper(ctx context.Context, h Helper) (int, string, error) {
 	}
 	return waited.StatusCode, logs, nil
 }
+
+// StreamLogs reads a container's output line by line: the last tail lines,
+// then new ones while follow is set and ctx lasts. stream is 1 for stdout,
+// 2 for stderr. A line longer than maxStreamLine is split.
+func (c *Client) StreamLogs(ctx context.Context, id string, tail int, follow bool, each func(stream byte, line []byte)) error {
+	query := url.Values{
+		"stdout": {"1"}, "stderr": {"1"}, "timestamps": {"1"},
+		"tail": {strconv.Itoa(tail)}, "follow": {strconv.FormatBool(follow)},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.base+"/containers/"+url.PathEscape(id)+"/logs?"+query.Encode(), nil)
+	if err != nil {
+		return fmt.Errorf("logs: %w", err)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("logs: %w", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode >= 300 {
+		return &APIError{Status: res.StatusCode, Message: "logs"}
+	}
+	partial := map[byte][]byte{}
+	header := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(res.Body, header); err != nil {
+			for stream, rest := range partial {
+				if len(rest) > 0 {
+					each(stream, rest)
+				}
+			}
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("logs: %w", err)
+		}
+		stream := header[0]
+		chunk := make([]byte, binary.BigEndian.Uint32(header[4:]))
+		if _, err := io.ReadFull(res.Body, chunk); err != nil {
+			return nil //nolint:nilerr // the stream ended mid-frame: what was read is all there is
+		}
+		buf := append(partial[stream], chunk...)
+		for {
+			i := bytes.IndexByte(buf, '\n')
+			if i < 0 {
+				break
+			}
+			each(stream, buf[:i])
+			buf = buf[i+1:]
+		}
+		if len(buf) > maxStreamLine {
+			each(stream, buf)
+			buf = nil
+		}
+		partial[stream] = append([]byte(nil), buf...)
+	}
+}
+
+// maxStreamLine is where an unterminated line is cut and sent anyway.
+const maxStreamLine = 16 << 10
 
 // Finished is a stopped container's exit code and the end of its output.
 func (c *Client) Finished(ctx context.Context, id string) (int, string, error) {

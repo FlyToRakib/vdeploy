@@ -22,6 +22,7 @@ import (
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/build"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
+	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 )
@@ -47,6 +48,8 @@ type Client struct {
 	Now        func() time.Time
 	// Builder runs builds the control plane asks for; nil refuses them.
 	Builder Builder
+	// Logs streams a project's container output; nil refuses log requests.
+	Logs func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error
 
 	buildMu sync.Mutex
 	builds  map[string]*build.Result // by build id: nil while running
@@ -141,6 +144,31 @@ type conn struct {
 	key     ed25519.PrivateKey
 	session *protocol.Session
 	mu      sync.Mutex
+
+	logsMu sync.Mutex
+	logs   map[string]context.CancelFunc // open log streams, by request id
+}
+
+func (k *conn) addLogs(id string, cancel context.CancelFunc) bool {
+	k.logsMu.Lock()
+	defer k.logsMu.Unlock()
+	if k.logs == nil {
+		k.logs = map[string]context.CancelFunc{}
+	}
+	if _, open := k.logs[id]; open || len(k.logs) >= maxLogStreams {
+		return false
+	}
+	k.logs[id] = cancel
+	return true
+}
+
+func (k *conn) stopLogs(id string) {
+	k.logsMu.Lock()
+	defer k.logsMu.Unlock()
+	if cancel, open := k.logs[id]; open {
+		cancel()
+		delete(k.logs, id)
+	}
 }
 
 // send numbers, signs and writes one frame. Numbering happens under the same
@@ -235,6 +263,28 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 	if err := json.Unmarshal(body, &head); err != nil {
 		return fmt.Errorf("malformed frame: %w", err)
 	}
+	switch head.Type {
+	case protocol.TypeLogs:
+		var frame logsFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startLogs(ctx, k, frame)
+		return nil
+	case protocol.TypeLogsStop:
+		var frame logsStopFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		k.stopLogs(frame.RequestID)
+		return nil
+	}
 	if head.Type == protocol.TypeBuild {
 		var frame buildFrame
 		if err := strictDecode(body, &frame); err != nil {
@@ -287,6 +337,67 @@ func (c *Client) forwardReports(ctx context.Context, k *conn) {
 			}
 		}
 	}
+}
+
+type logsFrame struct {
+	protocol.Header
+	RequestID string `json:"requestId"`
+	ProjectID string `json:"projectId"`
+	Tail      int    `json:"tail"`
+	Follow    bool   `json:"follow"`
+}
+
+type logsStopFrame struct {
+	protocol.Header
+	RequestID string `json:"requestId"`
+}
+
+type logsChunkFrame struct {
+	protocol.Header
+	RequestID string      `json:"requestId"`
+	Lines     []logs.Line `json:"lines"`
+}
+
+type logsEndFrame struct {
+	protocol.Header
+	RequestID string `json:"requestId"`
+	Error     string `json:"error,omitempty"`
+}
+
+// maxLogStreams bounds the log streams one connection may hold open.
+const maxLogStreams = 8
+
+// startLogs streams a project's logs for one request, until it ends, the
+// control plane stops it, or the connection drops.
+func (c *Client) startLogs(ctx context.Context, k *conn, frame logsFrame) {
+	end := func(reason string) {
+		_ = k.send(ctx, protocol.TypeLogsEnd, func(h protocol.Header) any {
+			return logsEndFrame{Header: h, RequestID: frame.RequestID, Error: reason}
+		})
+	}
+	if c.Logs == nil || len(frame.RequestID) == 0 || len(frame.RequestID) > 64 {
+		end("this server does not stream logs")
+		return
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	if !k.addLogs(frame.RequestID, cancel) {
+		cancel()
+		end("too many log streams are open")
+		return
+	}
+	go func() {
+		defer k.stopLogs(frame.RequestID)
+		err := c.Logs(streamCtx, frame.ProjectID, frame.Tail, frame.Follow, func(lines []logs.Line) error {
+			return k.send(streamCtx, protocol.TypeLogsChunk, func(h protocol.Header) any {
+				return logsChunkFrame{Header: h, RequestID: frame.RequestID, Lines: lines}
+			})
+		})
+		reason := ""
+		if err != nil && streamCtx.Err() == nil {
+			reason = err.Error()
+		}
+		end(reason)
+	}()
 }
 
 type buildFrame struct {

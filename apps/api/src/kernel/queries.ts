@@ -1,8 +1,10 @@
-import { readSpec, VDeployError, type OperationName } from '@vdeploy/contracts';
+import { readSpec, VDeployError, type LogLine, type OperationName } from '@vdeploy/contracts';
 import { describeCapacity, footprint } from '@vdeploy/core';
 import {
+  builds,
   buildView,
   deployments,
+  eventsFor,
   getBuild,
   listBuilds,
   domainChecksFor,
@@ -153,9 +155,47 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
     if (!row) throw new VDeployError('not_found', 'Build not found');
     return buildView(row);
   },
-  'project.logs': notYet,
+  'project.logs': async ({ deps, args }) => {
+    const [row] = await deps.db
+      .select({ serverId: projects.serverId })
+      .from(projects)
+      .where(eq(projects.id, id(args, 'projectId')));
+    if (!row?.serverId || !deps.logs) {
+      throw new VDeployError('unavailable', 'This project is not running anywhere yet');
+    }
+    const lines: LogLine[] = [];
+    const signal = AbortSignal.timeout(15_000);
+    await deps.logs.stream(
+      row.serverId,
+      id(args, 'projectId'),
+      { tail: Number(args.tail), follow: false, signal },
+      (batch) => lines.push(...batch),
+    );
+    // Oldest first, across replicas; the model sees them only as tainted data (§7).
+    return lines.sort((a, b) => a.time.localeCompare(b.time));
+  },
   'project.metrics': notYet,
-  'project.events': notYet,
-  'deployment.logs': notYet,
+  'project.events': async ({ deps, args }) => eventsFor(deps.db, id(args, 'projectId')),
+  'deployment.logs': async ({ deps, args }) => {
+    const [row] = await deps.db
+      .select({ deployment: deployments, buildId: releases.buildId })
+      .from(deployments)
+      .leftJoin(releases, eq(releases.id, deployments.releaseId))
+      .where(
+        and(
+          eq(deployments.id, id(args, 'deploymentId')),
+          eq(deployments.projectId, id(args, 'projectId')),
+        ),
+      );
+    if (!row) throw new VDeployError('not_found', 'Deployment not found');
+    const [build] = row.buildId
+      ? await deps.db.select().from(builds).where(eq(builds.id, row.buildId))
+      : [];
+    return {
+      status: row.deployment.status,
+      error: row.deployment.error,
+      build: build ? { id: build.id, status: build.status, log: build.log } : null,
+    };
+  },
   'health.check': notYet,
 };

@@ -22,6 +22,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/config"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
+	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
@@ -227,6 +228,9 @@ func serve(configPath string, log *slog.Logger) error {
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
 			BoxKey:  sealed.PublicKey(box),
 			Builder: builder,
+			Logs: func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error {
+				return logs.Stream(ctx, engine, projectID, tail, follow, emit) //nolint:wrapcheck // plain for the viewer
+			},
 			Updates: updates, Generation: loop.Generation, Reports: reports, Log: log,
 			HTTPClient: &http.Client{}, Now: time.Now,
 		}
