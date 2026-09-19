@@ -16,6 +16,13 @@ export const ApiConfig = z.object({
   PUBLIC_URL: z.url({ protocol: /^https?$/ }),
   /** Signs approvals (§8 L5). Rotating it voids every outstanding approval, by design. */
   APPROVAL_KEY: Key32,
+  /** Signs sessions and encrypts 2FA secrets. At least 32 random characters. */
+  AUTH_SECRET: z.string().min(32),
+  /** smtp(s)://user:pass@host:port — without it, email is logged, not sent. */
+  SMTP_URL: z.url({ protocol: /^smtps?$/ }).optional(),
+  MAIL_FROM: z.string().min(3).default('VDeploy <no-reply@localhost>'),
+  /** Reject passwords found in breaches (k-anonymity range query to HaveIBeenPwned). */
+  BREACHED_PASSWORD_CHECK: z.stringbool().default(true),
 });
 export type ApiConfig = z.output<typeof ApiConfig>;
 

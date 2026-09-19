@@ -11,20 +11,26 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
+    "@better-auth/api-key": "^1.7.5",
+    "@better-auth/passkey": "^1.7.5",
     "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/swagger": "^9.8.1",
+    "@node-rs/argon2": "^2.2.1",
     "@vdeploy/ai": "workspace:*",
     "@vdeploy/contracts": "workspace:*",
     "@vdeploy/core": "workspace:*",
     "@vdeploy/db": "workspace:*",
+    "better-auth": "^1.7.5",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",
     "fastify-type-provider-zod": "^7.0.0",
-    "zod": "^4.6.5",
-    "drizzle-orm": "^0.45.2"
+    "nodemailer": "^10.0.10",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^12.1.0",
+    "@types/nodemailer": "^8.0.2",
     "tsx": "^4.23.13"
   }
 }

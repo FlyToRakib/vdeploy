@@ -28,6 +28,13 @@ export const ID_PREFIXES = {
   invitation: 'inv',
   enrollment: 'enr',
   upload: 'upl',
+  member: 'mem',
+  account: 'acc',
+  verification: 'vrf',
+  twoFactor: 'tfa',
+  passkey: 'psk',
+  teamMember: 'tmm',
+  rateLimit: 'rtl',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

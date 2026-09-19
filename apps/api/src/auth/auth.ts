@@ -1,0 +1,185 @@
+import { apiKey } from '@better-auth/api-key';
+import { passkey } from '@better-auth/passkey';
+import { newId, ulid, type IdKind } from '@vdeploy/contracts';
+import { authSchema, type Database } from '@vdeploy/db';
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { haveIBeenPwned, organization, twoFactor } from 'better-auth/plugins';
+import {
+  adminAc,
+  defaultStatements,
+  memberAc,
+  ownerAc,
+} from 'better-auth/plugins/organization/access';
+import { createAccessControl } from 'better-auth/plugins/access';
+import { createHooks } from './hooks.js';
+import type { Mailer } from './mailer.js';
+import { hashPassword, verifyPassword } from './password.js';
+
+/** Idle timeout: a session unused this long expires. */
+export const SESSION_IDLE_SECONDS = 7 * 24 * 60 * 60;
+/** Refresh the idle window at most once a day of activity. */
+const SESSION_REFRESH_SECONDS = 24 * 60 * 60;
+
+const MODEL_ID_KIND: Readonly<Record<string, IdKind>> = {
+  user: 'user',
+  session: 'session',
+  account: 'account',
+  verification: 'verification',
+  organization: 'organization',
+  member: 'member',
+  invitation: 'invitation',
+  team: 'team',
+  teamMember: 'teamMember',
+  twoFactor: 'twoFactor',
+  passkey: 'passkey',
+  apikey: 'apiKey',
+  rateLimit: 'rateLimit',
+};
+
+/** Every auth record gets a prefixed id like every other VDeploy record. */
+function generateId({ model }: { model: string }): string {
+  const kind = MODEL_ID_KIND[model];
+  return kind ? newId(kind) : `${model.toLowerCase().slice(0, 4)}_${ulid()}`;
+}
+
+const ac = createAccessControl(defaultStatements);
+
+/**
+ * Better Auth's organization roles only gate its own endpoints, and those
+ * mutating endpoints are not public (see routes/auth.ts): every org change
+ * runs through the policy engine. The roles exist so invitations and
+ * memberships carry VDeploy's four role names.
+ */
+const roles = {
+  owner: ac.newRole(ownerAc.statements),
+  admin: ac.newRole(adminAc.statements),
+  developer: ac.newRole(memberAc.statements),
+  viewer: ac.newRole(memberAc.statements),
+};
+
+export interface AuthDeps {
+  db: Database;
+  mailer: Mailer;
+  secret: string;
+  /** The dashboard origin: cookies, passkeys and CSRF checks are bound to it. */
+  publicUrl: string;
+  breachedPasswordCheck: boolean;
+  /** Better Auth's own per-IP limits; tests of the lockout turn them off. */
+  rateLimit: boolean;
+  production: boolean;
+}
+
+export function createAuth(deps: AuthDeps) {
+  const origin = new URL(deps.publicUrl);
+  const link = (path: string) => new URL(path, origin).toString();
+  const { hooks, databaseHooks, onPasswordReset } = createHooks(deps);
+  return betterAuth({
+    hooks,
+    databaseHooks,
+    appName: 'VDeploy',
+    baseURL: deps.publicUrl,
+    basePath: '/api/auth',
+    secret: deps.secret,
+    trustedOrigins: [origin.origin],
+    database: drizzleAdapter(deps.db, { provider: 'pg', schema: authSchema }),
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 12,
+      maxPasswordLength: 128,
+      autoSignIn: true,
+      revokeSessionsOnPasswordReset: true,
+      resetPasswordTokenExpiresIn: 30 * 60,
+      password: { hash: hashPassword, verify: verifyPassword },
+      onPasswordReset,
+      sendResetPassword: async ({ user, url }) => {
+        await deps.mailer.send({
+          to: user.email,
+          subject: 'Reset your VDeploy password',
+          text: `Someone asked to reset the password for ${user.email}.\n\nReset it here (valid for 30 minutes, once): ${url}\n\nIf this wasn't you, ignore this email; your password is unchanged.`,
+        });
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: false,
+      sendVerificationEmail: async ({ user, url }) => {
+        await deps.mailer.send({
+          to: user.email,
+          subject: 'Confirm your email for VDeploy',
+          text: `Confirm this address to start deploying: ${url}`,
+        });
+      },
+    },
+    user: {
+      changeEmail: {
+        enabled: true,
+        // Confirmed at both addresses (§20.2): the current one approves, the new one verifies.
+        sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+          await deps.mailer.send({
+            to: user.email,
+            subject: 'Confirm your VDeploy email change',
+            text: `Someone asked to change your sign-in email to ${newEmail}. Approve it here: ${url}\n\nIf this wasn't you, change your password now: ${link('/settings/security')}`,
+          });
+        },
+      },
+    },
+    session: {
+      expiresIn: SESSION_IDLE_SECONDS,
+      updateAge: SESSION_REFRESH_SECONDS,
+      // Server-side sessions only: a cookie cache would delay revocation.
+      cookieCache: { enabled: false },
+    },
+    rateLimit: {
+      enabled: deps.rateLimit,
+      storage: 'database',
+      window: 60,
+      max: 100,
+      customRules: {
+        '/sign-in/*': { window: 60, max: 5 },
+        '/sign-up/*': { window: 3600, max: 5 },
+        '/request-password-reset': { window: 3600, max: 3 },
+        '/two-factor/*': { window: 60, max: 5 },
+      },
+    },
+    advanced: {
+      useSecureCookies: deps.production,
+      database: { generateId },
+      ipAddress: { ipAddressHeaders: ['x-forwarded-for'] },
+      defaultCookieAttributes: { httpOnly: true, sameSite: 'lax', secure: deps.production },
+    },
+    plugins: [
+      organization({
+        ac,
+        roles,
+        creatorRole: 'owner',
+        allowUserToCreateOrganization: false,
+        invitationExpiresIn: 7 * 24 * 60 * 60,
+        cancelPendingInvitationsOnReInvite: true,
+        teams: { enabled: true },
+        sendInvitationEmail: async ({ email, organization: org, inviter, id, role }) => {
+          await deps.mailer.send({
+            to: email,
+            subject: `You're invited to ${org.name} on VDeploy`,
+            text: `${inviter.user.name} invited you to join ${org.name} as ${role}.\n\nAccept: ${link(`/invite/${id}`)}`,
+          });
+        },
+      }),
+      twoFactor({ issuer: 'VDeploy', backupCodeOptions: { amount: 10, length: 12 } }),
+      passkey({ rpID: origin.hostname, rpName: 'VDeploy', origin: origin.origin }),
+      apiKey({
+        defaultPrefix: 'vd_',
+        requireName: true,
+        enableMetadata: true,
+        keyExpiration: { defaultExpiresIn: 90 * 24 * 60 * 60 * 1000 },
+      }),
+      haveIBeenPwned({
+        enabled: deps.breachedPasswordCheck,
+        customPasswordCompromisedMessage:
+          'This password has appeared in a data breach. Please choose a different one.',
+      }),
+    ],
+  });
+}
+
+export type Auth = ReturnType<typeof createAuth>;

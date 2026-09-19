@@ -1,4 +1,5 @@
 import { VDeployError, type ErrorCode } from '@vdeploy/contracts';
+import { isAPIError } from 'better-auth/api';
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { hasZodFastifySchemaValidationErrors } from 'fastify-type-provider-zod';
 
@@ -21,6 +22,16 @@ export const HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   internal: 500,
 };
 
+/** Better Auth errors carry an HTTP status; they leave in the same shape as ours. */
+const AUTH_STATUS_CODE: Readonly<Partial<Record<number, ErrorCode>>> = {
+  400: 'invalid_input',
+  401: 'unauthenticated',
+  403: 'forbidden',
+  404: 'not_found',
+  409: 'conflict',
+  429: 'rate_limited',
+};
+
 /**
  * Every error leaves the API as `{ error: { code, message } }`. Anything that
  * is not a VDeployError is logged in full and answered with a generic 500:
@@ -33,6 +44,11 @@ export function handleError(
 ): FastifyReply {
   if (error instanceof VDeployError) {
     return reply.status(HTTP_STATUS[error.code]).send(error.toBody());
+  }
+  if (isAPIError(error)) {
+    const status = typeof error.statusCode === 'number' ? error.statusCode : 400;
+    const code = AUTH_STATUS_CODE[status] ?? 'invalid_input';
+    return reply.status(status).send(new VDeployError(code, error.message).toBody());
   }
   if (hasZodFastifySchemaValidationErrors(error)) {
     const issues = error.validation.map((v) => ({
