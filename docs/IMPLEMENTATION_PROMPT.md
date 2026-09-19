@@ -238,6 +238,44 @@ Remove testbed artifacts when a milestone's VPS testing finishes. Cleanup target
 - No dead code, no TODOs left behind. If it must wait, it is a task in `PROGRESS.md`.
 - **Architecture Decision Records** in `docs/adr/NNNN-title.md` for every non-obvious choice: context, decision, consequences.
 
+### 3.4 Simplicity discipline — complete in capability, minimal in machinery
+
+This is the hardest standard to hold, and the one that decides whether this codebase is still maintainable in two years.
+
+> **The goal is a complete, powerful platform built from the smallest amount of code that can deliver it.**
+> Rich in capability. Lean in machinery. These are not in tension — bloat does not make software more capable, it makes it harder to change, and a codebase that is hard to change stops gaining capability.
+
+**Write less code:**
+
+- **YAGNI.** Build what the current milestone needs. Not what "we'll probably need later." Speculative generality is the most expensive code in any project, because it is never quite right when the real requirement finally arrives.
+- **Rule of three.** Do not abstract on the first use, or the second. Abstract on the third, when the shape is actually known. A premature abstraction is worse than duplication — duplication is visible and cheap to fix; a wrong abstraction hides and spreads.
+- **No layer without a job.** No repository wrapping the ORM, no service wrapping a single repository call, no manager coordinating one thing, no interface with one implementation and no second one planned. Drizzle *is* the data layer. Fastify *is* the HTTP layer.
+- **No patterns for their own sake.** No DI container, factory, observer, strategy or event bus where a plain function, a plain object or a direct call does the work. Use a pattern when it removes real complexity, never to demonstrate rigor.
+- **Prefer the platform.** Node and Go stdlib over a dependency. Postgres over a new service. An existing table over a new subsystem. **Every dependency must earn its place** — justify it in the commit, and prefer the small, maintained, boring one.
+- **No configuration nobody asked for.** Every option is a permanent support obligation and a combinatorial test burden. Ship a good default; add the knob when a real need appears.
+- **Delete aggressively.** Dead code, unused exports, abandoned helpers, stale comments, "temporarily" disabled tests. If it is not used, it goes. Git remembers.
+- **Solve today's problem well** — not a generic problem that today's happens to be an instance of.
+
+**What is NOT bloat — never cut these in the name of simplicity:**
+
+Simplicity is a discipline about *machinery*, never an excuse to skip *substance*. These are load-bearing and always justified:
+
+- The **seven-layer policy engine** and the **agent's L6 refusals**. They look like extra code. They are the product's core claim.
+- **Tests**, especially the §5.2 adversarial and chaos suites.
+- **`packages/contracts`.** It looks like indirection; it is the one thing preventing five divergent copies of every shape.
+- **Error handling, input validation and audit logging** on every path.
+- **Accessibility, plain-language diagnostics and the non-coder affordances.** They are the product, not polish.
+
+The test is always: *does this code carry weight?* Security, correctness and the user's experience carry weight. Abstraction that exists to look architectural does not.
+
+**Maintain the architecture continuously, not later:**
+
+- **Refactor in small commits, separate from features.** Never bundle a refactor into a feature commit. Never plan a "cleanup phase" — it never comes.
+- **Fix duplication the third time you see it**, not the tenth.
+- **When reality diverges from `docs/vdeploy.md`, update the plan in the same commit** — or write an ADR explaining the deviation. A plan that has quietly stopped describing the code is worse than no plan.
+- **If a file, function or module has become hard to explain, it has become wrong.** Split it before adding to it.
+- **Consistency beats cleverness.** A new file should look like the files around it; a reader should not be able to tell which week it was written in.
+
 ---
 
 ## 4. Security Standards
@@ -393,6 +431,7 @@ Stop **only** for these. Everything else: decide, act, record the decision, keep
 A task is done only when **all** of these hold:
 
 - [ ] Implemented per `docs/vdeploy.md`
+- [ ] **No speculative abstraction, no unused layer, no unjustified dependency, no dead code** (§3.4)
 - [ ] Tests written and passing, including the §5.2 rows that apply
 - [ ] `pnpm lint` clean · `pnpm typecheck` clean · `golangci-lint` clean
 - [ ] No secret, credential or IP in anything tracked
