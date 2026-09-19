@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.14 — L7 audit log — append-only, hash-chained; kill switch; spend cap check
+**Task:** 1.15 — apps/api — Fastify skeleton, env config, security headers, error model
 **Status:** in progress
-**Updated:** 2026-09-19 12:33 UTC
+**Updated:** 2026-09-19 12:36 UTC
 
 ## Done
 
@@ -20,14 +20,14 @@
 - [x] 1.11 policy L3 validation — strict parse, tenant + scope match answering not_found (flagged violation), AI per-session rate limit, idempotency key on AI mutations
 - [x] 1.12 policy L4 taint — untrusted read categories taint the session; frameUntrusted (ANSI/control stripped, 200 lines/32KB, unforgeable frame)
 - [x] 1.13 policy L5 approvals + engine — approvalReasons, HMAC approvals bound to plan_hash with 15-min TTL, checkApprover (ADR 0002), evaluate() composing L0–L5; exhaustive matrix (1.5k cases), 100% branch coverage
+- [x] 1.14 L7 — appendAudit (per-org hash chain, advisory-lock serialized, transactional) + verifyAuditChain; checkSpend pre-request cap; kill switch already in L1
 
 ## Doing
 
-- [ ] 1.14 L7 audit log — append-only, hash-chained; kill switch; spend cap check
+- [ ] 1.15 apps/api — Fastify skeleton, env config, security headers, error model
 
 ## Next (M1)
 
-- [ ] 1.15 apps/api — Fastify skeleton, env config, security headers, error model
 - [ ] 1.16 auth — §20.2 full surface
 - [ ] 1.17 apps/web — §20.1 shell (sidebar, theming, ⌘K, tokens)
 - [ ] 1.18 agent — Go scaffold + L6 spec validation + adversarial suite

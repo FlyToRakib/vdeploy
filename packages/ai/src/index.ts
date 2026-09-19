@@ -6,3 +6,4 @@ export * from './policy/validation.js';
 export * from './policy/taint.js';
 export * from './policy/approval.js';
 export * from './policy/engine.js';
+export * from './policy/spend.js';
