@@ -1,0 +1,27 @@
+{
+  "name": "@vdeploy/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "tsx watch --env-file=../api/.env src/main.ts",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@vdeploy/ai": "workspace:*",
+    "@vdeploy/contracts": "workspace:*",
+    "@vdeploy/core": "workspace:*",
+    "@vdeploy/db": "workspace:*",
+    "bullmq": "^6.3.8",
+    "drizzle-orm": "^0.45.2",
+    "pino": "^10.3.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
+    "tsx": "^4.23.13"
+  }
+}

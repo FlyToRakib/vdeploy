@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M1 — Kernel
-**Task:** 1.23 — control plane — agent gateway (wss) + worker applying plans + observed state
+**Task:** 1.24 — end-to-end deploy of a prebuilt image in the testbed (M1 exit)
 **Status:** in progress
-**Updated:** 2026-09-19 13:50 UTC
+**Updated:** 2026-09-19 14:06 UTC
 
 ## Done
 
@@ -29,14 +29,14 @@
 - [x] 1.20 agent — enrollment (one-time token → local Ed25519 key, pinned control-plane key, https-only except loopback, idempotent), signed-frame protocol (ADR 0004: sig over exact body bytes, per-connection nonce, strict seq, clock skew), outbound wss client (challenge → hello → desired_state/ack/observed_state, backoff reconnect, strict decode, any bad frame closes the connection); tests incl. forged/replayed/cross-connection/impostor; race detector on
 - [x] 1.21 agent — preflight doctor (OS/desktop refusal, arch, root, Docker ≥25, memory/swap, disk, ports 80/443, clock sync via adjtimex, cgroup v2), plain-language messages with fixes, runs before enroll and refuses to continue on failure; vd-agent preflight
 - [x] 1.22 control plane — POST /api/v1/operations/:name runs every op through one pipeline (resolve target → evaluate gate → plan (re-gated at the plan's real tier) → persist → queue or hold for approval; reads → handlers; admin ops → handlers), audit of every decision, idempotency keys, approve (checkApprover + re-plan hash check → stale, HMAC-signed approval, single winner) / reject, plan listing; admin ops (invite, remove, set_role ends sessions, org.update, server.add + one-time hashed enrollment token, api_key create/revoke, audit.export with chain verification); BullMQ apply queue on Postgres (ADR 0005)
+- [x] 1.23 control plane — agent enrollment + signed wss gateway (NOTIFY-driven desired-state push, validated acks/observed state, refusals audited); apps/worker applies queued plans: approval signature + re-plan hash re-checked at apply time, steps (create/update spec, digest-pinned releases via registry token flow, deploy with convergence wait + auto-rollback, restart via revision, scale, stop/start, delete), state change + generation bump + NOTIFY in one tx, exactly-once
 
 ## Doing
 
-- [ ] 1.23 control plane — agent gateway (wss) + worker applying plans + observed state
+- [ ] 1.24 end-to-end deploy of a prebuilt image in the testbed (M1 exit)
 
 ## Next (M1)
 
-- [ ] 1.24 end-to-end deploy of a prebuilt image in the testbed (M1 exit)
 - [ ] 1.25 control-plane backup/restore drill
 
 ## Known gaps (tracked, not forgotten)
@@ -44,6 +44,8 @@
 - Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
+- The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.
+- Health checks are "container running", not HTTP probes; health-gated blue/green arrives in M2. Snapshots before destructive steps arrive with backups (M4); until then the agent never deletes volumes at all.
 
 ## Decisions made
 

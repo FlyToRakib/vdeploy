@@ -128,11 +128,10 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     const { min, max } = project.spec.scaling;
     const withinDeclared = args.replicas >= min && args.replicas <= max;
     const draft = specChange(project, next, withinDeclared ? 'safe' : 'sensitive');
+    // Replicas are live state, not part of a release: scaling changes no image and no release.
     return {
       ...draft,
-      steps: draft.steps
-        .filter((s) => s.kind !== 'create_release' && s.kind !== 'deploy')
-        .concat({ kind: 'scale', replicas: args.replicas }),
+      steps: [{ kind: 'scale', replicas: args.replicas }],
       blastRadius: {
         ...draft.blastRadius,
         downtime: args.replicas === 0 ? 'until_started' : 'none',

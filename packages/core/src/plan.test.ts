@@ -64,7 +64,7 @@ describe('buildPlan', () => {
     const project = makeProject(makeSpec({ scaling: { min: 1, max: 4 } }));
     const within = buildPlan('project.scale', { projectId: project.id, replicas: 3 }, { project });
     expect(within.tier).toBe('safe');
-    expect(within.steps.map((s) => s.kind)).toEqual(['update_spec', 'scale']);
+    expect(within.steps).toEqual([{ kind: 'scale', replicas: 3 }]);
     const beyond = buildPlan('project.scale', { projectId: project.id, replicas: 5 }, { project });
     expect(beyond.tier).toBe('sensitive');
   });

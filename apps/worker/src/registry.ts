@@ -1,0 +1,98 @@
+import { VDeployError } from '@vdeploy/contracts';
+
+const MANIFEST_TYPES = [
+  'application/vnd.oci.image.index.v1+json',
+  'application/vnd.docker.distribution.manifest.list.v2+json',
+  'application/vnd.oci.image.manifest.v1+json',
+  'application/vnd.docker.distribution.manifest.v2+json',
+].join(', ');
+
+export interface ImageReference {
+  /** The name as written, without tag or digest ("nginx", "ghcr.io/acme/app"). */
+  name: string;
+  registry: string;
+  repository: string;
+  reference: string;
+}
+
+/** Splits "ghcr.io/acme/app:v1" into registry, repository and tag (docker.io by default). */
+export function parseImage(image: string): ImageReference {
+  const at = image.indexOf('@');
+  const name0 = at >= 0 ? image.slice(0, at) : image;
+  const lastColon = name0.lastIndexOf(':');
+  const hasTag = lastColon > name0.lastIndexOf('/');
+  const name = hasTag ? name0.slice(0, lastColon) : name0;
+  const reference = at >= 0 ? image.slice(at + 1) : hasTag ? name0.slice(lastColon + 1) : 'latest';
+  const first = name.split('/')[0] ?? '';
+  const explicitHost =
+    name.includes('/') && (first.includes('.') || first.includes(':') || first === 'localhost');
+  const registry = explicitHost ? first : 'docker.io';
+  const path = explicitHost ? name.slice(first.length + 1) : name;
+  const repository = registry === 'docker.io' && !path.includes('/') ? `library/${path}` : path;
+  return { name, registry, repository, reference };
+}
+
+export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+export interface RegistryAccess {
+  fetch: Fetch;
+  /** Base URL of a registry's API; Docker Hub's API host differs from its name. */
+  baseUrl: (registry: string) => string;
+}
+
+export const publicRegistries: RegistryAccess = {
+  fetch: (input, init) => fetch(input, init),
+  baseUrl: (registry) => `https://${registry === 'docker.io' ? 'registry-1.docker.io' : registry}`,
+};
+
+function challenge(header: string | null): { realm: string; params: URLSearchParams } | null {
+  if (!header?.startsWith('Bearer ')) return null;
+  const params = new URLSearchParams();
+  for (const [, key, value] of header.slice(7).matchAll(/(\w+)="([^"]*)"/g)) {
+    if (key && value !== undefined) params.set(key, value);
+  }
+  const realm = params.get('realm');
+  if (!realm) return null;
+  params.delete('realm');
+  return { realm, params };
+}
+
+/**
+ * Pins an image to the digest its tag points at right now. A release never
+ * references a mutable tag: rollback must restore exactly what ran (§5).
+ * Public images only for now; the anonymous token flow covers Docker Hub,
+ * GHCR and any registry following the distribution spec.
+ */
+export async function pinImage(
+  image: string,
+  access: RegistryAccess = publicRegistries,
+): Promise<string> {
+  const ref = parseImage(image);
+  if (ref.reference.startsWith('sha256:')) return `${ref.name}@${ref.reference}`;
+  const url = `${access.baseUrl(ref.registry)}/v2/${ref.repository}/manifests/${ref.reference}`;
+  const headers: Record<string, string> = { accept: MANIFEST_TYPES };
+  let res = await access.fetch(url, { method: 'HEAD', headers });
+  if (res.status === 401) {
+    const auth = challenge(res.headers.get('www-authenticate'));
+    if (!auth) throw new VDeployError('unavailable', `The registry for ${image} refused access`);
+    const token = await access.fetch(`${auth.realm}?${auth.params.toString()}`);
+    const body = (await token.json()) as { token?: string; access_token?: string };
+    const bearer = body.token ?? body.access_token;
+    if (!token.ok || !bearer) throw new VDeployError('unavailable', `No access to ${image}`);
+    res = await access.fetch(url, {
+      method: 'HEAD',
+      headers: { ...headers, authorization: `Bearer ${bearer}` },
+    });
+  }
+  if (res.status === 404) {
+    throw new VDeployError(
+      'not_found',
+      `The image ${image} does not exist, or its tag is misspelled`,
+    );
+  }
+  const digest = res.headers.get('docker-content-digest');
+  if (!res.ok || !digest || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+    throw new VDeployError('unavailable', `Could not read the digest of ${image} (${res.status})`);
+  }
+  return `${ref.name}@${digest}`;
+}
