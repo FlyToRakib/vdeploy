@@ -26,7 +26,10 @@ const CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/g;
 function sanitize(text: string): string {
   let clean = text
     .replace(ANSI, '')
-    .replace(CONTROL, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+    .replace(CONTROL, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`)
+    // The frame must be unforgeable from inside: no content can close it.
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   const lines = clean.split('\n');
   if (lines.length > UNTRUSTED_MAX_LINES) {
     clean = lines.slice(-UNTRUSTED_MAX_LINES).join('\n');
@@ -34,8 +37,7 @@ function sanitize(text: string): string {
   if (Buffer.byteLength(clean) > UNTRUSTED_MAX_BYTES) {
     clean = Buffer.from(clean).subarray(-UNTRUSTED_MAX_BYTES).toString('utf8');
   }
-  // The frame must be unforgeable from inside: no content can close it.
-  return clean.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return clean;
 }
 
 function attribute(value: string): string {

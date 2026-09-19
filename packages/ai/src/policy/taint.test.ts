@@ -63,3 +63,10 @@ describe('frameUntrusted', () => {
     expect(Buffer.byteLength(body(frameUntrusted(huge, 'logs', 'api')))).toBe(UNTRUSTED_MAX_BYTES);
   });
 });
+
+describe('frameUntrusted size cap', () => {
+  it('holds after escaping expands the content', () => {
+    const framed = frameUntrusted('<'.repeat(40_000), 'logs', 'api');
+    expect(Buffer.byteLength(body(framed))).toBeLessThanOrEqual(UNTRUSTED_MAX_BYTES);
+  });
+});
