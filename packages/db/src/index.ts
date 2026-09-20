@@ -14,3 +14,4 @@ export * from './diagnose.js';
 export * from './notifications.js';
 export * from './github.js';
 export * from './summaries.js';
+export * from './ai-context.js';

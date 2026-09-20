@@ -252,6 +252,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@vdeploy/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@vdeploy/contracts':
         specifier: workspace:*
         version: link:../contracts

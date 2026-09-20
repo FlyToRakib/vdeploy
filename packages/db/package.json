@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@vdeploy/contracts": "workspace:*",
+    "@vdeploy/ai": "workspace:*",
     "@vdeploy/core": "workspace:*",
     "bullmq": "^6.3.8",
     "drizzle-orm": "^0.45.2",

@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M3 — AI (M1 complete 2026-09-19, M2 complete 2026-09-21)
-**Task:** 3.1 — next milestone, not started
+**Task:** 3.2 — the Anthropic adapter and the tool loop
 **Status:** in progress
-**Updated:** 2026-09-21 03:00 UTC
+**Updated:** 2026-09-21 05:00 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -88,10 +88,11 @@ verified unchanged before, after, and after testbed teardown.
 [e2e] ✓ restored: same session, agent re-attached, same containers, audit chain intact
 [e2e] M1 exit criteria and restore drill: 30 checks passed is the non-coder walkthrough in a real browser (Playwright, Edge by default): create the owner, add a server and paste the one command it shows, upload a folder, see "we think this is a Node.js app", create it, watch it go Live and its output stream in, upload a broken version, and read on the page that the last change did not go through, why ("needs a setting called DATABASE_URL") and that the version before still serves. Found and fixed on the way: an uploaded project had no way to upload a new version from the dashboard ("Upload a new version" on the project page); a rollback message could end "again.. The previous release"; HSTS and upgrade-insecure-requests are sent only over HTTPS, so a plain-http origin works. HTTPS here is the testbed's own ACME test server; real certificates wait on the VPS ports decision (see Blocked)
 - [x] 2.17d M2 exit on the VPS testbed: the full e2e (30 checks) and the non-coder walkthrough, both against the testbed on the test VPS, with the production baseline verified unchanged before and after each run — 13 containers, host nginx, every service and both web ports untouched
+- [x] 3.1 the context engine (§11): bounded slots — what the organization has, the project in focus (spec, last three releases, the copies running, what the deterministic rules already found), and diagnostics only when asked for — each cut to its budget and saying so rather than truncating silently; the app's own output is framed as untrusted and taints the session; credentials never reach the model (values whose name or shape says credential are hidden, an address keeps its host but loses its password), and the spec is redacted without touching the stored one. The stable prefix explains the platform in plain words, what the mode allows, and how to answer; it is identical across turns so it can be cached. `gatherContext` in the db package feeds it the same facts the dashboard shows. The tool registry was already generated from the contracts in M1
 
 ## Doing
 
-- [ ] 3.1 M3 begins: context engine and the tool registry generated from the contracts (docs/vdeploy.md §26)
+- [ ] 3.2 the Anthropic adapter (bring-your-own-key), the tool loop and what a turn costs
 
 ## Next
 

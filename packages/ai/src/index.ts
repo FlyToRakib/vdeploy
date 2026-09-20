@@ -7,3 +7,6 @@ export * from './policy/taint.js';
 export * from './policy/approval.js';
 export * from './policy/engine.js';
 export * from './policy/spend.js';
+export * from './context/redaction.js';
+export * from './context/context.js';
+export * from './context/system-prompt.js';
