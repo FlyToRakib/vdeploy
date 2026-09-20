@@ -15,6 +15,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
     "@vdeploy/contracts": "workspace:*",
     "zod": "^4.6.5"
   },
