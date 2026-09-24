@@ -10,6 +10,7 @@ import {
   Scaling,
   Schedule,
 } from '../spec/sections.js';
+import { AiGrants } from '../grants.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
@@ -112,6 +113,13 @@ export const OPERATIONS = [
   query('server.resources', 'server', 'metrics', 'Show server CPU, memory and disk usage', obj(S)),
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
+  query(
+    'ai.settings',
+    'org',
+    'config',
+    'Show what the AI is allowed to see and do, and what it has cost this month',
+    obj({}),
+  ),
   query(
     'github.installations',
     'org',
@@ -638,6 +646,16 @@ export const OPERATIONS = [
     'Revoke an API key immediately',
     obj({ keyId: z.string().min(1).max(64) }),
   ),
+  operation(
+    'ai.configure',
+    'human_only',
+    'org',
+    'Change what the AI is allowed to see and do',
+    obj({ grants: AiGrants }),
+    { stepUp: true },
+  ),
+  // The kill switch: always one click, never a re-authentication away (§8 L7).
+  operation('ai.stop', 'human_only', 'org', 'Turn the AI off for this organization', obj({})),
   operation(
     'server.enrollment_token',
     'human_only',

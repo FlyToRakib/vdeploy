@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Server,
   ShieldCheck,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -44,6 +45,12 @@ export const NAV: readonly NavItem[] = [
     label: 'GitHub',
     icon: GitBranch,
     keywords: ['git', 'repository', 'connect', 'push'],
+  },
+  {
+    href: '/settings/ai',
+    label: 'AI',
+    icon: Sparkles,
+    keywords: ['assistant', 'grants', 'propose', 'autopilot', 'kill switch', 'spend'],
   },
   {
     href: '/settings/security',

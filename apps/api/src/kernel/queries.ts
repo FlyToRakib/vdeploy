@@ -19,6 +19,7 @@ import {
   urlSettingsFor,
 } from '@vdeploy/db';
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { AI_QUERIES } from './ai-settings.js';
 import { GITHUB_QUERIES } from './github.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
 import type { Handler } from './context.js';
@@ -44,6 +45,7 @@ const notYet: Handler = () =>
  * the scoped id so a secondary id can never reach another project's rows.
  */
 export const QUERIES: Partial<Record<OperationName, Handler>> = {
+  ...AI_QUERIES,
   ...NOTIFICATION_QUERIES,
   ...GITHUB_QUERIES,
   'project.list': async ({ deps, actor }) => projectSummaries(deps.db, actor.orgId),

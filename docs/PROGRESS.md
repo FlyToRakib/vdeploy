@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M3 — AI (M1 complete 2026-09-19, M2 complete 2026-09-21)
-**Task:** 3.4 — the assistant in the dashboard: proposals, grants, kill switch
+**Task:** 3.5 — the eval set of broken deployments, and the M3 exit
 **Status:** in progress
-**Updated:** 2026-09-24 08:20 UTC
+**Updated:** 2026-09-24 08:30 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -92,9 +92,11 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 3.2 the model adapter: one small interface (system prefix, this turn's context, the conversation, the bound tools) that anything can answer, so the platform never depends on a provider. The Anthropic adapter (bring-your-own-key, Claude Opus 5 by default, Sonnet 5 and Haiku 4.5 offered) sends the prefix marked for caching with the volatile context after it, converts tool calls and their results the way the Messages API expects, reads back the answer, the tools it wants to call, whether it refused and why, and what the turn cost (cache reads at a tenth, writes at a quarter more). A refused key, a rate limit and an outage each come back in words with whether retrying helps. A scripted model answers from a list for tests and for an installation with no provider
 - [x] 3.3 AI sessions and the turn loop (§9, §11): one conversation per person and organization, stored turn by turn, with what it read, what it cost and whether it is tainted. Each turn builds the context, sends the stable prefix plus the tools this session is allowed (RBAC ∩ grants ∩ mode), and runs every tool the model asks for through the same pipeline a click uses — so a change the AI wants is a plan, gated, hashed and audited exactly like a human's. In propose mode (and always once the session has read logs, commits or source) the plan comes back waiting for a person: that pending plan plus the model's plain words *is* the change proposal, so there is no second apply path to secure. A tool the session was not given is refused and told to the model as information, not a crash; a refusal, a rate limit or an outage ends the turn in plain words and the rest of VDeploy keeps working; the monthly spend cap is checked before each request with a pessimistic estimate, never after the bill. `ANTHROPIC_API_KEY` is optional — without it the assistant is simply off. Routes: `POST /api/v1/ai/ask`, `GET /api/v1/ai/proposals`
 
+- [x] 3.4 the assistant in the dashboard (§20.1): the docked panel now asks — it follows the person to the project they are looking at, keeps the conversation, picks Ask / Propose / Autopilot, and says in a line what that mode may do, what this chat has cost and what the month has cost. When it prepares a change it says so and links to it. A new AI screen shows what it may read and what it may change on its own, in plain sentences rather than tier names, with the spend cap, the hourly limit, "never change anything live" and the second-approver rule; the kill switch is one click with no password and no waiting, while widening what it may do asks for the password again. The changes it prepared are listed there as cards: its own words, what it does, what it risks, the exact before/after, and Approve or Reject — the same plan the Approvals screen shows, because that is all a proposal is. New operations `ai.settings`, `ai.configure` and `ai.stop` are Tier 4: never in any AI tool array, so no session can widen its own grants, proven in the policy matrix and in the API tests. A handler-registry test now fails loudly if an import cycle ever drops a handler map (`{...undefined}` is silent)
+
 ## Doing
 
-- [ ] 3.4 the assistant in the dashboard: ask and propose, proposal cards a non-coder can approve, the grant matrix, the kill switch and what it has spent
+- [ ] 3.5 a scored eval set of broken deployments, and the M3 exit: "why is my site down?" names the real cause, and "fix it" produces a change a non-coder would approve
 
 ## Next
 

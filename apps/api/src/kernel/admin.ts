@@ -24,6 +24,7 @@ import { generateSecret, isPublicIpv4 } from '@vdeploy/core';
 import { and, asc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
 import { checkReachability } from '../agents/reachability.js';
 import { GITHUB_ADMIN } from './github.js';
+import { AI_ADMIN } from './ai-settings.js';
 import { NOTIFICATION_ADMIN } from './notifications.js';
 import type { Handler, HandlerContext } from './context.js';
 
@@ -67,6 +68,7 @@ async function memberRole({ deps, actor }: HandlerContext, userId: string) {
  */
 export const ADMIN: Partial<Record<OperationName, Handler>> = {
   ...NOTIFICATION_ADMIN,
+  ...AI_ADMIN,
   ...GITHUB_ADMIN,
   'user.invite': async ({ deps, actor, args }) => {
     const id = newId('invitation');

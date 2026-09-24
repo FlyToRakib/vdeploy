@@ -63,6 +63,15 @@ function ask(body: Record<string, unknown>) {
   return owner.request('POST', '/api/v1/ai/ask', body);
 }
 
+function op(name: string, input: unknown) {
+  return owner.request('POST', `/api/v1/operations/${name}`, { input });
+}
+
+async function stepUp() {
+  const res = await owner.request('POST', '/api/v1/auth/step-up', { password: PASSWORD });
+  expect(res.statusCode).toBe(204);
+}
+
 interface AskBody {
   sessionId: string;
   text: string;
@@ -222,6 +231,45 @@ describe('the assistant', () => {
     } finally {
       await plain.close();
     }
+  });
+
+  it('shows what it may do and what it cost, and narrows what it reads when told to', async () => {
+    const shown = await op('ai.settings', {});
+    expect(shown.statusCode).toBe(200);
+    const settings = shown.json<{
+      result: { available: boolean; model: string; grants: { read: Record<string, boolean> } };
+    }>().result;
+    expect(settings.available).toBe(true);
+    expect(settings.model).toBe('claude-opus-5');
+    expect(settings.grants.read.logs).toBe(true);
+
+    const narrowed = { ...DEFAULT_AI_GRANTS, read: { ...DEFAULT_AI_GRANTS.read, logs: false } };
+    // Widening or narrowing what the AI may do asks for the password again.
+    expect((await op('ai.configure', { grants: narrowed })).statusCode).toBe(403);
+    await stepUp();
+    expect((await op('ai.configure', { grants: narrowed })).statusCode).toBe(200);
+
+    model.script([{ text: 'I cannot see the logs here.' }]);
+    await ask({ message: 'Why is the blog down?', projectId });
+    const tools = model.seen.at(-1)?.tools.map((tool) => tool.name) ?? [];
+    expect(tools).not.toContain('project_logs');
+    // Tier 4 is never in any tool array: the AI cannot reach its own settings.
+    expect(tools).not.toContain('ai_configure');
+    expect(tools).not.toContain('ai_stop');
+    await stepUp();
+    expect((await op('ai.configure', { grants: DEFAULT_AI_GRANTS })).statusCode).toBe(200);
+  });
+
+  it('turns the AI off in one click, with no password and no waiting', async () => {
+    const stopped = await op('ai.stop', {});
+    expect(stopped.statusCode).toBe(200);
+    const refused = await ask({ message: 'Are you there?', projectId });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json<{ error: { message: string } }>().error.message).toContain('turned off');
+    await stepUp();
+    expect((await op('ai.configure', { grants: DEFAULT_AI_GRANTS })).statusCode).toBe(200);
+    model.script([{ text: 'Here again.' }]);
+    expect((await ask({ message: 'Are you there?', projectId })).statusCode).toBe(200);
   });
 
   it('keeps every turn of the conversation, in order', async () => {

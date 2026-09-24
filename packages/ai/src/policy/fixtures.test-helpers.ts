@@ -1,4 +1,5 @@
 import {
+  DEFAULT_AI_GRANTS,
   newId,
   SCOPE_FIELD,
   type OperationDefinition,
@@ -147,6 +148,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'api_key.create': { name: 'ci', scope: 'read' },
   'api_key.revoke': { keyId: 'key_01J9Z3Q8S7M2K4X6V1B5N0C9D8' },
   'urls.configure': { mode: 'wildcard', baseDomain: 'apps.example.com' },
+  'ai.configure': { grants: DEFAULT_AI_GRANTS },
   'server.set_address': { ipv4: '8.8.4.4' },
   'server.check_reachability': {},
   'notification.channel_create': {
