@@ -1,5 +1,6 @@
 import {
   Bell,
+  Database,
   ClipboardCheck,
   FolderKanban,
   GitBranch,
@@ -28,6 +29,12 @@ export const NAV: readonly NavItem[] = [
     keywords: ['apps', 'sites', 'deploy'],
   },
   { href: '/servers', label: 'Servers', icon: Server, keywords: ['vps', 'machines', 'agent'] },
+  {
+    href: '/databases',
+    label: 'Databases',
+    icon: Database,
+    keywords: ['postgres', 'mysql', 'mariadb', 'redis', 'mongo', 'data'],
+  },
   {
     href: '/approvals',
     label: 'Approvals',

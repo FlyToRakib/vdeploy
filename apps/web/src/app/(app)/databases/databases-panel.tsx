@@ -1,0 +1,487 @@
+'use client';
+
+import { Database, Plus } from 'lucide-react';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { EmptyState } from '@/components/empty-state';
+import { useStepUp } from '@/components/step-up';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
+import { Field } from '@/components/ui/field';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Status } from '@/components/ui/status';
+import {
+  defaultEnvKey,
+  ENGINE_VERSIONS,
+  ENGINE_WORDS,
+  ENGINES,
+  reachWords,
+  statusWords,
+  type DatabaseEngine,
+  type DatabaseSummary,
+} from '@/lib/databases';
+import { formText } from '@/lib/forms';
+import { followPlan, OperationError, query, runOperation } from '@/lib/operations';
+import type { ProjectSummary } from '@/lib/projects';
+import type { ServerSummary } from '@/lib/servers';
+
+/** Runs an operation and follows the plan it makes, saying what happened. */
+async function act(
+  name: string,
+  input: Record<string, unknown>,
+  words: { doing: string; done: string },
+): Promise<boolean> {
+  const id = toast.loading(words.doing);
+  try {
+    const outcome = await runOperation(name, input);
+    if (outcome.status === 'pending_approval') {
+      toast.info('Prepared, and waiting for someone to approve it.', { id });
+      return true;
+    }
+    if (outcome.status === 'queued') {
+      const done = await followPlan(outcome.plan.id, () => undefined);
+      if (done?.status === 'failed') {
+        toast.error(done.error?.message ?? 'It did not work.', { id, duration: 20_000 });
+        return false;
+      }
+    }
+    toast.success(words.done, { id });
+    return true;
+  } catch (err) {
+    if (err instanceof OperationError && err.code === 'cancelled') toast.dismiss(id);
+    else toast.error(err instanceof Error ? err.message : 'That did not work.', { id });
+    return false;
+  }
+}
+
+function AddDatabaseDialog({
+  open,
+  servers,
+  onOpenChange,
+  onAdded,
+}: {
+  open: boolean;
+  servers: ServerSummary[];
+  onOpenChange: (open: boolean) => void;
+  onAdded: () => void;
+}) {
+  const stepUp = useStepUp();
+  const [engine, setEngine] = useState<DatabaseEngine>('postgres');
+  const [busy, setBusy] = useState(false);
+
+  async function add(form: FormData) {
+    setBusy(true);
+    const ok = await stepUp(() =>
+      act(
+        'database.create',
+        {
+          serverId: formText(form, 'serverId'),
+          name: formText(form, 'name'),
+          engine,
+          version: formText(form, 'version'),
+          size: `${formText(form, 'size') || '10'}Gi`,
+        },
+        { doing: 'Setting it up…', done: 'Your database is starting up.' },
+      ),
+    ).catch((err: unknown) => {
+      if (!(err instanceof OperationError && err.code === 'cancelled')) {
+        toast.error(err instanceof Error ? err.message : 'That did not work.');
+      }
+      return false;
+    });
+    setBusy(false);
+    if (ok) {
+      onOpenChange(false);
+      onAdded();
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Add a database"
+      description="It runs on your own server, and only the apps you link can reach it."
+    >
+      <form action={add} className="grid gap-4">
+        <Field label="Name" name="name" required placeholder="blog-db" autoComplete="off" />
+        <fieldset className="grid gap-2">
+          <legend className="text-sm font-medium">Kind</legend>
+          {ENGINES.map((option) => (
+            <label key={option} className="flex items-start gap-3 text-sm">
+              <input
+                type="radio"
+                name="engine"
+                value={option}
+                checked={engine === option}
+                onChange={() => {
+                  setEngine(option);
+                }}
+                className="mt-1 size-4"
+              />
+              <span>
+                <span className="font-medium">{ENGINE_WORDS[option].label}</span>
+                <span className="block text-muted-foreground">{ENGINE_WORDS[option].blurb}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-medium">Version</span>
+            <select
+              name="version"
+              defaultValue={ENGINE_VERSIONS[engine][0]}
+              key={engine}
+              className="h-10 rounded-md border border-border bg-surface-raised px-3 text-sm"
+            >
+              {ENGINE_VERSIONS[engine].map((version) => (
+                <option key={version} value={version}>
+                  {version}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Field
+            label="Room for data (GB)"
+            name="size"
+            type="number"
+            min={1}
+            max={2000}
+            defaultValue={10}
+            hint="You can give it more later."
+          />
+        </div>
+        <label className="grid gap-1.5 text-sm">
+          <span className="font-medium">Server</span>
+          <select
+            name="serverId"
+            required
+            className="h-10 rounded-md border border-border bg-surface-raised px-3 text-sm"
+          >
+            {servers.map((server) => (
+              <option key={server.id} value={server.id}>
+                {server.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              onOpenChange(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={busy || servers.length === 0}>
+            Create it
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function DatabaseCard({
+  database,
+  projects,
+  onChanged,
+}: {
+  database: DatabaseSummary;
+  projects: ProjectSummary[];
+  onChanged: () => void;
+}) {
+  const stepUp = useStepUp();
+  const [linking, setLinking] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const status = statusWords(database.status);
+  const linked = new Set(database.links.map((link) => link.projectId));
+  const free = projects.filter((project) => !linked.has(project.id));
+
+  async function run(
+    name: string,
+    input: Record<string, unknown>,
+    words: { doing: string; done: string },
+  ) {
+    const ok = await stepUp(() => act(name, { databaseId: database.id, ...input }, words)).catch(
+      (err: unknown) => {
+        if (!(err instanceof OperationError && err.code === 'cancelled')) {
+          toast.error(err instanceof Error ? err.message : 'That did not work.');
+        }
+        return false;
+      },
+    );
+    if (ok) onChanged();
+  }
+
+  return (
+    <Card className="grid gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-medium">{database.name}</h2>
+        <Status health={status.health}>{status.words}</Status>
+        <span className="text-sm text-muted-foreground">
+          {ENGINE_WORDS[database.engine].label} {database.version} · {database.diskSize}
+        </span>
+      </div>
+      <p className="text-sm text-muted-foreground">{reachWords(database)}</p>
+      {database.links.length > 0 && (
+        <ul className="grid gap-1 text-sm">
+          {database.links.map((link) => {
+            const project = projects.find((p) => p.id === link.projectId);
+            return (
+              <li key={`${link.projectId}-${link.envKey}`} className="flex flex-wrap gap-2">
+                <Link href={`/projects/${link.projectId}`} className="text-accent hover:underline">
+                  {project?.name ?? link.projectId}
+                </Link>
+                <span className="text-muted-foreground">reads it as {link.envKey}</span>
+                <button
+                  type="button"
+                  className="text-muted-foreground underline hover:text-foreground"
+                  onClick={() =>
+                    void run(
+                      'database.unlink',
+                      { projectId: link.projectId },
+                      {
+                        doing: 'Taking it away…',
+                        done: 'The app no longer has it. The data stays.',
+                      },
+                    )
+                  }
+                >
+                  Take it away
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {free.length > 0 && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setLinking(true);
+            }}
+          >
+            Give it to an app
+          </Button>
+        )}
+        {database.status === 'stopped' ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              void run('database.start', {}, { doing: 'Starting…', done: 'Starting up.' })
+            }
+          >
+            Start
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              void run(
+                'database.stop',
+                {},
+                { doing: 'Stopping…', done: 'Stopped. Its data is safe.' },
+              )
+            }
+          >
+            Stop
+          </Button>
+        )}
+        <Button
+          variant="danger"
+          size="sm"
+          onClick={() => {
+            setDeleting(true);
+          }}
+        >
+          Delete
+        </Button>
+      </div>
+
+      <Dialog
+        open={linking}
+        onOpenChange={setLinking}
+        title={`Give ${database.name} to an app`}
+        description="The app gets the address as one of its settings. You never have to copy anything."
+      >
+        <form
+          action={(form) => {
+            setLinking(false);
+            void run(
+              'database.link',
+              { projectId: formText(form, 'projectId'), envKey: formText(form, 'envKey') },
+              { doing: 'Connecting them…', done: 'Done. The app will find it on its next start.' },
+            );
+          }}
+          className="grid gap-4"
+        >
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-medium">App</span>
+            <select
+              name="projectId"
+              required
+              className="h-10 rounded-md border border-border bg-surface-raised px-3 text-sm"
+            >
+              {free.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Field
+            label="The setting the app reads"
+            name="envKey"
+            defaultValue={defaultEnvKey(database.engine)}
+            hint="Most apps look for this name. Change it only if yours expects another."
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setLinking(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">Connect them</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title={`Delete ${database.name}`}
+        description="Everything in it goes. Apps using it will stop being able to read their data."
+      >
+        <div className="grid gap-4">
+          <label className="grid gap-1.5 text-sm">
+            <span>
+              Type <strong className="font-mono">{database.name}</strong> to confirm
+            </span>
+            <input
+              value={typed}
+              onChange={(event) => {
+                setTyped(event.target.value);
+              }}
+              autoComplete="off"
+              className="h-10 rounded-md border border-border bg-surface-raised px-3"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setDeleting(false);
+              }}
+            >
+              Keep it
+            </Button>
+            <Button
+              variant="danger"
+              disabled={typed.trim() !== database.name}
+              onClick={() => {
+                setDeleting(false);
+                setTyped('');
+                void run(
+                  'database.delete',
+                  { keepData: false },
+                  { doing: 'Deleting…', done: 'It is gone.' },
+                );
+              }}
+            >
+              Delete it
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </Card>
+  );
+}
+
+/** The data layer (§17.3, §20): what exists, who can reach it, and one way in. */
+export function DatabasesPanel() {
+  const [databases, setDatabases] = useState<DatabaseSummary[] | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [servers, setServers] = useState<ServerSummary[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    void Promise.all([
+      query<DatabaseSummary[]>('database.list'),
+      query<ProjectSummary[]>('project.list').catch(() => []),
+      query<ServerSummary[]>('server.list').catch(() => []),
+    ]).then(
+      ([list, apps, machines]) => {
+        setDatabases(list);
+        setProjects(apps);
+        setServers(machines);
+      },
+      () => {
+        setDatabases([]);
+      },
+    );
+  }, [version]);
+
+  const reload = () => {
+    setVersion((v) => v + 1);
+  };
+  const add = (
+    <Button
+      onClick={() => {
+        setAdding(true);
+      }}
+      disabled={servers.length === 0}
+    >
+      <Plus aria-hidden className="size-4" />
+      Add a database
+    </Button>
+  );
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold">Databases</h1>
+        {databases && databases.length > 0 && add}
+      </div>
+      {databases === null && <Skeleton className="h-32" />}
+      {databases?.length === 0 && (
+        <EmptyState icon={Database} title="No databases yet">
+          A database is where your app keeps things that must survive a deploy. VDeploy runs one on
+          your own server, reachable only by the apps you link to it, and hands each app its address
+          so you never copy a password anywhere.
+          <div className="mt-4">{add}</div>
+        </EmptyState>
+      )}
+      {databases?.map((database) => (
+        <DatabaseCard
+          key={database.id}
+          database={database}
+          projects={projects}
+          onChanged={reload}
+        />
+      ))}
+      <AddDatabaseDialog
+        open={adding}
+        servers={servers}
+        onOpenChange={setAdding}
+        onAdded={reload}
+      />
+    </div>
+  );
+}

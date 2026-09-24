@@ -3,7 +3,7 @@
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
 **Task:** 4.2 — backups that are restored, not just taken
 **Status:** in progress
-**Updated:** 2026-09-24 11:05 UTC
+**Updated:** 2026-09-24 11:20 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -115,6 +115,8 @@ for the template catalog, which M4 builds; project creation from an
 image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.1 managed databases (§17.3): Postgres, MySQL, MariaDB, Redis and MongoDB, each with its image, its port, where its files live and how a connection string for it is written decided once in one place. A database is deliberately **not** a project: it is never deployed blue/green — two engines writing one volume is how data is lost — so the agent converges it in place, alone, on a network of its own, publishing nothing. Its password is generated on the server, sealed at rest under the database's own key, and sent to the agent sealed to that agent's key: it is in no spec, no frame and no log. Linking an app joins the database to that app's network and gives the app the whole connection string as one of its own secrets, so the app's releases pin it like any other value and nobody assembles a URL by hand; unlinking takes the variable away and leaves the data. Stop, start and delete are plans like any other, the governor counts the database against the server at plan time, and deleting says plainly that the files are still there. Agent protocol 2 carries databases; the agent heals one that died, replaces one whose version changed (old container stopped before the new one starts, never two at once), and never removes a volume
+
+- [x] 4.1b the Databases screen (§20 Data): what exists and what each one is for in plain words, a dialog that asks for a name, a kind (with one sentence each on what people use it for), a version and how much room for data, and a card that says who can reach it — "nothing can reach it yet" until an app is linked. Giving it to an app is one choice of app and one variable name, taking it away says the data stays, and deleting asks for the name typed out. Everything goes through the same operations, so a change that needs approval says so rather than pretending it happened
 
 ## Doing
 
