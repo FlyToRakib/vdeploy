@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
-**Milestone:** M3 — AI (M1 complete 2026-09-19, M2 complete 2026-09-21)
-**Task:** 3.5 — the eval set of broken deployments, and the M3 exit
+**Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
+**Task:** 4.1 — managed databases
 **Status:** in progress
-**Updated:** 2026-09-24 08:30 UTC
+**Updated:** 2026-09-24 09:05 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -94,9 +94,29 @@ verified unchanged before, after, and after testbed teardown.
 
 - [x] 3.4 the assistant in the dashboard (§20.1): the docked panel now asks — it follows the person to the project they are looking at, keeps the conversation, picks Ask / Propose / Autopilot, and says in a line what that mode may do, what this chat has cost and what the month has cost. When it prepares a change it says so and links to it. A new AI screen shows what it may read and what it may change on its own, in plain sentences rather than tier names, with the spend cap, the hourly limit, "never change anything live" and the second-approver rule; the kill switch is one click with no password and no waiting, while widening what it may do asks for the password again. The changes it prepared are listed there as cards: its own words, what it does, what it risks, the exact before/after, and Approve or Reject — the same plan the Approvals screen shows, because that is all a proposal is. New operations `ai.settings`, `ai.configure` and `ai.stop` are Tier 4: never in any AI tool array, so no session can widen its own grants, proven in the policy matrix and in the API tests. A handler-registry test now fails loudly if an import cycle ever drops a handler map (`{...undefined}` is silent)
 
+- [x] 3.5 a scored eval set of deployments that really break (§26 M3, §32): twelve scenarios — the wrong port, localhost only, killed for memory, a missing setting, an unreachable database, an import whose capital letters differ, a runtime too old, a crash no rule knows, nothing listening, and two builds that fail — each scored on five things: the cause named rather than the symptom, the confidence it deserves, the facts a person needs, words free of symptom-speak ("health check failed", "check the logs" are banned), and the right change prepared — or nothing touched when the fix is in the person's own code. The deterministic layer is measured on every test run and scores 60/60, so the floor holds with no model at all; the same set scores the assistant against a real model, which needs a key, so that run is skipped until one is given. The non-coder walkthrough now ends at the assistant: with no key it says so in the panel, the AI screen states what it would be allowed to read and change, and everything before it worked anyway
+
+## M3 — code complete 2026-09-24, exit pending a provider key
+
+Everything in M3 is built, tested and verified in the local testbed: the
+full e2e (30 checks) and the non-coder walkthrough both pass against this
+code, and the walkthrough now ends at the assistant. The deterministic
+half of the exit is measured — with no model at all, VDeploy names the
+cause of all twelve broken deployments, 60/60 on the scorecard.
+
+The other half — "why is my site down?" answered by the assistant, and
+"fix it" producing a change a non-coder would approve — calls a real
+model. It runs as soon as there is a key:
+
+    ANTHROPIC_API_KEY=… pnpm --filter @vdeploy/api test -- src/ai/eval.test.ts
+
+Deferred to M4 on purpose: "site creation from templates" (§26 M3) waits
+for the template catalog, which M4 builds; project creation from an
+image, an upload or GitHub already works, and the AI can do all three.
+
 ## Doing
 
-- [ ] 3.5 a scored eval set of broken deployments, and the M3 exit: "why is my site down?" names the real cause, and "fix it" produces a change a non-coder would approve
+- [ ] 4.1 managed databases (§16): create, connect, back up, and hand the app its address
 
 ## Next
 
@@ -141,6 +161,7 @@ verified unchanged before, after, and after testbed teardown.
 
 ## Blocked / needs the user
 
+- **An AI provider key** (Anthropic) to finish the M3 exit: the assistant half of the eval. Put it in `.vdeploy-local/ai.env` as `ANTHROPIC_API_KEY=…`, never in chat. The run costs a few cents and touches nothing outside a throwaway test database.
 - **GitHub App credentials** for the live check of 2.15 (the code is done and tested against a stand-in). Create the app on github.com (webhook URL `<PUBLIC_URL>/api/v1/github/webhook`, content type JSON, callback `<PUBLIC_URL>/api/v1/github/callback`, "Request user authorization (OAuth) during installation" on; permissions: Contents read, Metadata read; events: Push). Then put GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_WEBHOOK_SECRET, GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in `.vdeploy-local/github.env`, and the private key in `.vdeploy-local/github-app.pem`, never in chat.
 - For real HTTPS on the test VPS (2.17): a way to receive ports 80/443 that does not touch production nginx. Until then the testbed uses a local ACME test server (Pebble).
 

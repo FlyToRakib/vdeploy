@@ -129,4 +129,20 @@ test('a non-coder puts a folder online and survives a broken version', async ({ 
   await expect(main.getByText(/needs a setting called DATABASE_URL/)).toBeVisible();
   await expect(main.getByText(/The version before it is still serving./)).toBeVisible();
   await expect(main.getByText('Needs a look')).toBeVisible();
+
+  // The assistant: this VDeploy has no AI key, so it says so in words — and
+  // everything above worked without it. AI being off is not an outage.
+  await page.getByRole('button', { name: 'AI', exact: true }).click();
+  const assistant = page.getByRole('complementary', { name: 'AI assistant' });
+  await expect(assistant.getByText('The AI assistant is not connected yet.')).toBeVisible();
+  await expect(assistant.getByPlaceholder(/Ask about/)).toBeDisabled();
+
+  // What it would be allowed to do is a screen anyone can read.
+  await page.getByRole('link', { name: 'AI', exact: true }).click();
+  await expect(main.getByRole('heading', { name: 'AI', exact: true })).toBeVisible();
+  await expect(main.getByText('No AI model is connected')).toBeVisible();
+  await expect(main.getByText('What it may read')).toBeVisible();
+  await expect(main.getByText(/never their values/)).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Turn the AI off' })).toBeVisible();
+  await expect(main.getByText('Nothing prepared yet')).toBeVisible();
 });
