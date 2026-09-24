@@ -3,7 +3,7 @@
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
 **Task:** 4.2c — scheduled backups, offsite copies, and a restore verified on a schedule
 **Status:** in progress
-**Updated:** 2026-09-24 13:15 UTC
+**Updated:** 2026-09-24 13:40 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -126,7 +126,8 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.2a3 a build killed mid-flight no longer blocks the server (found by the testbed): BuildKit leaves a lock inside the build cache when it is killed — a reboot, a crash, a timeout — and every later build on that server then failed with "another instance running?", which tells a person nothing. Builds run one at a time, so a lock found before one starts is always a dead one; it is removed first, by a step that touches nothing but the cache and has no network
 
-## Doing
+- [x] 4.1/4.2 verified in the testbed: the full e2e is **33 checks**, now including a real Postgres 18 running on the server with nothing published, a linked app that resolves it by name and holds a connection string nobody copied, and a delete that waits for a person. The disaster drill still passes after it
+
 
 - [ ] 4.2c the rest of §17.4–17.5: backups on a schedule, offsite copies with restic, downloading the dump, importing one from elsewhere, and a restore verified on a schedule rather than assumed
 

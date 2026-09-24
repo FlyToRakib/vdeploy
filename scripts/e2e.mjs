@@ -519,12 +519,18 @@ async function managedDatabase(serverId, projectId) {
   if (!shape.startsWith('postgres://')) throw new Error(`the app has no DATABASE_URL: ${shape}`);
   if (Number(shape.split(' ').pop()) < 40) throw new Error('the address looks empty');
   pass('a linked app is handed the address, and nothing was copied by hand', shape);
+  // However many copies the app runs, they must all be the release that got
+  // the address before the disaster drill starts counting containers.
   await until(
-    'the release that got the address is the only one left',
-    () =>
-      inTestbed(`docker ps -a --filter label=io.vdeploy.project=${projectId} --format '{{.Names}}'`)
+    'only the release that got the address is left',
+    () => {
+      const releases = inTestbed(
+        `docker ps -a --filter label=io.vdeploy.project=${projectId} --format '{{.Label "io.vdeploy.release"}}'`,
+      )
         .split('\n')
-        .filter(Boolean).length === 1,
+        .filter(Boolean);
+      return releases.length > 0 && new Set(releases).size === 1;
+    },
     180_000,
   );
 
