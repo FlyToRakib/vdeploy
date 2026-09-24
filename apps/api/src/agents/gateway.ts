@@ -6,11 +6,17 @@ import {
   VDeployError,
   type LogLine,
 } from '@vdeploy/contracts';
-import { deliveryContext, isPublicIpv4, sealTo } from '@vdeploy/core';
+import { databaseHost, deliveryContext, engineProfile, isPublicIpv4, sealTo } from '@vdeploy/core';
 import {
   appendAudit,
+  BACKUPS_CHANNEL,
   BUILDS_CHANNEL,
+  claimBackups,
   claimBuilds,
+  databasePassword,
+  finishBackup,
+  getBackup,
+  getDatabase,
   DESIRED_STATE_CHANNEL,
   desiredStateFor,
   listen,
@@ -98,6 +104,7 @@ export class Gateway implements LogSource {
   private readonly logRequests = new Map<string, LogRequest>();
   private stopListening: (() => Promise<void>) | null = null;
   private stopBuildListening: (() => Promise<void>) | null = null;
+  private stopBackupListening: (() => Promise<void>) | null = null;
 
   /** When each server's ports were last checked from here (ms). */
   private readonly reachChecked = new Map<string, number>();
@@ -113,12 +120,69 @@ export class Gateway implements LogSource {
         this.deps.log.error({ err, serverId }, 'could not send builds');
       });
     });
+    this.stopBackupListening = await listen(this.deps.databaseUrl, BACKUPS_CHANNEL, (serverId) => {
+      void this.dispatchBackups(serverId).catch((err: unknown) => {
+        this.deps.log.error({ err, serverId }, 'could not send backups');
+      });
+    });
   }
 
   /**
    * Sends a server's queued builds to its agent (ADR 0008), each with a
    * one-time token for its source and its build secrets sealed to the agent.
    */
+  /**
+   * Sends a server's queued backups to its agent (§17.4): the engine's own
+   * client, version-matched, with the password sealed to that agent.
+   */
+  async dispatchBackups(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const { db, key, now, secretsKey } = this.deps;
+    const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+    // Without the agent's box key nothing can be sealed to it, so nothing is sent.
+    if (!server?.agentBoxKey) return;
+    for (const backup of await claimBackups(db, serverId, now())) {
+      const database = await getDatabase(db, backup.databaseId);
+      if (!database) continue;
+      const profile = engineProfile(database.engine);
+      const password = await databasePassword(db, secretsKey, database);
+      connection.socket.send(
+        seal(key, {
+          ...connection.session.next('backup'),
+          backup: {
+            backupId: backup.id,
+            databaseId: database.id,
+            engine: database.engine,
+            image: database.image,
+            host: databaseHost(database.id),
+            port: database.port,
+            user: database.user,
+            dbName: database.dbName ?? '',
+            credentials: [
+              {
+                key: profile.passwordKey,
+                version: database.passwordVersion,
+                sealed: sealTo(
+                  server.agentBoxKey,
+                  password,
+                  deliveryContext(
+                    serverId,
+                    database.id,
+                    profile.passwordKey,
+                    database.passwordVersion,
+                  ),
+                ),
+              },
+            ],
+            fileName: backup.fileName,
+            timeoutSeconds: 3600,
+          },
+        }),
+      );
+    }
+  }
+
   async dispatchBuilds(serverId: string): Promise<void> {
     const connection = this.connections.get(serverId);
     if (!connection) return;
@@ -372,6 +436,10 @@ export class Gateway implements LogSource {
       await notifyFromReport(db, serverId, frame.report, now());
     } else if (frame.type === 'build_result') {
       await finishBuild(db, serverId, frame.result, now());
+    } else if (frame.type === 'backup_result') {
+      // Only the server that was asked may answer, and only about its own backup.
+      const backup = await getBackup(db, frame.result.backupId);
+      if (backup?.serverId === serverId) await finishBackup(db, frame.result, now());
     } else if (frame.type === 'logs_chunk' || frame.type === 'logs_end') {
       // Only the server a request went to may answer it.
       const request = this.logRequests.get(frame.requestId);

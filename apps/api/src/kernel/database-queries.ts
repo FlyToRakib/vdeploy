@@ -1,5 +1,7 @@
 import { VDeployError, type DatabaseView, type OperationName } from '@vdeploy/contracts';
 import {
+  backupView,
+  backupsFor,
   databaseView,
   databasesOf,
   getDatabase,
@@ -47,6 +49,13 @@ export const DATABASE_QUERIES: Partial<Record<OperationName, Handler>> = {
       views.push(databaseView(row, await linksOf(deps.db, row.id), states.get(row.id) ?? null));
     }
     return views;
+  },
+  'backup.list': async ({ deps, actor, args }) => {
+    const rows = await backupsFor(deps.db, actor.orgId);
+    const wanted = typeof args.databaseId === 'string' ? args.databaseId : null;
+    return rows
+      .filter((row) => !wanted || row.backup.databaseId === wanted)
+      .map((row) => backupView(row.backup, row.databaseName));
   },
   'database.get': async ({ deps, args }) => {
     if (typeof args.databaseId !== 'string') {

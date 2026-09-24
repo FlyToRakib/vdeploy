@@ -3,8 +3,11 @@ import { newId, type OperationName } from '@vdeploy/contracts';
 import { buildPlan, connectionUrl, databaseHost } from '@vdeploy/core';
 import {
   auditLog,
+  backups,
+  claimBackups,
   databaseLinks,
   databases,
+  finishBackup,
   desiredStateFor,
   observedState,
   loadPlanWorld,
@@ -76,9 +79,31 @@ async function run(operation: OperationName, args: Record<string, unknown>) {
   return { planId: row?.id ?? '', outcome: await applyPlan(deps, row?.id ?? '') };
 }
 
-/** A stand-in agent: reports every replica ready, so deploys finish. */
+/** A stand-in agent: reports every replica ready, and takes backups. */
 let agentTimer: NodeJS.Timeout;
+/** What the stand-in agent reports about the next backup it is asked for. */
+let backupOutcome = {
+  ok: true,
+  sizeBytes: 4096,
+  verified: true,
+  error: undefined as string | undefined,
+};
 async function agentTick() {
+  for (const claimed of await claimBackups(t.db, serverId, new Date())) {
+    await finishBackup(
+      t.db,
+      {
+        backupId: claimed.id,
+        ok: backupOutcome.ok,
+        sizeBytes: backupOutcome.sizeBytes,
+        sha256: 'a'.repeat(64),
+        verified: backupOutcome.verified,
+        ...(backupOutcome.error ? { error: backupOutcome.error } : {}),
+        log: 'pg_dump: saving database definition',
+      },
+      new Date(),
+    );
+  }
   const state = await desiredStateFor(t.db, serverId);
   const report = {
     generation: state.generation,
@@ -226,6 +251,41 @@ describe('managed databases', () => {
     const [after] = await t.db.select().from(projects).where(eq(projects.id, projectId));
     expect(after?.spec.runtime.env.some((e) => e.key === 'DATABASE_URL')).toBe(false);
     expect(await t.db.select().from(databaseLinks)).toHaveLength(0);
+  });
+
+  it('takes a backup beside the database, and only counts it once it is checked', async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    const { planId } = await run('database.backup', { databaseId });
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, planId));
+    expect(plan?.status).toBe('applied');
+    const [taken] = await t.db.select().from(backups).where(eq(backups.databaseId, databaseId));
+    expect(taken).toMatchObject({ status: 'done', verified: true, sizeBytes: 4096 });
+    expect(taken?.fileName).toMatch(/^blog-db-.*.dump$/);
+
+    // A dump that ran but wrote nothing readable is a failure, not a backup.
+    backupOutcome = {
+      ok: false,
+      sizeBytes: 0,
+      verified: false,
+      error: 'the backup file is empty: nothing was saved',
+    };
+    const second = await run('database.backup', { databaseId });
+    expect(second.outcome).toBe('failed');
+    const [failedPlan] = await t.db.select().from(plans).where(eq(plans.id, second.planId));
+    expect(failedPlan?.error?.message).toContain('nothing was saved');
+    backupOutcome = { ok: true, sizeBytes: 4096, verified: true, error: undefined };
+  });
+
+  it('refuses to pretend it backed up a database that is off', async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    await run('database.stop', { databaseId });
+    const { planId } = await run('database.backup', { databaseId });
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, planId));
+    expect(plan?.status).toBe('failed');
+    expect(plan?.error?.message).toContain('Start it and try again');
+    await run('database.start', { databaseId });
   });
 
   it('stops, starts and deletes it, and says plainly what happened to the data', async () => {

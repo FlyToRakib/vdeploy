@@ -13,15 +13,20 @@ import { Field } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Status } from '@/components/ui/status';
 import {
+  ago,
+  dataLine,
   defaultEnvKey,
   ENGINE_VERSIONS,
   ENGINE_WORDS,
   ENGINES,
   reachWords,
+  sizeWords,
   statusWords,
+  type BackupSummary,
   type DatabaseEngine,
   type DatabaseSummary,
 } from '@/lib/databases';
+import { cn } from '@/lib/cn';
 import { formText } from '@/lib/forms';
 import { followPlan, OperationError, query, runOperation } from '@/lib/operations';
 import type { ProjectSummary } from '@/lib/projects';
@@ -190,10 +195,12 @@ function AddDatabaseDialog({
 function DatabaseCard({
   database,
   projects,
+  backups,
   onChanged,
 }: {
   database: DatabaseSummary;
   projects: ProjectSummary[];
+  backups: BackupSummary[];
   onChanged: () => void;
 }) {
   const stepUp = useStepUp();
@@ -201,6 +208,7 @@ function DatabaseCard({
   const [typed, setTyped] = useState('');
   const [deleting, setDeleting] = useState(false);
   const status = statusWords(database.status);
+  const data = dataLine(backups);
   const linked = new Set(database.links.map((link) => link.projectId));
   const free = projects.filter((project) => !linked.has(project.id));
 
@@ -230,6 +238,30 @@ function DatabaseCard({
         </span>
       </div>
       <p className="text-sm text-muted-foreground">{reachWords(database)}</p>
+      <p className={cn('text-sm', data.tone === 'warning' ? 'text-status-failed' : '')}>
+        <span className="font-medium">Data:</span> {data.words}
+      </p>
+      {backups.length > 0 && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted-foreground">
+            {backups.length} backup{backups.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="mt-2 grid gap-1">
+            {backups.slice(0, 10).map((backup) => (
+              <li key={backup.id} className="flex flex-wrap gap-2">
+                <span>{ago(backup.finishedAt ?? backup.startedAt)}</span>
+                <span className="text-muted-foreground">
+                  {backup.status === 'done' && backup.verified
+                    ? `${sizeWords(backup.sizeBytes)}, checked`
+                    : backup.status === 'failed'
+                      ? (backup.error ?? 'it did not work')
+                      : 'being taken…'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {database.links.length > 0 && (
         <ul className="grid gap-1 text-sm">
           {database.links.map((link) => {
@@ -273,6 +305,20 @@ function DatabaseCard({
             Give it to an app
           </Button>
         )}
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={database.status !== 'running'}
+          onClick={() =>
+            void run(
+              'database.backup',
+              {},
+              { doing: 'Backing it up…', done: 'Backed up, and checked that it can be read.' },
+            )
+          }
+        >
+          Back up now
+        </Button>
         {database.status === 'stopped' ? (
           <Button
             variant="secondary"
@@ -416,6 +462,7 @@ function DatabaseCard({
 /** The data layer (§17.3, §20): what exists, who can reach it, and one way in. */
 export function DatabasesPanel() {
   const [databases, setDatabases] = useState<DatabaseSummary[] | null>(null);
+  const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [servers, setServers] = useState<ServerSummary[]>([]);
   const [adding, setAdding] = useState(false);
@@ -426,11 +473,13 @@ export function DatabasesPanel() {
       query<DatabaseSummary[]>('database.list'),
       query<ProjectSummary[]>('project.list').catch(() => []),
       query<ServerSummary[]>('server.list').catch(() => []),
+      query<BackupSummary[]>('backup.list').catch(() => []),
     ]).then(
-      ([list, apps, machines]) => {
+      ([list, apps, machines, taken]) => {
         setDatabases(list);
         setProjects(apps);
         setServers(machines);
+        setBackups(taken);
       },
       () => {
         setDatabases([]);
@@ -473,6 +522,7 @@ export function DatabasesPanel() {
           key={database.id}
           database={database}
           projects={projects}
+          backups={backups.filter((backup) => backup.databaseId === database.id)}
           onChanged={reload}
         />
       ))}

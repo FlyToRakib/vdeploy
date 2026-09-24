@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/backup"
 	"github.com/FlyToRakib/vdeploy/agent/internal/build"
 	"github.com/FlyToRakib/vdeploy/agent/internal/config"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
@@ -229,10 +230,16 @@ func serve(configPath string, log *slog.Logger) error {
 			Log:    log,
 			Open:   sealed.Opener{Key: box, ServerID: id.ServerID}.Open,
 		}
+		backups := &backup.Runner{
+			Engine: engine,
+			Open:   sealed.Opener{Key: box, ServerID: id.ServerID}.Open,
+			Log:    log,
+		}
 		client := &transport.Client{
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
 			BoxKey:  sealed.PublicKey(box),
 			Builder: builder,
+			Backups: backups,
 			Logs: func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error {
 				return logs.Stream(ctx, engine, projectID, tail, follow, emit) //nolint:wrapcheck // plain for the viewer
 			},

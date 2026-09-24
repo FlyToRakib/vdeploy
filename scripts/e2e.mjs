@@ -441,6 +441,7 @@ async function run() {
   await fromGithub(server.serverId);
   await explainsFailure(server.serverId);
   await logsAndHistory(hello.id);
+  await managedDatabase(server.serverId, hello.id);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
@@ -458,6 +459,74 @@ async function run() {
   if (!audit.verification.ok)
     throw new Error(`audit chain broken: ${JSON.stringify(audit.verification)}`);
   pass('every action is in the audit log, chain verified', `${audit.entries.length} entries`);
+}
+
+/**
+ * A managed database (M4 4.1): it runs on the server, nothing outside can
+ * reach it, and a linked app is handed its address without anyone copying a
+ * password anywhere.
+ */
+async function managedDatabase(serverId, projectId) {
+  const create = await op('database.create', {
+    serverId,
+    name: 'app-db',
+    engine: 'postgres',
+    version: '18',
+    size: '1Gi',
+  });
+  const created = await settled(create.result?.plan?.id ?? create.plan.id, 600_000);
+  if (created.status !== 'applied')
+    throw new Error(`the database was not created: ${created.status}`);
+  const { result: databases } = await op('database.list', {});
+  const database = databases.find((d) => d.name === 'app-db');
+  if (!database) throw new Error('the database is not listed');
+  const container = `vd-db-${database.id.replace(/^db_/, '').toLowerCase()}`;
+  await until(
+    'the database answers',
+    () =>
+      inTestbed(
+        `docker exec ${container} pg_isready -U vdeploy -d ${database.dbName} >/dev/null 2>&1 && echo yes || true`,
+      ).includes('yes'),
+    300_000,
+  );
+  // Nothing published it: it is reachable only inside Docker.
+  const ports = inTestbed(`docker port ${container} 2>/dev/null || true`);
+  if (ports.trim()) throw new Error(`the database published ports: ${ports}`);
+  pass(
+    'a managed database runs, reachable only inside the server',
+    `postgres 18, ${database.host}`,
+  );
+
+  const link = await op('database.link', { projectId, databaseId: database.id });
+  const linked = await settled(link.plan.id, 600_000);
+  if (linked.status !== 'applied') throw new Error(`the link did not apply: ${linked.status}`);
+  const [appContainer] = managedContainers()
+    .map(([name]) => name)
+    .filter(
+      (name) =>
+        name.startsWith(`vd-${projectId.replace(/^prj_/, '').toLowerCase()}`) &&
+        !name.includes('-release'),
+    );
+  if (!appContainer) throw new Error('the app has no container');
+  // The app resolves the database by name, and holds the address as a setting.
+  const resolved = inTestbed(`docker exec ${appContainer} getent hosts ${database.host} || true`);
+  if (!resolved.includes(database.host)) {
+    throw new Error(`the app cannot resolve ${database.host}: ${resolved}`);
+  }
+  const shape = inTestbed(
+    `docker exec ${appContainer} sh -c 'echo "${'$'}{DATABASE_URL%%://*}://… ${'$'}{#DATABASE_URL}"'`,
+  );
+  if (!shape.startsWith('postgres://')) throw new Error(`the app has no DATABASE_URL: ${shape}`);
+  if (Number(shape.split(' ').pop()) < 40) throw new Error('the address looks empty');
+  pass('a linked app is handed the address, and nothing was copied by hand', shape);
+
+  // Deleting data always asks a person, even an owner who just signed in again.
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const del = await op('database.delete', { databaseId: database.id, keepData: false });
+  if (del.status !== 'pending_approval') {
+    throw new Error(`deleting data must wait for a person, got ${del.status}`);
+  }
+  pass('deleting a database waits for a person', del.plan.tier);
 }
 
 const HELLO_HOST = 'hello.vdeploy.test';
@@ -594,6 +663,9 @@ async function keepUploads(projectId) {
     const { result } = await op('storage.status', { projectId });
     return result.unsaved.some((u) => u.path === '/app/uploads' && u.status === 'unprotected');
   });
+  // Losing files makes even a restart destructive, so it asks for the password
+  // again — minutes may have passed since the last time.
+  await call('POST', '/api/v1/auth/step-up', { password });
   const restart = await op('project.restart', { projectId });
   if (
     restart.status !== 'pending_approval' ||

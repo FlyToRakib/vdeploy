@@ -13,6 +13,9 @@ import {
 import {
   createDatabase,
   databasePassword,
+  finishBackup,
+  getBackup,
+  queueBackup,
   databaseLinks,
   databases,
   getDatabase,
@@ -206,5 +209,77 @@ export async function deleteDatabaseStep(
     state.notes.push(
       'Its files are still on the server: removing data needs a verified snapshot first, which arrives with backups.',
     );
+  }
+}
+
+/** The file a backup writes: the database, the day, and the time, in UTC. */
+export function backupFileName(name: string, engine: DatabaseEngine, at: Date): string {
+  const stamp = at.toISOString().replace(/[:.]/g, '-').replace('Z', 'Z');
+  const suffix = engine === 'redis' ? 'rdb' : engine === 'postgres' ? 'dump' : 'sql';
+  return `${name.replace(/[^A-Za-z0-9._-]/g, '-')}-${stamp}.${suffix}`;
+}
+
+/**
+ * Takes a backup now (§17.4). The agent does the work beside the database;
+ * this waits for the artifact to be checked, because a backup nobody
+ * verified is a promise, not a backup.
+ */
+export async function takeBackupStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+  databaseId: string,
+  reason: 'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive' = 'manual',
+): Promise<void> {
+  const row = await getDatabase(deps.db, databaseId);
+  if (!row) throw new VDeployError('not_found', 'The database no longer exists');
+  if (!row.running) {
+    // Never silently skip: a database that is off cannot be backed up (§17.4).
+    throw new VDeployError(
+      'conflict',
+      `${row.name} is stopped, so there is nothing to back up. Start it and try again.`,
+    );
+  }
+  const queued = await deps.db.transaction((tx) =>
+    queueBackup(tx, {
+      orgId: state.orgId,
+      databaseId,
+      serverId: row.serverId,
+      fileName: backupFileName(row.name, row.engine, deps.now()),
+      reason,
+    }),
+  );
+  const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
+  for (;;) {
+    const backup = await getBackup(deps.db, queued.id);
+    if (backup?.status === 'done') {
+      state.notes.push(
+        `Backed up ${row.name}: ${String(Math.round((backup.sizeBytes ?? 0) / 1024))} KB, checked and readable.`,
+      );
+      return;
+    }
+    if (backup?.status === 'failed') {
+      throw new VDeployError(
+        'unavailable',
+        `The backup did not work. ${backup.error ?? ''}`.trim(),
+      );
+    }
+    if (Date.now() > deadline) {
+      await deps.db.transaction((tx) =>
+        finishBackup(
+          tx,
+          {
+            backupId: queued.id,
+            ok: false,
+            sizeBytes: 0,
+            verified: false,
+            error: 'it did not finish in time',
+            log: '',
+          },
+          deps.now(),
+        ),
+      );
+      throw new VDeployError('unavailable', 'The backup did not finish in time; try again');
+    }
+    await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
   }
 }

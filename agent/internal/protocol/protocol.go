@@ -28,6 +28,8 @@ const (
 	TypeObserved     = "observed_state"
 	TypeBuild        = "build"
 	TypeBuildResult  = "build_result"
+	TypeBackup       = "backup"
+	TypeBackupResult = "backup_result"
 	TypeLogs         = "logs"
 	TypeLogsStop     = "logs_stop"
 	TypeLogsChunk    = "logs_chunk"

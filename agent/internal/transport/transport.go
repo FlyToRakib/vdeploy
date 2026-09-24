@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/backup"
 	"github.com/FlyToRakib/vdeploy/agent/internal/build"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
@@ -48,12 +49,23 @@ type Client struct {
 	Now        func() time.Time
 	// Builder runs builds the control plane asks for; nil refuses them.
 	Builder Builder
+	// Backups takes database backups the control plane asks for; nil refuses them.
+	Backups BackupTaker
 	// Logs streams a project's container output; nil refuses log requests.
 	Logs func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error
 
 	buildMu sync.Mutex
 	builds  map[string]*build.Result // by build id: nil while running
 	results chan build.Result
+
+	backupMu      sync.Mutex
+	backups       map[string]*backup.Result // by backup id: nil while running
+	backupResults chan backup.Result
+}
+
+// BackupTaker takes one backup to completion.
+type BackupTaker interface {
+	Take(ctx context.Context, req backup.Request) backup.Result
 }
 
 // Builder runs one build to completion.
@@ -72,6 +84,12 @@ func (c *Client) Run(ctx context.Context) {
 		c.builds = map[string]*build.Result{}
 	}
 	c.buildMu.Unlock()
+	c.backupMu.Lock()
+	if c.backupResults == nil {
+		c.backupResults = make(chan backup.Result, 16)
+		c.backups = map[string]*backup.Result{}
+	}
+	c.backupMu.Unlock()
 	backoff := time.Second
 	for ctx.Err() == nil {
 		started := time.Now()
@@ -208,6 +226,7 @@ func (c *Client) session(ctx context.Context) error {
 	defer cancel()
 	go c.forwardReports(ctx, k)
 	go c.forwardBuildResults(ctx, k)
+	go c.forwardBackupResults(ctx, k)
 	for {
 		if err := c.receive(ctx, k); err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
@@ -283,6 +302,17 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 			return err
 		}
 		k.stopLogs(frame.RequestID)
+		return nil
+	}
+	if head.Type == protocol.TypeBackup {
+		var frame backupFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startBackup(ctx, frame.Backup)
 		return nil
 	}
 	if head.Type == protocol.TypeBuild {
@@ -445,6 +475,68 @@ func (c *Client) startBuild(ctx context.Context, req build.Request) {
 		c.buildMu.Unlock()
 		c.queueResult(result)
 	}()
+}
+
+type backupFrame struct {
+	protocol.Header
+	Backup backup.Request `json:"backup"`
+}
+
+type backupResultFrame struct {
+	protocol.Header
+	Result backup.Result `json:"result"`
+}
+
+// startBackup takes one backup. A request repeated after a reconnect gets
+// the finished result again instead of a second dump.
+func (c *Client) startBackup(ctx context.Context, req backup.Request) {
+	c.backupMu.Lock()
+	defer c.backupMu.Unlock()
+	if done, seen := c.backups[req.BackupID]; seen {
+		if done != nil {
+			c.queueBackupResult(*done)
+		}
+		return
+	}
+	if c.Backups == nil {
+		result := backup.Result{BackupID: req.BackupID, Error: "this server does not take backups"}
+		c.backups[req.BackupID] = &result
+		c.queueBackupResult(result)
+		return
+	}
+	c.backups[req.BackupID] = nil
+	go func() {
+		result := c.Backups.Take(context.WithoutCancel(ctx), req)
+		c.backupMu.Lock()
+		c.backups[req.BackupID] = &result
+		c.backupMu.Unlock()
+		c.queueBackupResult(result)
+	}()
+}
+
+func (c *Client) queueBackupResult(result backup.Result) {
+	select {
+	case c.backupResults <- result:
+	default:
+		c.Log.Warn("backup result dropped: queue full", "backup", result.BackupID)
+	}
+}
+
+func (c *Client) forwardBackupResults(ctx context.Context, k *conn) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case result := <-c.backupResults:
+			err := k.send(ctx, protocol.TypeBackupResult, func(h protocol.Header) any {
+				return backupResultFrame{Header: h, Result: result}
+			})
+			if err != nil {
+				c.queueBackupResult(result) // the next connection sends it
+				return
+			}
+		}
+	}
 }
 
 // queueResult hands a result to whichever connection is up; the newest win if the queue is full.

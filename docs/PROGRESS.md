@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.2 — backups that are restored, not just taken
+**Task:** 4.2b — restore: to a new database by default, and verified on a schedule
 **Status:** in progress
-**Updated:** 2026-09-24 11:20 UTC
+**Updated:** 2026-09-24 11:55 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -118,9 +118,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.1b the Databases screen (§20 Data): what exists and what each one is for in plain words, a dialog that asks for a name, a kind (with one sentence each on what people use it for), a version and how much room for data, and a card that says who can reach it — "nothing can reach it yet" until an app is linked. Giving it to an app is one choice of app and one variable name, taking it away says the data stays, and deleting asks for the name typed out. Everything goes through the same operations, so a change that needs approval says so rather than pretending it happened
 
+- [x] 4.2a database backups that are checked, not assumed (§17.4): a backup never uses `docker exec` — a short-lived sidecar joins the database's own network and runs the engine's own client over TCP, so the platform needs no shell primitive anywhere and the client always matches the server version. The password reaches it sealed, as an environment value, never as an argument every process on the server could read; Mongo is refused in words for exactly that reason until there is a safe way to pass it. The artifact is then read back — size, hash, and the format's own first bytes — and a dump that ran cleanly but wrote nothing, or wrote something that is not a dump, is recorded as **failed**: the classic silent backup failure is the one thing this must catch. Artifacts live in a store of their own, outside the container that made them and outside the database's volume. A database that is off is refused rather than silently skipped. The dashboard shows the one line that matters — "Last backup 4 hours ago, 4.0 MB, checked and readable" or "No backups yet — your data exists in exactly one place"
+
 ## Doing
 
-- [ ] 4.2 backups (§17.4–17.5): a dump a person can download and a restore that is tested, not assumed
+- [ ] 4.2b restore (§17.5): to a new database by default, download the dump, import one from elsewhere, and a restore verified on a schedule rather than assumed
 
 ## Next
 

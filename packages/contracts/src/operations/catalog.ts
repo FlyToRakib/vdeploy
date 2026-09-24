@@ -130,6 +130,13 @@ export const OPERATIONS = [
     obj({ databaseId }),
   ),
   query(
+    'backup.list',
+    'org',
+    'config',
+    'List the backups taken: when, how big, and whether each one was checked',
+    obj({ databaseId: databaseId.optional() }),
+  ),
+  query(
     'ai.settings',
     'org',
     'config',
@@ -203,6 +210,13 @@ export const OPERATIONS = [
     obj(S),
   ),
   operation('backup.trigger', 'safe', 'project', 'Take a backup now', obj(P)),
+  operation(
+    'database.backup',
+    'safe',
+    'database',
+    'Take a backup of this database now, and check that it can be read',
+    obj({ databaseId }),
+  ),
 
   // ── Tier 2 · sensitive ──────────────────────────────────────────────────
   operation(

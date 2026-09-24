@@ -1,6 +1,7 @@
 import {
   newId,
   VDeployError,
+  type BackupView,
   type DatabaseEngine,
   type DatabaseView,
   type Id,
@@ -14,9 +15,9 @@ import {
   sealValue,
   unwrapDataKey,
 } from '@vdeploy/core';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
-import { databaseKeys, databaseLinks, databases } from './schema/index.js';
+import { backups, databaseKeys, databaseLinks, databases } from './schema/index.js';
 
 export type DatabaseRow = typeof databases.$inferSelect;
 
@@ -190,4 +191,129 @@ export async function bumpDatabaseRevision(tx: Executor, databaseId: string, now
     .update(databases)
     .set({ revision: sql`${databases.revision} + 1`, updatedAt: now })
     .where(eq(databases.id, databaseId));
+}
+
+export type BackupRow = typeof backups.$inferSelect;
+
+/** Channel on which the worker tells the gateway a server has a backup to take. */
+export const BACKUPS_CHANNEL = 'vdeploy_backups';
+
+/** Queues a backup for the agent to take. */
+export async function queueBackup(
+  tx: Executor,
+  input: {
+    orgId: string;
+    databaseId: string;
+    serverId: string;
+    fileName: string;
+    reason?: BackupRow['reason'];
+  },
+): Promise<BackupRow> {
+  const [row] = await tx
+    .insert(backups)
+    .values({
+      id: newId('backup'),
+      orgId: input.orgId,
+      databaseId: input.databaseId,
+      serverId: input.serverId,
+      fileName: input.fileName,
+      reason: input.reason ?? 'manual',
+      status: 'queued',
+    })
+    .returning();
+  if (!row) throw new VDeployError('internal', 'The backup was not queued');
+  // Inside the caller's transaction: the agent hears about it only if that commits.
+  await tx.execute(sql`select pg_notify(${BACKUPS_CHANNEL}, ${input.serverId})`);
+  return row;
+}
+
+/**
+ * Claims the backups waiting for one server, so a reconnecting agent is
+ * asked once. A claimed backup that never finishes is visible as running,
+ * never as done.
+ */
+export async function claimBackups(
+  tx: Executor,
+  serverId: string,
+  now: Date,
+): Promise<BackupRow[]> {
+  return tx
+    .update(backups)
+    .set({ status: 'running', startedAt: now })
+    .where(and(eq(backups.serverId, serverId), eq(backups.status, 'queued')))
+    .returning();
+}
+
+/** Records what the agent found. Nothing is "done" unless the file was checked. */
+export async function finishBackup(
+  tx: Executor,
+  result: {
+    backupId: string;
+    ok: boolean;
+    sizeBytes: number;
+    sha256?: string | undefined;
+    verified: boolean;
+    error?: string | undefined;
+    log: string;
+  },
+  now: Date,
+): Promise<void> {
+  await tx
+    .update(backups)
+    .set({
+      status: result.ok && result.verified ? 'done' : 'failed',
+      sizeBytes: result.sizeBytes,
+      sha256: result.sha256 ?? null,
+      verified: result.verified,
+      error: result.error ?? null,
+      log: result.log.slice(-20_000),
+      finishedAt: now,
+    })
+    .where(eq(backups.id, result.backupId));
+}
+
+export async function getBackup(tx: Executor, backupId: string): Promise<BackupRow | null> {
+  const [row] = await tx.select().from(backups).where(eq(backups.id, backupId));
+  return row ?? null;
+}
+
+/** The backups of one database, newest first. */
+export async function backupsOf(
+  tx: Executor,
+  databaseId: string,
+  limit = 50,
+): Promise<BackupRow[]> {
+  return tx
+    .select()
+    .from(backups)
+    .where(eq(backups.databaseId, databaseId))
+    .orderBy(desc(backups.createdAt))
+    .limit(limit);
+}
+
+/** Every organization's backups, newest first — the Data line on a screen. */
+export async function backupsFor(tx: Executor, orgId: string, limit = 100) {
+  return tx
+    .select({ backup: backups, databaseName: databases.name })
+    .from(backups)
+    .innerJoin(databases, eq(databases.id, backups.databaseId))
+    .where(eq(backups.orgId, orgId))
+    .orderBy(desc(backups.createdAt))
+    .limit(limit);
+}
+
+export function backupView(row: BackupRow, databaseName: string): BackupView {
+  return {
+    id: row.id as Id<'backup'>,
+    databaseId: row.databaseId as Id<'database'>,
+    databaseName,
+    status: row.status,
+    kind: row.kind,
+    reason: row.reason,
+    sizeBytes: row.sizeBytes,
+    verified: row.verified,
+    error: row.error,
+    startedAt: (row.startedAt ?? row.createdAt).toISOString(),
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  };
 }

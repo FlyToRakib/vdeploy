@@ -91,3 +91,42 @@ export const databaseLinks = pgTable(
     index('database_links_project').on(t.projectId),
   ],
 );
+
+/**
+ * A backup of a managed database (§17.4). The row is the record; the file
+ * itself lives on the server, in a store of its own.
+ */
+export const backups = pgTable(
+  'backups',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'restrict' }),
+    databaseId: text('database_id')
+      .notNull()
+      .references(() => databases.id, { onDelete: 'cascade' }),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'restrict' }),
+    kind: text('kind').$type<'dump'>().notNull().default('dump'),
+    /** Why it was taken, for the person reading the list. */
+    reason: text('reason')
+      .$type<'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive'>()
+      .notNull()
+      .default('manual'),
+    status: text('status').$type<'queued' | 'running' | 'done' | 'failed'>().notNull(),
+    /** The file inside the server's backup store. */
+    fileName: text('file_name').notNull(),
+    sizeBytes: integer('size_bytes'),
+    sha256: text('sha256'),
+    /** True only when the artifact itself was checked, never just because a command exited 0. */
+    verified: boolean('verified').notNull().default(false),
+    error: text('error'),
+    log: text('log').notNull().default(''),
+    createdAt: createdAt(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [index('backups_database_created').on(t.databaseId, t.createdAt)],
+);

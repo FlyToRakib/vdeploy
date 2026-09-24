@@ -71,3 +71,60 @@ export function reachWords(database: DatabaseSummary): string {
 export function defaultEnvKey(engine: DatabaseEngine): string {
   return engine === 'redis' ? 'REDIS_URL' : 'DATABASE_URL';
 }
+
+/** A backup, as `backup.list` returns it. */
+export interface BackupSummary {
+  id: string;
+  databaseId: string;
+  databaseName: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  kind: 'dump';
+  reason: 'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive';
+  sizeBytes: number | null;
+  verified: boolean;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/** "4 hours ago", for a person who wants to know if it is recent. */
+export function ago(iso: string, now = Date.now()): string {
+  const minutes = Math.round((now - Date.parse(iso)) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${String(minutes)} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${String(hours)} hour${hours === 1 ? '' : 's'} ago`;
+  return `${String(Math.round(hours / 24))} days ago`;
+}
+
+export function sizeWords(bytes: number | null): string {
+  if (bytes === null || bytes <= 0) return 'empty';
+  if (bytes < 1024 * 1024) return `${String(Math.max(1, Math.round(bytes / 1024)))} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+/**
+ * The one line every database shows about its data (§17.5). It says the
+ * uncomfortable thing when it is true: one copy is not a backup.
+ */
+export function dataLine(
+  backups: BackupSummary[],
+  now = Date.now(),
+): { tone: 'good' | 'warning'; words: string } {
+  const done = backups.filter((backup) => backup.status === 'done' && backup.verified);
+  const last = done[0];
+  if (!last?.finishedAt) {
+    const failed = backups.find((backup) => backup.status === 'failed');
+    return {
+      tone: 'warning',
+      words: failed
+        ? `No backup has worked yet — ${failed.error ?? 'the last one failed'}. Your data exists in exactly one place.`
+        : 'No backups yet — your data exists in exactly one place.',
+    };
+  }
+  return {
+    tone: 'good',
+    words: `Last backup ${ago(last.finishedAt, now)}, ${sizeWords(last.sizeBytes)}, checked and readable.`,
+  };
+}

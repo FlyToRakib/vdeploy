@@ -416,6 +416,29 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       blastRadius: radius(project.spec, { rollbackTo: project.currentReleaseId }),
     };
   },
+  'database.backup': (args, context) => {
+    const database = requireDatabase(context);
+    return {
+      specHash: null,
+      changes: [
+        {
+          path: 'backup',
+          before: null,
+          after: `a copy of ${database.name}, checked after it is taken`,
+        },
+      ],
+      steps: [{ kind: 'take_backup', databaseId: args.databaseId }],
+      tier: 'safe',
+      blastRadius: {
+        projects: 0,
+        replicas: 1,
+        domains: [],
+        downtime: 'none',
+        dataAtRisk: [],
+        rollbackTo: null,
+      },
+    };
+  },
   'database.stop': (args, context) => {
     const database = requireDatabase(context);
     return {
