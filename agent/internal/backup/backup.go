@@ -274,3 +274,116 @@ func fromHex(text string) (string, error) {
 	}
 	return string(out), nil
 }
+
+// RestoreRequest is one restore the control plane asked for: a dump already
+// on this server, loaded into a database on it.
+type RestoreRequest struct {
+	RestoreID   string       `json:"restoreId"`
+	BackupID    string       `json:"backupId"`
+	DatabaseID  string       `json:"databaseId"`
+	Engine      string       `json:"engine"`
+	Image       string       `json:"image"`
+	Host        string       `json:"host"`
+	Port        int          `json:"port"`
+	User        string       `json:"user"`
+	DBName      string       `json:"dbName"`
+	Credentials []Credential `json:"credentials"`
+	// FileName is the artifact in the backup store; it is never a path.
+	FileName       string `json:"fileName"`
+	TimeoutSeconds int    `json:"timeoutSeconds"`
+}
+
+// RestoreResult is what happened. A restore that did not finish cleanly must
+// never be reported as one: the person would believe their data is back.
+type RestoreResult struct {
+	RestoreID string `json:"restoreId"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+	Log       string `json:"log"`
+}
+
+func restorePlan(req RestoreRequest) (plan, error) {
+	host, port := req.Host, strconv.Itoa(req.Port)
+	file := mountPath + "/" + req.FileName
+	switch req.Engine {
+	case "postgres":
+		return plan{
+			entrypoint: []string{"pg_restore"},
+			// --clean --if-exists so a restore over an existing database replaces it
+			// rather than colliding with what is already there; one transaction, so a
+			// restore that fails part way leaves nothing half-loaded.
+			args: []string{
+				"--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges",
+				"-h", host, "-p", port, "-U", req.User, "-d", req.DBName, file,
+			},
+			passwordKey: "PGPASSWORD",
+		}, nil
+	case "mysql", "mariadb":
+		return plan{
+			entrypoint:  []string{"/bin/sh", "-c"},
+			args:        []string{`exec mysql -h "$H" -P "$P" -u "$U" "$D" < "$F"`},
+			passwordKey: "MYSQL_PWD", // #nosec G101 -- a variable name, not a password
+		}, nil
+	default:
+		// A Redis dump is a file the server loads at startup, not something a
+		// client can send over the wire.
+		return plan{}, fmt.Errorf("restoring %s is not supported yet", req.Engine)
+	}
+}
+
+// Restore loads a dump back into a database (§17.5).
+func (r *Runner) Restore(ctx context.Context, req RestoreRequest) RestoreResult {
+	fail := func(reason, log string) RestoreResult {
+		return RestoreResult{RestoreID: req.RestoreID, Error: reason, Log: log}
+	}
+	if !safeName.MatchString(req.FileName) {
+		return fail("the backup file name is not allowed", "")
+	}
+	steps, err := restorePlan(req)
+	if err != nil {
+		return fail(err.Error(), "")
+	}
+	env, err := r.credentials(Request{
+		BackupID:    req.RestoreID,
+		DatabaseID:  req.DatabaseID,
+		Credentials: req.Credentials,
+	}, steps.passwordKey)
+	if err != nil {
+		return fail(err.Error(), "")
+	}
+	if req.Engine == "mysql" || req.Engine == "mariadb" {
+		// The client reads the file from the store; the shell only redirects it.
+		env = append(env,
+			"H="+req.Host, "P="+strconv.Itoa(req.Port), "U="+req.User, "D="+req.DBName,
+			"F="+mountPath+"/"+req.FileName,
+		)
+	}
+	timeout := time.Duration(req.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = time.Hour
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	code, log, err := r.Engine.RunHelper(runCtx, docker.Helper{
+		Name:        "vd-restore-" + compose.DatabaseKey(req.DatabaseID),
+		Image:       req.Image,
+		Entrypoint:  steps.entrypoint,
+		Cmd:         steps.args,
+		Env:         env,
+		Volumes:     map[string]string{Volume: mountPath},
+		MemoryBytes: MemoryBytes,
+		NanoCPUs:    NanoCPUs,
+		Network:     compose.DatabaseNetwork(req.DatabaseID),
+		SecurityOpt: []string{"no-new-privileges:true"},
+	})
+	if err != nil {
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return fail("the restore took too long and was stopped", log)
+		}
+		return fail(fmt.Sprintf("the restore could not run: %v", err), log)
+	}
+	if code != 0 {
+		return fail(fmt.Sprintf("the restore failed (exit %d); nothing was changed", code), log)
+	}
+	return RestoreResult{RestoreID: req.RestoreID, OK: true, Log: log}
+}

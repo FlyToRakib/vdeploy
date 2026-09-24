@@ -134,3 +134,32 @@ export const backups = pgTable(
   },
   (t) => [index('backups_database_created').on(t.databaseId, t.createdAt)],
 );
+
+/** Putting a backup back (§17.5): to a new database, or over an existing one. */
+export const restores = pgTable(
+  'restores',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'restrict' }),
+    backupId: text('backup_id')
+      .notNull()
+      .references(() => backups.id, { onDelete: 'cascade' }),
+    /** The database the data goes into: a new one, or the one it came from. */
+    databaseId: text('database_id')
+      .notNull()
+      .references(() => databases.id, { onDelete: 'cascade' }),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'restrict' }),
+    mode: text('mode').$type<'new' | 'in_place'>().notNull(),
+    status: text('status').$type<'queued' | 'running' | 'done' | 'failed'>().notNull(),
+    error: text('error'),
+    log: text('log').notNull().default(''),
+    createdAt: createdAt(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [index('restores_database_created').on(t.databaseId, t.createdAt)],
+);

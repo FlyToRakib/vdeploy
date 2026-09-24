@@ -170,3 +170,60 @@ func TestEveryEngineWritesWhereItIsToldAndReadsItsPasswordFromTheEnvironment(t *
 		}
 	}
 }
+
+func restoreRequest() RestoreRequest {
+	return RestoreRequest{
+		RestoreID:   "rst_01J9Z3Q8S7M2K4X6V1B5N0C9D8",
+		BackupID:    "bak_01J9Z3Q8S7M2K4X6V1B5N0C9D8",
+		DatabaseID:  "db_01J9Z3Q8S7M2K4X6V1B5N0C9D8",
+		Engine:      "postgres",
+		Image:       "postgres:18",
+		Host:        "vd-db-01j9z3q8s7m2k4x6v1b5n0c9d8",
+		Port:        5432,
+		User:        "vdeploy",
+		DBName:      "blog",
+		Credentials: []Credential{{Key: "POSTGRES_PASSWORD", Version: 1, Sealed: "sealed:hunter2"}},
+		FileName:    "blog-2026-09-24.dump",
+	}
+}
+
+func TestRestoreLoadsTheDumpInOnePieceOrNotAtAll(t *testing.T) {
+	engine := &fakeEngine{}
+	runner := &Runner{Engine: engine, Open: opener()}
+	result := runner.Restore(context.Background(), restoreRequest())
+	if !result.OK {
+		t.Fatalf("a good restore was not accepted: %+v", result)
+	}
+	args := strings.Join(engine.runs[0].Cmd, " ")
+	// One transaction: a restore that fails part way leaves nothing half-loaded.
+	if !strings.Contains(args, "--single-transaction") || !strings.Contains(args, "--clean") {
+		t.Fatalf("the restore is not all-or-nothing: %s", args)
+	}
+	if !strings.Contains(args, "/backups/"+restoreRequest().FileName) {
+		t.Fatalf("the restore reads the wrong file: %s", args)
+	}
+	if engine.runs[0].Env[0] != "PGPASSWORD=hunter2" {
+		t.Fatalf("the password was not passed in the environment: %v", engine.runs[0].Env)
+	}
+}
+
+func TestAFailedRestoreSaysNothingWasChanged(t *testing.T) {
+	engine := &fakeEngine{dump: func(docker.Helper) (int, string, error) {
+		return 1, "pg_restore: error: could not execute query\n", nil
+	}}
+	runner := &Runner{Engine: engine, Open: opener()}
+	result := runner.Restore(context.Background(), restoreRequest())
+	if result.OK || !strings.Contains(result.Error, "nothing was changed") {
+		t.Fatalf("a failed restore must say so plainly: %+v", result)
+	}
+}
+
+func TestRedisRestoreIsRefusedInWords(t *testing.T) {
+	req := restoreRequest()
+	req.Engine = "redis"
+	runner := &Runner{Engine: &fakeEngine{}, Open: opener()}
+	result := runner.Restore(context.Background(), req)
+	if result.OK || !strings.Contains(result.Error, "not supported yet") {
+		t.Fatalf("redis restore should be refused in words: %+v", result)
+	}
+}

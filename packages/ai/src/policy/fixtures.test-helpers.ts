@@ -151,6 +151,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'ai.configure': { grants: DEFAULT_AI_GRANTS },
   'database.link': { databaseId: newId('database') },
   'database.unlink': { databaseId: newId('database') },
+  'database.restore': { backupId: newId('backup'), mode: 'new' },
   'server.set_address': { ipv4: '8.8.4.4' },
   'server.check_reachability': {},
   'notification.channel_create': {

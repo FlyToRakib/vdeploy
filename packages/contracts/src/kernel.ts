@@ -59,6 +59,11 @@ export const PlanStep = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('create_database') }),
   z.strictObject({ kind: z.literal('take_backup'), databaseId: idSchema('database') }),
   z.strictObject({
+    kind: z.literal('restore_backup'),
+    backupId: idSchema('backup'),
+    mode: z.enum(['new', 'in_place']),
+  }),
+  z.strictObject({
     kind: z.literal('delete_database'),
     databaseId: idSchema('database'),
     keepData: z.boolean(),

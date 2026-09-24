@@ -78,3 +78,34 @@ export const BackupView = z.strictObject({
   finishedAt: z.iso.datetime().nullable(),
 });
 export type BackupView = z.infer<typeof BackupView>;
+
+/**
+ * Putting a backup back (§17.5). Restoring to a new database is the default
+ * and the safe one: verifying a backup must never require touching what is
+ * live. Restoring in place replaces everything, so it takes a copy first and
+ * stops the apps that read it — restoring underneath a running app corrupts
+ * both.
+ */
+export const RestoreMode = z.enum(['new', 'in_place']);
+export type RestoreMode = z.infer<typeof RestoreMode>;
+
+export const RestoreResult = z.strictObject({
+  restoreId: idSchema('restore'),
+  ok: z.boolean(),
+  error: z.string().max(4096).optional(),
+  log: z.string().max(20_000),
+});
+export type RestoreResult = z.infer<typeof RestoreResult>;
+
+export const RestoreView = z.strictObject({
+  id: idSchema('restore'),
+  backupId: idSchema('backup'),
+  databaseId: idSchema('database'),
+  databaseName: z.string().max(100),
+  mode: RestoreMode,
+  status: z.enum(['queued', 'running', 'done', 'failed']),
+  error: z.string().nullable(),
+  startedAt: z.iso.datetime(),
+  finishedAt: z.iso.datetime().nullable(),
+});
+export type RestoreView = z.infer<typeof RestoreView>;

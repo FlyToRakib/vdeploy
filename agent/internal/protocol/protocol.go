@@ -21,19 +21,21 @@ const Version = 1
 
 // Frame types.
 const (
-	TypeChallenge    = "challenge"
-	TypeHello        = "hello"
-	TypeDesiredState = "desired_state"
-	TypeAck          = "ack"
-	TypeObserved     = "observed_state"
-	TypeBuild        = "build"
-	TypeBuildResult  = "build_result"
-	TypeBackup       = "backup"
-	TypeBackupResult = "backup_result"
-	TypeLogs         = "logs"
-	TypeLogsStop     = "logs_stop"
-	TypeLogsChunk    = "logs_chunk"
-	TypeLogsEnd      = "logs_end"
+	TypeChallenge     = "challenge"
+	TypeHello         = "hello"
+	TypeDesiredState  = "desired_state"
+	TypeAck           = "ack"
+	TypeObserved      = "observed_state"
+	TypeBuild         = "build"
+	TypeBuildResult   = "build_result"
+	TypeBackup        = "backup"
+	TypeBackupResult  = "backup_result"
+	TypeRestore       = "restore"
+	TypeRestoreResult = "restore_result"
+	TypeLogs          = "logs"
+	TypeLogsStop      = "logs_stop"
+	TypeLogsChunk     = "logs_chunk"
+	TypeLogsEnd       = "logs_end"
 )
 
 // MaxClockSkew bounds how far a frame's timestamp may be from ours.

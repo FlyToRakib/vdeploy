@@ -43,6 +43,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { bumpGeneration, waitForConvergence, type Expectation } from './converge.js';
 import {
   createDatabaseStep,
+  restoreBackupStep,
   takeBackupStep,
   deleteDatabaseStep,
   linkDatabaseStep,
@@ -585,6 +586,8 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return rotate(deps, state, step.secretId);
     case 'create_database':
       return createDatabaseStep(deps, state);
+    case 'restore_backup':
+      return restoreBackupStep(deps, state, step.backupId, step.mode);
     case 'take_backup':
       return takeBackupStep(
         deps,

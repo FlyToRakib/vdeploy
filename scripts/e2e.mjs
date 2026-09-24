@@ -519,6 +519,14 @@ async function managedDatabase(serverId, projectId) {
   if (!shape.startsWith('postgres://')) throw new Error(`the app has no DATABASE_URL: ${shape}`);
   if (Number(shape.split(' ').pop()) < 40) throw new Error('the address looks empty');
   pass('a linked app is handed the address, and nothing was copied by hand', shape);
+  await until(
+    'the release that got the address is the only one left',
+    () =>
+      inTestbed(`docker ps -a --filter label=io.vdeploy.project=${projectId} --format '{{.Names}}'`)
+        .split('\n')
+        .filter(Boolean).length === 1,
+    180_000,
+  );
 
   // Deleting data always asks a person, even an owner who just signed in again.
   await call('POST', '/api/v1/auth/step-up', { password });
@@ -1121,12 +1129,15 @@ async function drill() {
   const size = Number(inTestbed('wc -c < /tmp/cp.dump'));
   pass('control plane backed up and the dump verified', `${Math.round(size / 1024)} KB`);
 
+  inTestbed('docker rm -f cp-api cp-worker cp-db >/dev/null');
+  await sleep(5000);
   const before = managedContainers()
     .map(([name]) => name)
     .sort();
-  inTestbed('docker rm -f cp-api cp-worker cp-db >/dev/null');
-  await sleep(5000);
-  const [victim] = before;
+  const victim = managedContainers().find(
+    ([name, state]) => state === 'running' && name.startsWith('vd-') && !name.includes('traefik'),
+  )?.[0];
+  if (!victim) throw new Error('no running app container to kill');
   inTestbed(`docker kill ${victim} >/dev/null`);
   await until(
     'offline self-heal',

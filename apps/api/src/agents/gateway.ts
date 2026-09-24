@@ -13,6 +13,10 @@ import {
   BUILDS_CHANNEL,
   claimBackups,
   claimBuilds,
+  claimRestores,
+  finishRestore,
+  getRestore,
+  RESTORES_CHANNEL,
   databasePassword,
   finishBackup,
   getBackup,
@@ -105,6 +109,7 @@ export class Gateway implements LogSource {
   private stopListening: (() => Promise<void>) | null = null;
   private stopBuildListening: (() => Promise<void>) | null = null;
   private stopBackupListening: (() => Promise<void>) | null = null;
+  private stopRestoreListening: (() => Promise<void>) | null = null;
 
   /** When each server's ports were last checked from here (ms). */
   private readonly reachChecked = new Map<string, number>();
@@ -125,6 +130,15 @@ export class Gateway implements LogSource {
         this.deps.log.error({ err, serverId }, 'could not send backups');
       });
     });
+    this.stopRestoreListening = await listen(
+      this.deps.databaseUrl,
+      RESTORES_CHANNEL,
+      (serverId) => {
+        void this.dispatchRestores(serverId).catch((err: unknown) => {
+          this.deps.log.error({ err, serverId }, 'could not send restores');
+        });
+      },
+    );
   }
 
   /**
@@ -172,6 +186,53 @@ export class Gateway implements LogSource {
                     profile.passwordKey,
                     database.passwordVersion,
                   ),
+                ),
+              },
+            ],
+            fileName: backup.fileName,
+            timeoutSeconds: 3600,
+          },
+        }),
+      );
+    }
+  }
+
+  /** Sends a server's queued restores to its agent (§17.5). */
+  async dispatchRestores(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const { db, key, now, secretsKey } = this.deps;
+    const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+    if (!server?.agentBoxKey) return;
+    for (const restore of await claimRestores(db, serverId, now())) {
+      const [target, backup] = await Promise.all([
+        getDatabase(db, restore.databaseId),
+        getBackup(db, restore.backupId),
+      ]);
+      if (!target || !backup) continue;
+      const profile = engineProfile(target.engine);
+      const password = await databasePassword(db, secretsKey, target);
+      connection.socket.send(
+        seal(key, {
+          ...connection.session.next('restore'),
+          restore: {
+            restoreId: restore.id,
+            backupId: backup.id,
+            databaseId: target.id,
+            engine: target.engine,
+            image: target.image,
+            host: databaseHost(target.id),
+            port: target.port,
+            user: target.user,
+            dbName: target.dbName ?? '',
+            credentials: [
+              {
+                key: profile.passwordKey,
+                version: target.passwordVersion,
+                sealed: sealTo(
+                  server.agentBoxKey,
+                  password,
+                  deliveryContext(serverId, target.id, profile.passwordKey, target.passwordVersion),
                 ),
               },
             ],
@@ -436,6 +497,9 @@ export class Gateway implements LogSource {
       await notifyFromReport(db, serverId, frame.report, now());
     } else if (frame.type === 'build_result') {
       await finishBuild(db, serverId, frame.result, now());
+    } else if (frame.type === 'restore_result') {
+      const restore = await getRestore(db, frame.result.restoreId);
+      if (restore?.serverId === serverId) await finishRestore(db, frame.result, now());
     } else if (frame.type === 'backup_result') {
       // Only the server that was asked may answer, and only about its own backup.
       const backup = await getBackup(db, frame.result.backupId);

@@ -2,6 +2,7 @@ import {
   newId,
   VDeployError,
   type BackupView,
+  type RestoreView,
   type DatabaseEngine,
   type DatabaseView,
   type Id,
@@ -17,7 +18,7 @@ import {
 } from '@vdeploy/core';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
-import { backups, databaseKeys, databaseLinks, databases } from './schema/index.js';
+import { backups, databaseKeys, databaseLinks, databases, restores } from './schema/index.js';
 
 export type DatabaseRow = typeof databases.$inferSelect;
 
@@ -312,6 +313,88 @@ export function backupView(row: BackupRow, databaseName: string): BackupView {
     reason: row.reason,
     sizeBytes: row.sizeBytes,
     verified: row.verified,
+    error: row.error,
+    startedAt: (row.startedAt ?? row.createdAt).toISOString(),
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  };
+}
+
+export type RestoreRow = typeof restores.$inferSelect;
+
+/** Channel on which the worker tells the gateway a server has a restore to run. */
+export const RESTORES_CHANNEL = 'vdeploy_restores';
+
+export async function queueRestore(
+  tx: Executor,
+  input: {
+    orgId: string;
+    backupId: string;
+    databaseId: string;
+    serverId: string;
+    mode: 'new' | 'in_place';
+  },
+): Promise<RestoreRow> {
+  const [row] = await tx
+    .insert(restores)
+    .values({ id: newId('restore'), ...input, status: 'queued' })
+    .returning();
+  if (!row) throw new VDeployError('internal', 'The restore was not queued');
+  await tx.execute(sql`select pg_notify(${RESTORES_CHANNEL}, ${input.serverId})`);
+  return row;
+}
+
+export async function claimRestores(
+  tx: Executor,
+  serverId: string,
+  now: Date,
+): Promise<RestoreRow[]> {
+  return tx
+    .update(restores)
+    .set({ status: 'running', startedAt: now })
+    .where(and(eq(restores.serverId, serverId), eq(restores.status, 'queued')))
+    .returning();
+}
+
+export async function finishRestore(
+  tx: Executor,
+  result: { restoreId: string; ok: boolean; error?: string | undefined; log: string },
+  now: Date,
+): Promise<void> {
+  await tx
+    .update(restores)
+    .set({
+      status: result.ok ? 'done' : 'failed',
+      error: result.error ?? null,
+      log: result.log.slice(-20_000),
+      finishedAt: now,
+    })
+    .where(eq(restores.id, result.restoreId));
+}
+
+export async function getRestore(tx: Executor, restoreId: string): Promise<RestoreRow | null> {
+  const [row] = await tx.select().from(restores).where(eq(restores.id, restoreId));
+  return row ?? null;
+}
+
+/** Every restore in an organization, newest first. */
+export async function restoresFor(tx: Executor, orgId: string, limit = 50) {
+  return tx
+    .select({ restore: restores, databaseName: databases.name })
+    .from(restores)
+    .innerJoin(databases, eq(databases.id, restores.databaseId))
+    .where(eq(restores.orgId, orgId))
+    .orderBy(desc(restores.createdAt))
+    .limit(limit);
+}
+
+export function restoreView(row: RestoreRow, databaseName: string): RestoreView {
+  return {
+    id: row.id as Id<'restore'>,
+    backupId: row.backupId as Id<'backup'>,
+    databaseId: row.databaseId as Id<'database'>,
+    databaseName,
+    mode: row.mode,
+    status: row.status,
     error: row.error,
     startedAt: (row.startedAt ?? row.createdAt).toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,

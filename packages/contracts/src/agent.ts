@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
-import { BackupResult } from './backups.js';
+import { BackupResult, RestoreResult } from './backups.js';
 import { BuildResult } from './builds.js';
 import { DesiredDatabase, ObservedDatabase } from './databases.js';
 import { ReplicaEvidence } from './diagnosis.js';
@@ -155,6 +155,7 @@ export const AgentFrame = z.discriminatedUnion('type', [
   z.strictObject({ ...FrameHeader, type: z.literal('observed_state'), report: ObservedReport }),
   z.strictObject({ ...FrameHeader, type: z.literal('build_result'), result: BuildResult }),
   z.strictObject({ ...FrameHeader, type: z.literal('backup_result'), result: BackupResult }),
+  z.strictObject({ ...FrameHeader, type: z.literal('restore_result'), result: RestoreResult }),
   z.strictObject({
     ...FrameHeader,
     type: z.literal('logs_chunk'),

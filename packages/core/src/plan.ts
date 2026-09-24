@@ -379,6 +379,43 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       },
     };
   },
+  'database.restore': (args, context) => {
+    const database = requireDatabase(context);
+    const toNew = args.mode === 'new';
+    return {
+      specHash: null,
+      changes: [
+        toNew
+          ? {
+              path: 'database',
+              before: null,
+              after: `${args.newName ?? `${database.name}-restored`}, holding what the backup contains`,
+            }
+          : {
+              path: `database.${database.name}`,
+              before: 'what is in it now',
+              after: 'what the backup contains',
+            },
+      ],
+      steps: toNew
+        ? [{ kind: 'restore_backup', backupId: args.backupId, mode: 'new' }]
+        : [
+            // A copy of what is about to be replaced, before it is replaced.
+            { kind: 'take_backup', databaseId: args.databaseId },
+            { kind: 'restore_backup', backupId: args.backupId, mode: 'in_place' },
+          ],
+      tier: toNew ? 'sensitive' : 'destructive',
+      blastRadius: {
+        projects: toNew ? 0 : database.linkedProjects,
+        replicas: 1,
+        domains: [],
+        // Restoring underneath a running app corrupts both, so the apps stop first.
+        downtime: toNew ? 'none' : 'brief',
+        dataAtRisk: toNew ? [] : [`everything in ${database.name} right now`],
+        rollbackTo: null,
+      },
+    };
+  },
   'database.delete': (args, context) => {
     const database = requireDatabase(context);
     return {

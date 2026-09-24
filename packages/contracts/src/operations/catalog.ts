@@ -13,6 +13,7 @@ import {
 } from '../spec/sections.js';
 import { Memory } from '../spec/quantities.js';
 import { AiGrants } from '../grants.js';
+import { RestoreMode } from '../backups.js';
 import { DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
@@ -135,6 +136,13 @@ export const OPERATIONS = [
     'config',
     'List the backups taken: when, how big, and whether each one was checked',
     obj({ databaseId: databaseId.optional() }),
+  ),
+  query(
+    'backup.restores',
+    'org',
+    'config',
+    'Show the restores that were run, and whether each one worked',
+    obj({}),
   ),
   query(
     'ai.settings',
@@ -551,6 +559,20 @@ export const OPERATIONS = [
     'project',
     'Delete a permanent folder after taking a snapshot',
     obj({ ...P, volume: ResourceName }),
+  ),
+  // Sensitive as an intent; the plan raises it to destructive when it would
+  // replace live data, which is what the gate then confirms.
+  operation(
+    'database.restore',
+    'sensitive',
+    'database',
+    'Put a backup back: into a new database, or over this one',
+    obj({
+      databaseId,
+      backupId: idSchema('backup'),
+      mode: RestoreMode.default('new'),
+      newName: ResourceName.optional(),
+    }),
   ),
   operation(
     'database.delete',

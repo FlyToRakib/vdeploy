@@ -14,8 +14,13 @@ import {
   createDatabase,
   databasePassword,
   finishBackup,
+  finishRestore,
   getBackup,
+  getRestore,
+  linksOf,
+  observedState,
   queueBackup,
+  queueRestore,
   databaseLinks,
   databases,
   getDatabase,
@@ -281,5 +286,150 @@ export async function takeBackupStep(
       throw new VDeployError('unavailable', 'The backup did not finish in time; try again');
     }
     await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+  }
+}
+
+/** Waits until the agent reports this database running, or gives up saying so. */
+async function untilRunning(
+  deps: DatabaseStepDeps & { pollMs: number },
+  serverId: string,
+  databaseId: string,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const [observed] = await deps.db
+      .select({ report: observedState.report })
+      .from(observedState)
+      .where(eq(observedState.serverId, serverId));
+    const entry = observed?.report.databases?.find((row) => row.databaseId === databaseId);
+    if (entry?.state === 'running') return;
+    if (Date.now() > deadline) {
+      throw new VDeployError(
+        'unavailable',
+        'The database did not start in time; nothing was changed',
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+  }
+}
+
+/** Stops every app that reads this database, so nothing writes while data goes back. */
+async function holdLinkedApps(
+  deps: DatabaseStepDeps,
+  databaseId: string,
+  running: boolean,
+): Promise<string[]> {
+  const links = await linksOf(deps.db, databaseId);
+  const projectIds = [...new Set(links.map((link) => link.projectId))];
+  if (projectIds.length === 0) return [];
+  await deps.db.transaction(async (tx) => {
+    for (const projectId of projectIds) {
+      const [row] = await tx
+        .update(projects)
+        .set({ running, updatedAt: deps.now() })
+        .where(eq(projects.id, projectId))
+        .returning({ serverId: projects.serverId });
+      if (row?.serverId) await bumpGeneration(tx, row.serverId);
+    }
+  });
+  return projectIds;
+}
+
+/**
+ * Puts a backup back (§17.5). Into a new database by default, because
+ * checking that a backup is good must never mean touching what is live; over
+ * the existing one only with the apps stopped first, since restoring
+ * underneath a running app corrupts both.
+ */
+export async function restoreBackupStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+  backupId: string,
+  mode: 'new' | 'in_place',
+): Promise<void> {
+  const backup = await getBackup(deps.db, backupId);
+  if (!backup) throw new VDeployError('not_found', 'That backup no longer exists');
+  if (backup.status !== 'done' || !backup.verified) {
+    throw new VDeployError(
+      'conflict',
+      'That backup was never checked, so it cannot be restored. Take a new one first.',
+    );
+  }
+  const source = await getDatabase(deps.db, backup.databaseId);
+  if (!source) throw new VDeployError('not_found', 'The database that backup came from is gone');
+
+  let target = source;
+  let held: string[] = [];
+  if (mode === 'new') {
+    const name =
+      typeof state.args.newName === 'string' ? state.args.newName : `${source.name}-restored`;
+    const { user, dbName } = databaseNames(source.engine, name);
+    target = await deps.db.transaction(async (tx) => {
+      const created = await createDatabase(tx, deps.secretsKey, {
+        orgId: state.orgId,
+        serverId: source.serverId,
+        name,
+        engine: source.engine,
+        version: source.version,
+        image: source.image,
+        port: source.port,
+        user,
+        dbName,
+        memoryLimit: source.memoryLimit,
+        diskSize: source.diskSize,
+      });
+      await bumpGeneration(tx, source.serverId);
+      return created;
+    });
+    await untilRunning(deps, source.serverId, target.id, 10 * 60_000);
+  } else {
+    held = await holdLinkedApps(deps, source.id, false);
+    if (held.length > 0)
+      state.notes.push('The apps using it were stopped while the data went back.');
+  }
+
+  const queued = await deps.db.transaction((tx) =>
+    queueRestore(tx, {
+      orgId: state.orgId,
+      backupId,
+      databaseId: target.id,
+      serverId: target.serverId,
+      mode,
+    }),
+  );
+  const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
+  try {
+    for (;;) {
+      const restore = await getRestore(deps.db, queued.id);
+      if (restore?.status === 'done') {
+        state.notes.push(
+          mode === 'new'
+            ? `Restored into ${target.name}. Nothing existing was touched; link an app to it when you have checked it.`
+            : `Restored into ${target.name} from the backup taken ${backup.createdAt.toISOString()}.`,
+        );
+        return;
+      }
+      if (restore?.status === 'failed') {
+        throw new VDeployError(
+          'unavailable',
+          `The restore did not work. ${restore.error ?? ''}`.trim(),
+        );
+      }
+      if (Date.now() > deadline) {
+        await deps.db.transaction((tx) =>
+          finishRestore(
+            tx,
+            { restoreId: queued.id, ok: false, error: 'it did not finish in time', log: '' },
+            deps.now(),
+          ),
+        );
+        throw new VDeployError('unavailable', 'The restore did not finish in time');
+      }
+      await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+    }
+  } finally {
+    // Whatever happened, the apps come back: they are never left stopped silently.
+    if (held.length > 0) await holdLinkedApps(deps, source.id, true);
   }
 }

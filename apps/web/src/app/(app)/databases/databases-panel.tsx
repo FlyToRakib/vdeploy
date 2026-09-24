@@ -207,6 +207,9 @@ function DatabaseCard({
   const [linking, setLinking] = useState(false);
   const [typed, setTyped] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [overwrite, setOverwrite] = useState(false);
+  const [confirmName, setConfirmName] = useState('');
   const status = statusWords(database.status);
   const data = dataLine(backups);
   const linked = new Set(database.links.map((link) => link.projectId));
@@ -257,6 +260,17 @@ function DatabaseCard({
                       ? (backup.error ?? 'it did not work')
                       : 'being taken…'}
                 </span>
+                {backup.status === 'done' && backup.verified && (
+                  <button
+                    type="button"
+                    className="text-accent underline"
+                    onClick={() => {
+                      setRestoring(backup.id);
+                    }}
+                  >
+                    Put it back…
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -403,6 +417,121 @@ function DatabaseCard({
               Cancel
             </Button>
             <Button type="submit">Connect them</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={restoring !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRestoring(null);
+            setOverwrite(false);
+            setConfirmName('');
+          }
+        }}
+        title={`Restore ${database.name}`}
+        description="Checking that a backup is good should never mean touching what is live."
+      >
+        <form
+          action={(form) => {
+            const backupId = restoring ?? '';
+            const mode = overwrite ? 'in_place' : 'new';
+            setRestoring(null);
+            setOverwrite(false);
+            setConfirmName('');
+            void run(
+              'database.restore',
+              mode === 'new'
+                ? { backupId, mode, newName: formText(form, 'newName') }
+                : { backupId, mode },
+              {
+                doing: 'Putting the data back…',
+                done:
+                  mode === 'new'
+                    ? 'Restored into a new database. Nothing existing was touched.'
+                    : 'Restored. The apps using it are starting again.',
+              },
+            );
+          }}
+          className="grid gap-4"
+        >
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="radio"
+              name="mode"
+              checked={!overwrite}
+              onChange={() => {
+                setOverwrite(false);
+              }}
+              className="mt-1 size-4"
+            />
+            <span>
+              <span className="font-medium">Restore to a new database</span>
+              <span className="block text-muted-foreground">
+                Safe, and what we suggest. Nothing existing is touched.
+              </span>
+            </span>
+          </label>
+          {!overwrite && (
+            <Field
+              label="Name for the new database"
+              name="newName"
+              defaultValue={`${database.name}-restored`}
+              autoComplete="off"
+            />
+          )}
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="radio"
+              name="mode"
+              checked={overwrite}
+              onChange={() => {
+                setOverwrite(true);
+              }}
+              className="mt-1 size-4"
+            />
+            <span>
+              <span className="font-medium">Restore over {database.name}</span>
+              <span className="block text-status-failed">
+                Replaces everything in it now. A copy is taken first, and the apps using it stop
+                while the data goes back.
+              </span>
+            </span>
+          </label>
+          {overwrite && (
+            <label className="grid gap-1.5 text-sm">
+              <span>
+                Type <strong className="font-mono">{database.name}</strong> to confirm
+              </span>
+              <input
+                value={confirmName}
+                onChange={(event) => {
+                  setConfirmName(event.target.value);
+                }}
+                autoComplete="off"
+                className="h-10 rounded-md border border-border bg-surface-raised px-3"
+              />
+            </label>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setRestoring(null);
+                setOverwrite(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant={overwrite ? 'danger' : 'primary'}
+              disabled={overwrite && confirmName.trim() !== database.name}
+            >
+              {overwrite ? 'Replace the data' : 'Restore to a new database'}
+            </Button>
           </div>
         </form>
       </Dialog>

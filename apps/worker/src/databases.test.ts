@@ -5,6 +5,9 @@ import {
   auditLog,
   backups,
   claimBackups,
+  claimRestores,
+  finishRestore,
+  restores,
   databaseLinks,
   databases,
   finishBackup,
@@ -82,6 +85,7 @@ async function run(operation: OperationName, args: Record<string, unknown>) {
 /** A stand-in agent: reports every replica ready, and takes backups. */
 let agentTimer: NodeJS.Timeout;
 /** What the stand-in agent reports about the next backup it is asked for. */
+let restoreWorks = true;
 let backupOutcome = {
   ok: true,
   sizeBytes: 4096,
@@ -89,6 +93,18 @@ let backupOutcome = {
   error: undefined as string | undefined,
 };
 async function agentTick() {
+  for (const claimed of await claimRestores(t.db, serverId, new Date())) {
+    await finishRestore(
+      t.db,
+      {
+        restoreId: claimed.id,
+        ok: restoreWorks,
+        ...(restoreWorks ? {} : { error: 'the restore failed (exit 1); nothing was changed' }),
+        log: 'pg_restore: connecting to database',
+      },
+      new Date(),
+    );
+  }
   for (const claimed of await claimBackups(t.db, serverId, new Date())) {
     await finishBackup(
       t.db,
@@ -131,8 +147,12 @@ async function agentTick() {
     });
 }
 
-async function theDatabase() {
-  const [row] = await t.db.select().from(databases).where(isNull(databases.deletedAt));
+/** The database this test file works with, by the name it was made under. */
+async function theDatabase(name = 'blog-db') {
+  const [row] = await t.db
+    .select()
+    .from(databases)
+    .where(and(eq(databases.name, name), isNull(databases.deletedAt)));
   return row;
 }
 
@@ -302,6 +322,93 @@ describe('managed databases', () => {
     await run('database.create', { serverId, name: 'blog-db', engine: 'postgres' });
   });
 
+  it('puts a backup back into a new database, touching nothing that is live', async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    const { planId } = await run('database.backup', { databaseId });
+    const [backup] = await t.db
+      .select()
+      .from(backups)
+      .where(and(eq(backups.databaseId, databaseId), eq(backups.status, 'done')));
+    expect(planId).toBeTruthy();
+
+    const restored = await run('database.restore', {
+      databaseId,
+      backupId: backup?.id ?? '',
+      mode: 'new',
+      newName: 'blog-db-copy',
+    });
+    expect(restored.outcome).toBe('applied');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, restored.planId));
+    // Restoring beside what is live is not a destructive act, and says so.
+    expect(plan?.tier).toBe('sensitive');
+    expect(plan?.blastRadius.dataAtRisk).toEqual([]);
+
+    const made = await t.db
+      .select()
+      .from(databases)
+      .where(and(eq(databases.name, 'blog-db-copy'), isNull(databases.deletedAt)));
+    expect(made).toHaveLength(1);
+    expect(made[0]).toMatchObject({ engine: row?.engine, version: row?.version });
+    // The original is untouched, and the restore is recorded against the new one.
+    const [record] = await t.db.select().from(restores);
+    expect(record).toMatchObject({ mode: 'new', status: 'done', databaseId: made[0]?.id });
+  });
+
+  it('stops the apps before replacing live data, and starts them again even when it fails', async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    await run('database.link', { projectId, databaseId });
+    const [backup] = await t.db
+      .select()
+      .from(backups)
+      .where(and(eq(backups.databaseId, databaseId), eq(backups.status, 'done')));
+
+    restoreWorks = false;
+    const failed = await run('database.restore', {
+      databaseId,
+      backupId: backup?.id ?? '',
+      mode: 'in_place',
+    });
+    expect(failed.outcome).toBe('failed');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, failed.planId));
+    expect(plan?.tier).toBe('destructive');
+    expect(plan?.error?.message).toContain('nothing was changed');
+    // Whatever happened, the app is running again — never left stopped in silence.
+    const [app] = await t.db.select().from(projects).where(eq(projects.id, projectId));
+    expect(app?.running).toBe(true);
+    // And a copy of what was about to be replaced was taken first.
+    const taken = await t.db.select().from(backups).where(eq(backups.reason, 'pre_destructive'));
+    expect(taken.length).toBeGreaterThan(0);
+    restoreWorks = true;
+    await run('database.unlink', { projectId, databaseId });
+  });
+
+  it('refuses to restore a backup nobody checked', async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    const [unchecked] = await t.db
+      .insert(backups)
+      .values({
+        id: newId('backup'),
+        orgId,
+        databaseId,
+        serverId,
+        fileName: 'never-checked.dump',
+        status: 'failed',
+        verified: false,
+      })
+      .returning();
+    const res = await run('database.restore', {
+      databaseId,
+      backupId: unchecked?.id ?? '',
+      mode: 'new',
+    });
+    expect(res.outcome).toBe('failed');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, res.planId));
+    expect(plan?.error?.message).toContain('never checked');
+  });
+
   it('refuses to pretend it backed up a database that is off', async () => {
     const row = await theDatabase();
     const databaseId = row?.id ?? '';
@@ -331,7 +438,7 @@ describe('managed databases', () => {
     expect(await theDatabase()).toBeUndefined();
     // Gone from what the server should run — and its files are still on disk.
     const desired = await desiredStateFor(t.db, serverId, { secretsKey: SECRETS });
-    expect(desired.databases).toHaveLength(0);
+    expect(desired.databases.map((d) => d.databaseId)).not.toContain(databaseId);
     // What it told the person is in the audit entry for the apply.
     const [entry] = await t.db
       .select()
