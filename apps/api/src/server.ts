@@ -1,5 +1,6 @@
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import { anthropicModel, type ModelClient } from '@vdeploy/ai';
 import type { Database } from '@vdeploy/db';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -27,6 +28,7 @@ import { githubRoutes } from './routes/github.js';
 import { AgentBinaries } from './agents/installer.js';
 import { agentInstallRoutes } from './routes/agent-install.js';
 import { uploadRoutes } from './routes/uploads.js';
+import { aiRoutes } from './routes/ai.js';
 
 /** Log fields that may carry credentials or secret values; never written out. */
 export const REDACTED_PATHS = [
@@ -54,6 +56,8 @@ export interface ServerDeps {
   probe?: PortProbe;
   /** The GitHub App; from the environment when unset. Tests point it at a stand-in. */
   github?: GithubDeps;
+  /** The assistant's model, when no API key is configured. Tests script it. */
+  model?: ModelClient;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -121,6 +125,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.addHook('onClose', () => gateway.stop());
   await app.register(agentRoutes(gateway, gatewayDeps));
 
+  const model = config.ANTHROPIC_API_KEY
+    ? anthropicModel({
+        apiKey: config.ANTHROPIC_API_KEY,
+        model: config.AI_MODEL,
+        ...(config.ANTHROPIC_BASE_URL ? { baseURL: config.ANTHROPIC_BASE_URL } : {}),
+      })
+    : deps.model;
+
   const kernel = {
     db,
     auth,
@@ -133,11 +145,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     logs: gateway,
     probe,
     ...(github ? { github } : {}),
+    ...(model ? { model } : {}),
   };
   await app.register(operationRoutes(kernel));
   await app.register(logRoutes(kernel));
   await app.register(uploadRoutes(kernel));
   await app.register(githubRoutes(kernel));
+  await app.register(aiRoutes(kernel));
   await app.register(
     agentInstallRoutes({
       publicUrl: config.PUBLIC_URL,

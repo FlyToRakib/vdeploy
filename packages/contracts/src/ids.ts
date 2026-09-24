@@ -25,6 +25,7 @@ export const ID_PREFIXES = {
   apiKey: 'key',
   aiSession: 'ais',
   changeProposal: 'chg',
+  aiMessage: 'aim',
   invitation: 'inv',
   enrollment: 'enr',
   upload: 'upl',

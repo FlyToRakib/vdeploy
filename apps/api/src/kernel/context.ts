@@ -1,4 +1,4 @@
-import type { HumanActor } from '@vdeploy/ai';
+import type { Actor, ModelClient } from '@vdeploy/ai';
 import type { GithubAppConfig, GithubOAuthConfig } from '@vdeploy/core';
 import type { Database } from '@vdeploy/db';
 import type { Auth } from '../auth/auth.js';
@@ -28,6 +28,8 @@ export interface KernelDeps {
   probe: PortProbe;
   /** The VDeploy GitHub App, when this installation has one (M2 2.15). */
   github?: GithubDeps;
+  /** The model behind the assistant; without one the assistant is off (§26).*/
+  model?: ModelClient;
 }
 
 export interface GithubDeps {
@@ -41,7 +43,7 @@ export interface GithubDeps {
 /** What an operation handler receives once the gate has let the request through. */
 export interface HandlerContext {
   deps: KernelDeps;
-  actor: HumanActor;
+  actor: Actor;
   args: Record<string, unknown>;
 }
 

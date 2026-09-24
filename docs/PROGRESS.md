@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M3 — AI (M1 complete 2026-09-19, M2 complete 2026-09-21)
-**Task:** 3.3 — AI sessions, change proposals and the turn loop
+**Task:** 3.4 — the assistant in the dashboard: proposals, grants, kill switch
 **Status:** in progress
-**Updated:** 2026-09-21 06:30 UTC
+**Updated:** 2026-09-24 08:20 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -90,10 +90,11 @@ verified unchanged before, after, and after testbed teardown.
 - [x] 2.17d M2 exit on the VPS testbed: the full e2e (30 checks) and the non-coder walkthrough, both against the testbed on the test VPS, with the production baseline verified unchanged before and after each run — 13 containers, host nginx, every service and both web ports untouched
 - [x] 3.1 the context engine (§11): bounded slots — what the organization has, the project in focus (spec, last three releases, the copies running, what the deterministic rules already found), and diagnostics only when asked for — each cut to its budget and saying so rather than truncating silently; the app's own output is framed as untrusted and taints the session; credentials never reach the model (values whose name or shape says credential are hidden, an address keeps its host but loses its password), and the spec is redacted without touching the stored one. The stable prefix explains the platform in plain words, what the mode allows, and how to answer; it is identical across turns so it can be cached. `gatherContext` in the db package feeds it the same facts the dashboard shows. The tool registry was already generated from the contracts in M1
 - [x] 3.2 the model adapter: one small interface (system prefix, this turn's context, the conversation, the bound tools) that anything can answer, so the platform never depends on a provider. The Anthropic adapter (bring-your-own-key, Claude Opus 5 by default, Sonnet 5 and Haiku 4.5 offered) sends the prefix marked for caching with the volatile context after it, converts tool calls and their results the way the Messages API expects, reads back the answer, the tools it wants to call, whether it refused and why, and what the turn cost (cache reads at a tenth, writes at a quarter more). A refused key, a rate limit and an outage each come back in words with whether retrying helps. A scripted model answers from a list for tests and for an installation with no provider
+- [x] 3.3 AI sessions and the turn loop (§9, §11): one conversation per person and organization, stored turn by turn, with what it read, what it cost and whether it is tainted. Each turn builds the context, sends the stable prefix plus the tools this session is allowed (RBAC ∩ grants ∩ mode), and runs every tool the model asks for through the same pipeline a click uses — so a change the AI wants is a plan, gated, hashed and audited exactly like a human's. In propose mode (and always once the session has read logs, commits or source) the plan comes back waiting for a person: that pending plan plus the model's plain words *is* the change proposal, so there is no second apply path to secure. A tool the session was not given is refused and told to the model as information, not a crash; a refusal, a rate limit or an outage ends the turn in plain words and the rest of VDeploy keeps working; the monthly spend cap is checked before each request with a pessimistic estimate, never after the bill. `ANTHROPIC_API_KEY` is optional — without it the assistant is simply off. Routes: `POST /api/v1/ai/ask`, `GET /api/v1/ai/proposals`
 
 ## Doing
 
-- [ ] 3.3 AI sessions, the turn loop through the gate, and change proposals
+- [ ] 3.4 the assistant in the dashboard: ask and propose, proposal cards a non-coder can approve, the grant matrix, the kill switch and what it has spent
 
 ## Next
 

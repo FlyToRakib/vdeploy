@@ -3,7 +3,7 @@ import {
   approvalReasons,
   checkIdentity,
   evaluate,
-  type HumanActor,
+  type Actor,
   type Target,
 } from '@vdeploy/ai';
 import {
@@ -28,8 +28,12 @@ import type { KernelDeps } from './context.js';
 import { QUERIES } from './queries.js';
 import { loadPlanContext, resolveTarget } from './target.js';
 
-export function actorRecord(actor: HumanActor): ActorRecord {
-  return { userId: actor.userId, origin: actor.origin };
+export function actorRecord(actor: Actor): ActorRecord {
+  return {
+    userId: actor.userId,
+    origin: actor.origin,
+    ...(actor.kind === 'ai' ? { aiSessionId: actor.aiSessionId, model: actor.model } : {}),
+  };
 }
 
 export async function loadGrants(deps: KernelDeps, orgId: string): Promise<AiGrants> {
@@ -64,7 +68,7 @@ function atPlanTier(op: OperationDefinition, plan: Plan): OperationDefinition {
 
 async function persistPlan(
   deps: KernelDeps,
-  actor: HumanActor,
+  actor: Actor,
   plan: Plan,
   args: Record<string, unknown>,
   reasons: string[],
@@ -93,7 +97,7 @@ async function persistPlan(
 
 async function audit(
   deps: KernelDeps,
-  actor: HumanActor,
+  actor: Actor,
   action: string,
   target: Target | null,
   outcome: 'allowed' | 'denied' | 'succeeded' | 'failed',
@@ -111,7 +115,7 @@ async function audit(
 
 async function remembered(
   deps: KernelDeps,
-  actor: HumanActor,
+  actor: Actor,
   name: string,
   key: string | undefined,
 ): Promise<OperationResponse | null> {
@@ -132,7 +136,7 @@ async function remembered(
 
 async function remember(
   deps: KernelDeps,
-  actor: HumanActor,
+  actor: Actor,
   name: string,
   key: string | undefined,
   response: OperationResponse,
@@ -155,7 +159,7 @@ async function remember(
  */
 export async function runOperation(
   deps: KernelDeps,
-  actor: HumanActor,
+  actor: Actor,
   name: string,
   request: OperationRequest,
 ): Promise<OperationResponse> {

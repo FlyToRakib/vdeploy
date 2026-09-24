@@ -1,3 +1,4 @@
+import { DEFAULT_MODEL } from '@vdeploy/ai';
 import { parseEnv } from '@vdeploy/contracts';
 import { z } from 'zod';
 
@@ -39,6 +40,10 @@ export const ApiConfig = z.object({
   GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
   GITHUB_API_URL: z.url().default('https://api.github.com'),
   GITHUB_WEB_URL: z.url().default('https://github.com'),
+  /** The key for the assistant's model (§26, bring your own key). Without it the assistant is off. */
+  ANTHROPIC_API_KEY: z.string().min(8).optional(),
+  ANTHROPIC_BASE_URL: z.url().optional(),
+  AI_MODEL: z.string().min(1).default(DEFAULT_MODEL),
   /** Where the agent binaries for the one-command installer are (vd-agent-linux-amd64, -arm64). */
   AGENT_BINARIES_DIR: z.string().default('/app/agent'),
 });

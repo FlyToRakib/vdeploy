@@ -2,6 +2,7 @@ import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { memoryMailer, type Mail } from './auth/mailer.js';
 import { ApiConfig } from './config.js';
+import type { ModelClient } from '@vdeploy/ai';
 import type { PortReach } from '@vdeploy/contracts';
 import type { GithubDeps } from './kernel/context.js';
 import { buildServer } from './server.js';
@@ -35,7 +36,7 @@ export interface TestApp {
 }
 
 export async function startTestApp(
-  options: { authRateLimit?: boolean; github?: GithubDeps } = {},
+  options: { authRateLimit?: boolean; github?: GithubDeps; model?: ModelClient } = {},
 ): Promise<TestApp> {
   const database = await startTestDatabase();
   const mailer = memoryMailer();
@@ -43,6 +44,7 @@ export async function startTestApp(
   const ports = new Map<string, PortReach>();
   const app = await buildServer({
     ...(options.github ? { github: options.github } : {}),
+    ...(options.model ? { model: options.model } : {}),
     probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
     config: testConfig(database.url),
     db: database.db,
