@@ -43,6 +43,8 @@ export interface PlanContext {
   project: ProjectState | null;
   /** The database an operation names, for the data layer (§17.3). */
   database?: DatabaseState | null;
+  /** Databases this project reads, so a deploy copies them first (§17.4). */
+  linkedDatabases?: { id: Id<'database'>; name: string }[];
   /** The release a rollback returns to, loaded by the caller. */
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   /** The server the project runs (or will run) on, for the governor (§14). */
@@ -163,6 +165,22 @@ function specChange(
     },
     atRisk,
   );
+}
+
+/**
+ * A bad migration is the most likely way to lose data, so a project with a
+ * database is copied before it deploys (§17.4). The backup is checked, and
+ * if it cannot be taken the deploy does not happen.
+ */
+function withPreDeployBackup(steps: PlanStep[], context: PlanContext): PlanStep[] {
+  const databases = context.linkedDatabases ?? [];
+  if (databases.length === 0 || !steps.some((step) => step.kind === 'deploy')) return steps;
+  const before: PlanStep[] = databases.map((database) => ({
+    kind: 'take_backup',
+    databaseId: database.id,
+  }));
+  const at = steps.findIndex((step) => step.kind === 'deploy');
+  return [...steps.slice(0, at), ...before, ...steps.slice(at)];
 }
 
 function simple(
@@ -366,7 +384,11 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     return {
       specHash: null,
       changes: [{ path: 'database', before: database.name, after: null }],
-      steps: [{ kind: 'delete_database', databaseId: args.databaseId, keepData: args.keepData }],
+      steps: [
+        // A last copy before it goes: §17.4 takes a snapshot before every Tier 3 step.
+        { kind: 'take_backup', databaseId: args.databaseId },
+        { kind: 'delete_database', databaseId: args.databaseId, keepData: args.keepData },
+      ],
       tier: 'destructive',
       blastRadius: {
         projects: database.linkedProjects,
@@ -517,7 +539,9 @@ export function buildPlan(name: OperationName, input: unknown, context: PlanCont
     });
   }
   const args = parsed.data as OperationArgs<OperationName>;
-  const draft = planner(args, context);
+  const drafted = planner(args, context);
+  // Every path that deploys copies the data first: one place, not each planner.
+  const draft = { ...drafted, steps: withPreDeployBackup(drafted.steps, context) };
   const tier = maxTier(operation.tier, draft.tier);
   const identity = {
     operation: name,

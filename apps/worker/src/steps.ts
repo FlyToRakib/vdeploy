@@ -586,7 +586,16 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
     case 'create_database':
       return createDatabaseStep(deps, state);
     case 'take_backup':
-      return takeBackupStep(deps, state, step.databaseId);
+      return takeBackupStep(
+        deps,
+        state,
+        step.databaseId,
+        state.operation === 'database.delete'
+          ? 'pre_destructive'
+          : state.operation === 'database.backup'
+            ? 'manual'
+            : 'pre_deploy',
+      );
     case 'delete_database':
       return deleteDatabaseStep(deps, state, step.databaseId, step.keepData);
     case 'link_database':

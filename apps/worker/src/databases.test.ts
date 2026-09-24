@@ -277,6 +277,31 @@ describe('managed databases', () => {
     backupOutcome = { ok: true, sizeBytes: 4096, verified: true, error: undefined };
   });
 
+  it('copies the data before a deploy that could ruin it, and before deleting it', async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    await run('database.link', { projectId, databaseId });
+    await t.db.delete(backups);
+
+    // A deploy of an app that reads this database takes a copy first (§17.4).
+    const { planId } = await run('project.redeploy', { projectId });
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, planId));
+    expect(plan?.status).toBe('applied');
+    const [taken] = await t.db.select().from(backups);
+    expect(taken).toMatchObject({ reason: 'pre_deploy', status: 'done', verified: true });
+    const steps = plan?.plan.steps.map((step) => step.kind) ?? [];
+    expect(steps.indexOf('take_backup')).toBeLessThan(steps.indexOf('deploy'));
+
+    // And a last copy before the database itself is deleted.
+    await t.db.delete(backups);
+    const deleted = await run('database.delete', { databaseId, keepData: true });
+    expect(deleted.outcome).toBe('applied');
+    const [last] = await t.db.select().from(backups);
+    expect(last?.reason).toBe('pre_destructive');
+    // Re-made for the tests that follow.
+    await run('database.create', { serverId, name: 'blog-db', engine: 'postgres' });
+  });
+
   it('refuses to pretend it backed up a database that is off', async () => {
     const row = await theDatabase();
     const databaseId = row?.id ?? '';

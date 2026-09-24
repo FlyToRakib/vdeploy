@@ -1,4 +1,5 @@
 import type { DatabaseEngine } from '@vdeploy/contracts';
+import { sql } from 'drizzle-orm';
 import {
   integer,
   pgTable,
@@ -50,7 +51,10 @@ export const databases = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex('databases_server_name').on(t.serverId, t.name),
+    // Deleting a database frees its name, as deleting a project frees its own.
+    uniqueIndex('databases_server_name_live')
+      .on(t.serverId, t.name)
+      .where(sql`${t.deletedAt} is null`),
     index('databases_org').on(t.orgId),
   ],
 );

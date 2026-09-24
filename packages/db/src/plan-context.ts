@@ -3,7 +3,14 @@ import { footprint, NO_FOOTPRINT, type DatabaseState, type ServerBudget } from '
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
 import { getDatabase, linksOf } from './databases.js';
-import { observedState, projects, releases, servers } from './schema/index.js';
+import {
+  databaseLinks,
+  databases,
+  observedState,
+  projects,
+  releases,
+  servers,
+} from './schema/index.js';
 
 export interface ProjectSnapshot {
   id: Id<'project'>;
@@ -15,6 +22,7 @@ export interface ProjectSnapshot {
 export interface PlanWorld {
   project: ProjectSnapshot | null;
   database?: DatabaseState | null;
+  linkedDatabases?: { id: Id<'database'>; name: string }[];
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   server?: ServerBudget | null;
   unsaved?: string[];
@@ -106,6 +114,20 @@ async function requestedDatabase(
   };
 }
 
+/** The databases an app is linked to, by id and name. */
+async function linkedDatabases(
+  db: Database,
+  projectId: string,
+): Promise<{ id: Id<'database'>; name: string }[]> {
+  const rows = await db
+    .select({ id: databases.id, name: databases.name })
+    .from(databaseLinks)
+    .innerJoin(databases, eq(databases.id, databaseLinks.databaseId))
+    .where(and(eq(databaseLinks.projectId, projectId), isNull(databases.deletedAt)));
+  const seen = new Map(rows.map((row) => [row.id, row.name]));
+  return [...seen].map(([id, name]) => ({ id: id as Id<'database'>, name }));
+}
+
 export async function loadPlanWorld(
   db: Database,
   projectId: string | null,
@@ -124,6 +146,8 @@ export async function loadPlanWorld(
   if (!row) return { project: null };
   const world: PlanWorld = {
     ...(database ? { database: database.state } : {}),
+    // What this app reads its data from: a deploy copies it first (§17.4).
+    linkedDatabases: await linkedDatabases(db, projectId),
     project: {
       id: row.id as Id<'project'>,
       spec: readSpec(row.spec),

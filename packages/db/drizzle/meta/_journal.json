@@ -127,6 +127,13 @@
       "when": 1790228608454,
       "tag": "0017_backups",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790229303353,
+      "tag": "0018_database_names_freed",
+      "breakpoints": true
     }
   ]
 }
