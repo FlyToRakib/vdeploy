@@ -21,7 +21,7 @@ import (
 var desiredStateSchema []byte
 
 // Protocol is the desired-state protocol version this agent speaks.
-const Protocol = 1
+const Protocol = 2
 
 // DesiredState is everything one server should be running.
 type DesiredState struct {
@@ -29,6 +29,36 @@ type DesiredState struct {
 	ServerID   string           `json:"serverId"`
 	Generation int64            `json:"generation"`
 	Projects   []DesiredProject `json:"projects"`
+	// Databases are the managed databases this server runs (§17.3). A
+	// database is not a project: it is never deployed blue/green, because two
+	// engines on one volume is how data is lost.
+	Databases []DesiredDatabase `json:"databases"`
+}
+
+// DesiredDatabase is one managed database as the agent must run it.
+type DesiredDatabase struct {
+	DatabaseID string `json:"databaseId"`
+	Name       string `json:"name"`
+	Engine     string `json:"engine"`
+	Image      string `json:"image"`
+	Port       int    `json:"port"`
+	DataPath   string `json:"dataPath"`
+	Env        []struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	} `json:"env"`
+	// Credentials are environment values sealed to this agent's key.
+	Credentials []struct {
+		Key     string `json:"key"`
+		Version int    `json:"version"`
+		Sealed  string `json:"sealed"`
+	} `json:"credentials"`
+	MemoryBytes int64   `json:"memoryBytes"`
+	CPU         float64 `json:"cpu"`
+	Running     bool    `json:"running"`
+	Revision    int     `json:"revision"`
+	// LinkedProjects may reach it: their networks are joined to its own.
+	LinkedProjects []string `json:"linkedProjects"`
 }
 
 // DesiredProject is one project as the agent must converge it: a whole release.

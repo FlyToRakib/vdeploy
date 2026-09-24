@@ -1,5 +1,7 @@
 import { AGENT_PROTOCOL, DesiredState, readSpec } from '@vdeploy/contracts';
-import { deliveryContext, sealTo } from '@vdeploy/core';
+import { memoryBytes } from '@vdeploy/contracts';
+import { deliveryContext, engineProfile, sealTo } from '@vdeploy/core';
+import { databasePassword, databasesOn, linksOf } from './databases.js';
 import type { Database } from './client.js';
 import { certificateHosts, verifiedHosts } from './domains.js';
 import { readSecret } from './secrets.js';
@@ -51,6 +53,48 @@ export async function desiredStateFor(
     secrets.set(project.id, await sealed(project.id, release.secretVersions));
   }
 
+  /**
+   * The server's managed databases (§17.3). Each carries its credentials
+   * sealed to this agent, exactly as a project's secrets are: the password
+   * is in no frame, no log and no spec.
+   */
+  const running = await databasesOn(db, serverId);
+  const databases = [];
+  for (const row of running) {
+    const profile = engineProfile(row.engine);
+    const links = await linksOf(db, row.id);
+    const boxKey = server?.agentBoxKey;
+    const credentials =
+      boxKey && options.secretsKey
+        ? [
+            {
+              key: profile.passwordKey,
+              version: row.passwordVersion,
+              sealed: sealTo(
+                boxKey,
+                await databasePassword(db, options.secretsKey, row),
+                deliveryContext(serverId, row.id, profile.passwordKey, row.passwordVersion),
+              ),
+            },
+          ]
+        : [];
+    databases.push({
+      databaseId: row.id,
+      name: row.name,
+      engine: row.engine,
+      image: row.image,
+      port: row.port,
+      dataPath: profile.dataPath,
+      env: profile.env({ dbName: row.dbName, user: row.user }),
+      credentials,
+      memoryBytes: memoryBytes(row.memoryLimit),
+      cpu: 1,
+      running: row.running,
+      revision: row.revision,
+      linkedProjects: [...new Set(links.map((link) => link.projectId))],
+    });
+  }
+
   // Parsing here means a malformed state can never be sent to an agent.
   return DesiredState.parse({
     protocol: AGENT_PROTOCOL,
@@ -75,5 +119,6 @@ export async function desiredStateFor(
         secrets: secrets.get(project.id) ?? [],
       };
     }),
+    databases,
   });
 }

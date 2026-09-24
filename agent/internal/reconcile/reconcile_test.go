@@ -28,6 +28,7 @@ type fakeEngine struct {
 	env          map[string][]string // by container name, as created
 	exitCodes    map[string]int      // by id, once a container has exited
 	networkOwner map[string]string   // network name → project
+	attached     map[string][]string // container id → networks joined beyond its own
 	outputs      map[string]string
 	failCreate   string // container name whose create fails
 	nextID       int

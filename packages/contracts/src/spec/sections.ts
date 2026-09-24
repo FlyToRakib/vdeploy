@@ -23,7 +23,9 @@ export const ContainerPath = z
   .regex(/^\/[^\0]*$/, 'must be an absolute path')
   .refine((p) => !p.split('/').includes('..'), 'must not contain ..');
 
-const EnvKey = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,254}$/, 'must be a valid variable name');
+export const EnvKey = z
+  .string()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]{0,254}$/, 'must be a valid variable name');
 
 const Cidr = z.union([z.cidrv4(), z.cidrv6(), z.ipv4(), z.ipv6()]);
 

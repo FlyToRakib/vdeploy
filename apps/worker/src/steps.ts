@@ -41,6 +41,13 @@ import {
 } from '@vdeploy/db';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { bumpGeneration, waitForConvergence, type Expectation } from './converge.js';
+import {
+  createDatabaseStep,
+  deleteDatabaseStep,
+  linkDatabaseStep,
+  setDatabaseRunning,
+  unlinkDatabaseStep,
+} from './database-steps.js';
 import type { RegistryAccess } from './registry.js';
 import { pinImage } from './registry.js';
 
@@ -575,5 +582,15 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return deleteProject(deps, state, step.keepData);
     case 'rotate_secret':
       return rotate(deps, state, step.secretId);
+    case 'create_database':
+      return createDatabaseStep(deps, state);
+    case 'delete_database':
+      return deleteDatabaseStep(deps, state, step.databaseId, step.keepData);
+    case 'link_database':
+      return linkDatabaseStep(deps, state, step.databaseId);
+    case 'unlink_database':
+      return unlinkDatabaseStep(deps, state, step.databaseId);
+    case 'database_running':
+      return setDatabaseRunning(deps, state, step.databaseId, step.running);
   }
 }

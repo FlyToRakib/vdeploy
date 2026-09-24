@@ -3,6 +3,7 @@ import { idSchema } from '../ids.js';
 import { ApplicationSpec } from '../spec/application.js';
 import {
   Deploy,
+  EnvKey,
   Health,
   Network,
   ResourceName,
@@ -10,7 +11,9 @@ import {
   Scaling,
   Schedule,
 } from '../spec/sections.js';
+import { Memory } from '../spec/quantities.js';
 import { AiGrants } from '../grants.js';
+import { DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
@@ -22,7 +25,6 @@ const databaseId = idSchema('database');
 const P = { projectId };
 const S = { serverId };
 const obj = z.strictObject;
-const DatabaseEngine = z.enum(['postgres', 'mysql', 'mariadb', 'redis', 'mongodb']);
 const CronEntry = Schedule.shape.crons.unwrap().element;
 
 /**
@@ -113,6 +115,20 @@ export const OPERATIONS = [
   query('server.resources', 'server', 'metrics', 'Show server CPU, memory and disk usage', obj(S)),
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
+  query(
+    'database.list',
+    'org',
+    'config',
+    'List the managed databases: engine, version, size and which apps use each',
+    obj({}),
+  ),
+  query(
+    'database.get',
+    'database',
+    'config',
+    'Show one database, the apps linked to it, and how to reach it',
+    obj({ databaseId }),
+  ),
   query(
     'ai.settings',
     'org',
@@ -397,8 +413,38 @@ export const OPERATIONS = [
       ...S,
       name: ResourceName,
       engine: DatabaseEngine,
-      version: z.string().regex(/^\d+(\.\d+)*$/),
+      version: DatabaseVersion.optional(),
+      size: Memory.optional(),
+      memoryLimit: Memory.optional(),
     }),
+  ),
+  operation(
+    'database.link',
+    'sensitive',
+    'project',
+    'Give an app its database: the connection string arrives as one of its settings',
+    obj({ ...P, databaseId, envKey: EnvKey.optional() }),
+  ),
+  operation(
+    'database.unlink',
+    'sensitive',
+    'project',
+    'Take a database away from an app; the data stays',
+    obj({ ...P, databaseId }),
+  ),
+  operation(
+    'database.stop',
+    'sensitive',
+    'database',
+    'Stop a database; apps using it lose their data connection until it starts again',
+    obj({ databaseId }),
+  ),
+  operation(
+    'database.start',
+    'sensitive',
+    'database',
+    'Start a stopped database',
+    obj({ databaseId }),
   ),
   operation(
     'cron.create',
@@ -496,8 +542,8 @@ export const OPERATIONS = [
     'database.delete',
     'destructive',
     'database',
-    'Delete a database after taking a backup',
-    obj({ databaseId }),
+    'Delete a database and everything in it',
+    obj({ databaseId, keepData: z.boolean().default(false) }),
   ),
   operation(
     'secret.generate',

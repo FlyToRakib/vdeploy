@@ -1,5 +1,5 @@
 {
-  "protocol": 1,
+  "protocol": 2,
   "serverId": "srv_01J9Z3Q8S7M2K4X6V1B5N0C9D8",
   "generation": 7,
   "projects": [
@@ -116,5 +116,6 @@
       "hosts": { "instant": "blog.8-8-4-4.sslip.io", "redirects": [], "verified": ["blog.8-8-4-4.sslip.io"] },
       "secrets": []
     }
-  ]
+  ],
+  "databases": []
 }

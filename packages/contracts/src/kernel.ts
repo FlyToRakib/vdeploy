@@ -55,6 +55,20 @@ export const PlanStep = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('snapshot_volumes') }),
   z.strictObject({ kind: z.literal('delete_project'), keepData: z.boolean() }),
   z.strictObject({ kind: z.literal('rotate_secret'), secretId: idSchema('secret') }),
+  // The data layer (§17.3): a database is created, linked and deleted on its own.
+  z.strictObject({ kind: z.literal('create_database') }),
+  z.strictObject({
+    kind: z.literal('delete_database'),
+    databaseId: idSchema('database'),
+    keepData: z.boolean(),
+  }),
+  z.strictObject({ kind: z.literal('link_database'), databaseId: idSchema('database') }),
+  z.strictObject({ kind: z.literal('unlink_database'), databaseId: idSchema('database') }),
+  z.strictObject({
+    kind: z.literal('database_running'),
+    databaseId: idSchema('database'),
+    running: z.boolean(),
+  }),
 ]);
 export type PlanStep = z.infer<typeof PlanStep>;
 

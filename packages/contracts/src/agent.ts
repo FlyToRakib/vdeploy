@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
 import { BuildResult } from './builds.js';
+import { DesiredDatabase, ObservedDatabase } from './databases.js';
 import { ReplicaEvidence } from './diagnosis.js';
 import { LogLine } from './logs.js';
 import { PinnedImage } from './kernel.js';
@@ -8,7 +9,7 @@ import { ApplicationSpec } from './spec/application.js';
 import { Hostname } from './spec/sections.js';
 
 /** Bumped on any breaking change to what the agent receives (§25 version negotiation). */
-export const AGENT_PROTOCOL = 1;
+export const AGENT_PROTOCOL = 2;
 
 /** One project as the agent must converge it: a whole release, never a container spec. */
 export const DesiredProject = z.strictObject({
@@ -63,6 +64,8 @@ export const DesiredState = z.strictObject({
   serverId: idSchema('server'),
   generation: z.number().int().min(0),
   projects: z.array(DesiredProject).max(200),
+  /** The managed databases this server runs (§17.3); absent for older agents. */
+  databases: z.array(DesiredDatabase).max(64).default([]),
 });
 export type DesiredState = z.infer<typeof DesiredState>;
 
@@ -111,6 +114,8 @@ export const ObservedReport = z.strictObject({
     .max(200)
     .nullable(),
   events: z.array(ReconcileEvent).max(1000).nullable(),
+  /** What the agent saw of each managed database. */
+  databases: z.array(ObservedDatabase).max(64).optional(),
   /** A replica is still starting or an old release draining. */
   settling: z.boolean().optional(),
 });

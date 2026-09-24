@@ -1,0 +1,80 @@
+import { z } from 'zod';
+import { idSchema } from './ids.js';
+import { Memory } from './spec/quantities.js';
+import { ResourceName } from './spec/sections.js';
+
+/** The engines VDeploy manages (§17.3). */
+export const DatabaseEngine = z.enum(['postgres', 'mysql', 'mariadb', 'redis', 'mongodb']);
+export type DatabaseEngine = z.infer<typeof DatabaseEngine>;
+
+export const DatabaseVersion = z
+  .string()
+  .regex(/^\d+(\.\d+)*$/, 'must be a version like 16 or 8.4');
+
+/** What a database is, to everyone outside the data layer. */
+export const DatabaseView = z.strictObject({
+  id: idSchema('database'),
+  serverId: idSchema('server'),
+  name: ResourceName,
+  engine: DatabaseEngine,
+  version: DatabaseVersion,
+  /** The image the agent runs, pinned by the control plane. */
+  image: z.string().max(256),
+  status: z.enum(['creating', 'running', 'stopped', 'failed', 'deleting']),
+  /** Host and port on the server's internal network — never reachable from outside. */
+  host: z.string().max(128),
+  port: z.number().int().min(1).max(65535),
+  user: z.string().max(64),
+  /** The logical database inside the engine; Redis has none. */
+  dbName: z.string().max(64).nullable(),
+  memoryLimit: Memory,
+  diskSize: Memory,
+  /** Projects this database is linked to, and the variable each one gets. */
+  links: z.array(z.strictObject({ projectId: idSchema('project'), envKey: z.string().max(64) })),
+  createdAt: z.iso.datetime(),
+});
+export type DatabaseView = z.infer<typeof DatabaseView>;
+
+/**
+ * One managed database as the agent must run it (§25). It is not a project:
+ * a database is never deployed blue/green — two engines on one volume is how
+ * data is lost — so it converges in place, alone, on its own network.
+ */
+export const DesiredDatabase = z.strictObject({
+  databaseId: idSchema('database'),
+  name: ResourceName,
+  engine: DatabaseEngine,
+  image: z.string().max(256),
+  port: z.number().int().min(1).max(65535),
+  /** Where the engine keeps its files inside the container. */
+  dataPath: z.string().max(256),
+  /** Plain environment the engine needs; never a credential. */
+  env: z.array(z.strictObject({ key: z.string().max(64), value: z.string().max(4096) })).max(32),
+  /** The credential environment, sealed to this agent (§22). */
+  credentials: z
+    .array(
+      z.strictObject({
+        key: z.string().max(64),
+        version: z.number().int().positive(),
+        sealed: z.string().max(50_000),
+      }),
+    )
+    .max(8),
+  memoryBytes: z.number().int().positive(),
+  cpu: z.number().min(0.05).max(64),
+  running: z.boolean(),
+  /** Bumped to replace the container without changing anything else. */
+  revision: z.number().int().min(0),
+  /** Projects allowed to reach it: their networks are joined to its own. */
+  linkedProjects: z.array(idSchema('project')).max(64),
+});
+export type DesiredDatabase = z.infer<typeof DesiredDatabase>;
+
+/** What the agent saw of one database. */
+export const ObservedDatabase = z.strictObject({
+  databaseId: z.string().max(64),
+  container: z.string().max(128).nullable(),
+  state: z.string().max(32),
+  error: z.string().max(4096).optional(),
+});
+export type ObservedDatabase = z.infer<typeof ObservedDatabase>;

@@ -1,7 +1,8 @@
 import { readSpec, type ApplicationSpec, type Id } from '@vdeploy/contracts';
-import { footprint, NO_FOOTPRINT, type ServerBudget } from '@vdeploy/core';
+import { footprint, NO_FOOTPRINT, type DatabaseState, type ServerBudget } from '@vdeploy/core';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
+import { getDatabase, linksOf } from './databases.js';
 import { observedState, projects, releases, servers } from './schema/index.js';
 
 export interface ProjectSnapshot {
@@ -13,6 +14,7 @@ export interface ProjectSnapshot {
 
 export interface PlanWorld {
   project: ProjectSnapshot | null;
+  database?: DatabaseState | null;
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   server?: ServerBudget | null;
   unsaved?: string[];
@@ -84,18 +86,44 @@ function requestedServer(args: Record<string, unknown>): string | null {
  * world has moved — or that no longer fits its server — is caught before
  * anything runs.
  */
+/** The database an operation names, with the apps that would feel it. */
+async function requestedDatabase(
+  db: Database,
+  args: Record<string, unknown>,
+): Promise<{ serverId: string; state: DatabaseState } | null> {
+  if (typeof args.databaseId !== 'string') return null;
+  const row = await getDatabase(db, args.databaseId);
+  if (!row) return null;
+  const links = await linksOf(db, row.id);
+  return {
+    serverId: row.serverId,
+    state: {
+      id: row.id as Id<'database'>,
+      name: row.name,
+      engine: row.engine,
+      linkedProjects: new Set(links.map((link) => link.projectId)).size,
+    },
+  };
+}
+
 export async function loadPlanWorld(
   db: Database,
   projectId: string | null,
   args: Record<string, unknown>,
 ): Promise<PlanWorld> {
+  const database = await requestedDatabase(db, args);
   if (projectId === null) {
-    const serverId = requestedServer(args);
-    return { project: null, server: serverId ? await serverBudget(db, serverId, null) : null };
+    const serverId = requestedServer(args) ?? database?.serverId;
+    return {
+      project: null,
+      server: serverId ? await serverBudget(db, serverId, null) : null,
+      ...(database ? { database: database.state } : {}),
+    };
   }
   const [row] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!row) return { project: null };
   const world: PlanWorld = {
+    ...(database ? { database: database.state } : {}),
     project: {
       id: row.id as Id<'project'>,
       spec: readSpec(row.spec),

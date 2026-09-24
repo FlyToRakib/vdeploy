@@ -7,7 +7,7 @@ import {
   type OperationDefinition,
 } from '@vdeploy/contracts';
 import type { PlanContext } from '@vdeploy/core';
-import { loadPlanWorld, projects, servers, type Database } from '@vdeploy/db';
+import { getDatabase, loadPlanWorld, projects, servers, type Database } from '@vdeploy/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
 const NOT_FOUND = () => new VDeployError('not_found', 'Resource not found');
@@ -69,7 +69,15 @@ export async function resolveTarget(
       serverId: row.id as Id<'server'>,
     };
   }
-  throw NOT_FOUND(); // databases arrive with the data layer (M4)
+  const row = await getDatabase(db, id);
+  if (!row) throw NOT_FOUND();
+  return {
+    ...base,
+    kind: 'database',
+    id: row.id,
+    orgId: row.orgId as Id<'organization'>,
+    serverId: row.serverId as Id<'server'>,
+  };
 }
 
 /** What the planner needs to know about the world, read at the moment of planning. */

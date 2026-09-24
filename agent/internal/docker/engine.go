@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 )
@@ -242,4 +244,46 @@ func (c *Client) Stop(ctx context.Context, id string, timeoutSeconds int) error 
 // Remove deletes a stopped container. Its named volumes are kept.
 func (c *Client) Remove(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/containers/"+url.PathEscape(id), nil, nil, nil)
+}
+
+// ContainerNetworks lists the networks a container is attached to.
+func (c *Client) ContainerNetworks(ctx context.Context, id string) ([]string, error) {
+	var out struct {
+		NetworkSettings struct {
+			Networks map[string]struct{} `json:"Networks"`
+		} `json:"NetworkSettings"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(id)+"/json", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(out.NetworkSettings.Networks))
+	for name := range out.NetworkSettings.Networks {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
+// ConnectNetwork attaches a container to another network under an alias, so
+// apps reach a linked database by name. Attaching twice is not an error.
+func (c *Client) ConnectNetwork(ctx context.Context, id, network, alias string) error {
+	body := map[string]any{
+		"Container":      id,
+		"EndpointConfig": map[string]any{"Aliases": []string{alias}},
+	}
+	err := c.do(ctx, http.MethodPost, "/networks/"+url.PathEscape(network)+"/connect", nil, body, nil)
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	return err
+}
+
+// DisconnectNetwork detaches a container from a network it no longer needs.
+func (c *Client) DisconnectNetwork(ctx context.Context, id, network string) error {
+	body := map[string]any{"Container": id, "Force": true}
+	err := c.do(ctx, http.MethodPost, "/networks/"+url.PathEscape(network)+"/disconnect", nil, body, nil)
+	if IsNotFound(err) {
+		return nil
+	}
+	return err
 }

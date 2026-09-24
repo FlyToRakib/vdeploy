@@ -66,9 +66,10 @@ type ProjectState struct {
 
 // Report is the outcome of one reconciliation pass.
 type Report struct {
-	Generation int64          `json:"generation"`
-	Projects   []ProjectState `json:"projects"`
-	Events     []Event        `json:"events"`
+	Generation int64           `json:"generation"`
+	Projects   []ProjectState  `json:"projects"`
+	Databases  []DatabaseState `json:"databases,omitempty"`
+	Events     []Event         `json:"events"`
 	// Settling means a replica is still starting or an old one draining: pass again soon.
 	Settling bool `json:"settling"`
 }
@@ -110,6 +111,8 @@ type Reconciler struct {
 	// moving: new permanent folders (by volume) whose files still have to be copied in.
 	moving   map[string]bool
 	evidence map[string]evidenceCache
+	// databaseRevision is the revision each database container was created at.
+	databaseRevision map[string]int
 }
 
 func (r *Reconciler) now() time.Time {
@@ -128,7 +131,9 @@ type pass struct {
 	// desired and settled: which projects exist, and which have every replica ready.
 	desired map[string]spec.DesiredProject
 	settled map[string]bool
-	report  Report
+	// databaseIDs are the databases this server should run, for retiring the rest.
+	databaseIDs map[string]bool
+	report      Report
 }
 
 func (p *pass) event(kind, projectID, container, message string) {
@@ -145,6 +150,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 		r.ready = map[string]*readiness{}
 		r.draining = map[string]time.Time{}
 	}
+	if r.databaseRevision == nil {
+		r.databaseRevision = map[string]int{}
+	}
 	p := &pass{
 		r:        r,
 		existing: map[string]docker.Container{},
@@ -152,6 +160,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 		states:   map[string]string{},
 		desired:  map[string]spec.DesiredProject{},
 		settled:  map[string]bool{},
+
+		databaseIDs: map[string]bool{},
 	}
 	p.report.Generation = state.Generation
 	for _, c := range listed {
@@ -161,6 +171,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 		p.desired[project.ProjectID] = project
 		p.report.Projects = append(p.report.Projects, p.project(ctx, project))
 	}
+	p.databases(ctx, state)
 	// Traffic moves to new replicas only once all of them are ready, and old
 	// ones are retired only after that, once they have drained.
 	p.route(ctx, state)
@@ -353,6 +364,14 @@ func (p *pass) retire(ctx context.Context) {
 		if p.wanted[name] {
 			continue
 		}
+		if id := c.Labels[compose.DatabaseLabel]; id != "" {
+			if p.databaseIDs[id] {
+				continue
+			}
+			p.remove(ctx, c)
+			delete(p.r.databaseRevision, id)
+			continue
+		}
 		projectID := c.Labels[compose.ProjectLabel]
 		serving := c.State == "running" && (p.r.ready[name] == nil || p.r.ready[name].failed == "")
 		if project, ok := p.desired[projectID]; ok && project.Running && serving && !p.drained(project) {
@@ -383,6 +402,9 @@ func (p *pass) pruneNetworks(ctx context.Context) {
 		busy[c.Labels[compose.ProjectLabel]] = true
 	}
 	for name, projectID := range networks {
+		if p.databaseIDs[projectID] {
+			continue
+		}
 		if _, desired := p.desired[projectID]; desired || busy[projectID] {
 			continue
 		}

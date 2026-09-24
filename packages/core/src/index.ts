@@ -9,6 +9,7 @@ export * from './envelope.js';
 export * from './spec-edit.js';
 export * from './seal.js';
 export * from './governor.js';
+export * from './databases.js';
 export * from './diagnose.js';
 export * from './reachability.js';
 export * from './webhook.js';

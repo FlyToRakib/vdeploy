@@ -3,6 +3,8 @@ import {
   VDeployError,
   describeIssues,
   findOperation,
+  memoryBytes,
+  type DatabaseEngine,
   type BlastRadius,
   type Id,
   type OperationArgs,
@@ -14,6 +16,7 @@ import {
 } from '@vdeploy/contracts';
 import { hashOf } from './canonical.js';
 import { diffSpecs, removedVolumes } from './diff.js';
+import { defaultEnvKey, engineProfile } from './databases.js';
 import { checkFits, footprint, type ServerBudget } from './governor.js';
 import { maxTier } from './risk.js';
 import { specAfter } from './spec-edit.js';
@@ -26,9 +29,20 @@ export interface ProjectState {
   running?: boolean;
 }
 
+/** A managed database as the planner needs to see it. */
+export interface DatabaseState {
+  id: Id<'database'>;
+  name: string;
+  engine: DatabaseEngine;
+  /** How many apps would lose their data connection. */
+  linkedProjects: number;
+}
+
 export interface PlanContext {
   /** The project as it is now; null only for `project.create`. */
   project: ProjectState | null;
+  /** The database an operation names, for the data layer (§17.3). */
+  database?: DatabaseState | null;
   /** The release a rollback returns to, loaded by the caller. */
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   /** The server the project runs (or will run) on, for the governor (§14). */
@@ -77,6 +91,11 @@ type Planner<N extends OperationName> = (args: OperationArgs<N>, context: PlanCo
 function requireProject(context: PlanContext): ProjectState {
   if (!context.project) throw new VDeployError('not_found', 'Project not found');
   return context.project;
+}
+
+function requireDatabase(context: PlanContext): DatabaseState {
+  if (!context.database) throw new VDeployError('not_found', 'Database not found');
+  return context.database;
 }
 
 function hosts(...specs: (ApplicationSpec | null | undefined)[]): string[] {
@@ -316,6 +335,119 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
           ...unsavedAtRisk(context, project.spec.runtime.volumes),
         ],
       }),
+    };
+  },
+  'database.create': (args, context) => {
+    const engine = engineProfile(args.engine);
+    const memory = args.memoryLimit ?? engine.memoryLimit;
+    // A database holds capacity like anything else: the governor decides here, not later.
+    checkFits(context.server, { memoryBytes: memoryBytes(memory), cpu: 1 });
+    return {
+      specHash: null,
+      changes: [
+        { path: 'database', before: null, after: `${args.engine} ${args.version ?? 'latest'}` },
+        { path: 'database.name', before: null, after: args.name },
+        { path: 'database.reachableFrom', before: null, after: 'only the apps you link to it' },
+      ],
+      steps: [{ kind: 'create_database' }],
+      tier: 'sensitive',
+      blastRadius: {
+        projects: 0,
+        replicas: 1,
+        domains: [],
+        downtime: 'none',
+        dataAtRisk: [],
+        rollbackTo: null,
+      },
+    };
+  },
+  'database.delete': (args, context) => {
+    const database = requireDatabase(context);
+    return {
+      specHash: null,
+      changes: [{ path: 'database', before: database.name, after: null }],
+      steps: [{ kind: 'delete_database', databaseId: args.databaseId, keepData: args.keepData }],
+      tier: 'destructive',
+      blastRadius: {
+        projects: database.linkedProjects,
+        replicas: 1,
+        domains: [],
+        downtime: 'permanent',
+        dataAtRisk: args.keepData ? [] : [`everything in the ${database.name} database`],
+        rollbackTo: null,
+      },
+    };
+  },
+  'database.link': (args, context) => {
+    const project = requireProject(context);
+    const database = requireDatabase(context);
+    const envKey = args.envKey ?? defaultEnvKey(database.engine);
+    return {
+      specHash: null,
+      changes: [
+        {
+          path: `runtime.env.${envKey}`,
+          before: null,
+          after: `the address of ${database.name}, kept as a secret`,
+        },
+      ],
+      // The app gets the address as one of its own settings, then deploys with it.
+      steps: [
+        { kind: 'link_database', databaseId: args.databaseId },
+        { kind: 'create_release' },
+        { kind: 'deploy', strategy: project.spec.deploy.strategy },
+      ],
+      tier: 'sensitive',
+      blastRadius: radius(project.spec, { rollbackTo: project.currentReleaseId }),
+    };
+  },
+  'database.unlink': (args, context) => {
+    const project = requireProject(context);
+    const database = requireDatabase(context);
+    return {
+      specHash: null,
+      changes: [{ path: 'runtime.env', before: `the address of ${database.name}`, after: null }],
+      steps: [
+        { kind: 'unlink_database', databaseId: args.databaseId },
+        { kind: 'create_release' },
+        { kind: 'deploy', strategy: project.spec.deploy.strategy },
+      ],
+      tier: 'sensitive',
+      blastRadius: radius(project.spec, { rollbackTo: project.currentReleaseId }),
+    };
+  },
+  'database.stop': (args, context) => {
+    const database = requireDatabase(context);
+    return {
+      specHash: null,
+      changes: [],
+      steps: [{ kind: 'database_running', databaseId: args.databaseId, running: false }],
+      tier: 'sensitive',
+      blastRadius: {
+        projects: database.linkedProjects,
+        replicas: 1,
+        domains: [],
+        downtime: 'until_started',
+        dataAtRisk: [],
+        rollbackTo: null,
+      },
+    };
+  },
+  'database.start': (args, context) => {
+    const database = requireDatabase(context);
+    return {
+      specHash: null,
+      changes: [],
+      steps: [{ kind: 'database_running', databaseId: args.databaseId, running: true }],
+      tier: 'sensitive',
+      blastRadius: {
+        projects: database.linkedProjects,
+        replicas: 1,
+        domains: [],
+        downtime: 'none',
+        dataAtRisk: [],
+        rollbackTo: null,
+      },
     };
   },
   'release.rollback': (args, context) => {

@@ -149,7 +149,7 @@ func TestHostileFramesAreRefused(t *testing.T) {
 		}, "already routed"},
 
 		// Protocol.
-		{"future protocol", func(f map[string]any) { f["protocol"] = 2 }, "contract"},
+		{"future protocol", func(f map[string]any) { f["protocol"] = 3 }, "contract"},
 		{"future spec version", func(f map[string]any) { appSpec(f)["apiVersion"] = "vdeploy/v2" }, "contract"},
 		{"negative generation", func(f map[string]any) { f["generation"] = -1 }, "contract"},
 	}

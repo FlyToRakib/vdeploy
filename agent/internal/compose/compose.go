@@ -183,3 +183,74 @@ func ReleaseJob(p spec.DesiredProject, replica Container) Container {
 	}
 	return job
 }
+
+// DatabaseLabel marks the managed database a container belongs to.
+const DatabaseLabel = "io.vdeploy.database"
+
+// DatabaseKey is the short, name-safe form of a database id.
+func DatabaseKey(databaseID string) string {
+	return strings.ToLower(strings.TrimPrefix(databaseID, "db_"))
+}
+
+// DatabaseName is the container that runs a managed database. It is also the
+// hostname apps reach it by, on the networks it is joined to.
+func DatabaseName(databaseID string) string {
+	return "vd-db-" + DatabaseKey(databaseID)
+}
+
+// DatabaseNetwork is the database's own network. Nothing else is on it until
+// a project is linked, and a link joins that project's network — never the
+// other way round, so an app is never moved to reach its data.
+func DatabaseNetwork(databaseID string) string {
+	return "vd-db-" + DatabaseKey(databaseID) + "-net"
+}
+
+// DatabaseVolume holds the engine's files. The agent never removes it.
+func DatabaseVolume(databaseID string) string {
+	return "vd-db-" + DatabaseKey(databaseID) + "-data"
+}
+
+// PlanDatabase composes the single container of a managed database (§17.3).
+// It publishes no port: a database is reachable only on the networks of the
+// apps linked to it. Credentials are not here — they are opened and added
+// at creation, like every other secret.
+func PlanDatabase(d spec.DesiredDatabase) Container {
+	env := make([]string, 0, len(d.Env))
+	for _, e := range d.Env {
+		env = append(env, e.Key+"="+e.Value)
+	}
+	return Container{
+		Name:    DatabaseName(d.DatabaseID),
+		Image:   d.Image,
+		Env:     env,
+		Network: DatabaseNetwork(d.DatabaseID),
+		Volumes: []Mount{{Volume: DatabaseVolume(d.DatabaseID), Target: d.DataPath}},
+		Labels: map[string]string{
+			ManagedLabel:  "true",
+			DatabaseLabel: d.DatabaseID,
+			RoleLabel:     "database",
+		},
+		MemoryBytes:   d.MemoryBytes,
+		NanoCPUs:      int64(d.CPU * 1e9),
+		PidsLimit:     PidsLimit,
+		StopTimeout:   60,
+		RestartPolicy: "unless-stopped",
+	}
+}
+
+// DatabaseEnv opens a database's sealed credentials for one container
+// creation. As with app secrets, no value is kept and no error carries one.
+func DatabaseEnv(d spec.DesiredDatabase, open func(key string, version int, sealed string) (string, error)) ([]string, error) {
+	env := make([]string, 0, len(d.Credentials))
+	for _, c := range d.Credentials {
+		value, err := open(c.Key, c.Version, c.Sealed)
+		if err != nil {
+			return nil, fmt.Errorf("the value of %s could not be opened: %w", c.Key, err)
+		}
+		if strings.ContainsRune(value, 0) {
+			return nil, fmt.Errorf("the value of %s contains a NUL byte", c.Key)
+		}
+		env = append(env, c.Key+"="+value)
+	}
+	return env, nil
+}
