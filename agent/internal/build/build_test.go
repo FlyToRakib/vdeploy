@@ -191,10 +191,11 @@ func TestADockerfileBuildIsCappedAndRecorded(t *testing.T) {
 	if !result.OK || result.Image != "sha256:"+strings.Repeat("c", 64) {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(engine.helpers) != 1 {
+	// The unlock step, then the build itself.
+	if len(engine.helpers) != 2 {
 		t.Fatalf("helpers = %+v", engine.helpers)
 	}
-	h := engine.helpers[0]
+	h := buildHelper(t, engine)
 	if h.Image != docker.BuildkitImage || h.MemoryBytes != 1<<30 || h.NanoCPUs != 1e9 {
 		t.Fatalf("builder = %+v", h)
 	}
@@ -218,11 +219,12 @@ func TestAutoDetectRunsRailpackFirstAndReturnsWhatItFound(t *testing.T) {
 	if !result.OK || string(result.Detection) != `{"detectedProviders":["node"]}` {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(engine.helpers) != 2 || engine.helpers[0].Image != docker.RailpackImage || engine.helpers[0].User != "1000:1000" {
+	// Detection, the unlock step, then the build itself.
+	if len(engine.helpers) != 3 || engine.helpers[0].Image != docker.RailpackImage || engine.helpers[0].User != "1000:1000" {
 		t.Fatalf("helpers = %+v", engine.helpers)
 	}
-	if !slices.Contains(engine.helpers[1].Cmd, "source="+docker.RailpackImage) {
-		t.Fatalf("builder does not use the railpack frontend: %v", engine.helpers[1].Cmd)
+	if !slices.Contains(engine.helpers[2].Cmd, "source="+docker.RailpackImage) {
+		t.Fatalf("builder does not use the railpack frontend: %v", engine.helpers[2].Cmd)
 	}
 }
 
@@ -295,9 +297,49 @@ func TestBuildSecretsAreMountedNotPassedAsArguments(t *testing.T) {
 	if !result.OK || secretFile != "s3cret" {
 		t.Fatalf("result = %+v secret file = %q", result, secretFile)
 	}
-	args := strings.Join(engine.helpers[0].Cmd, " ")
+	args := strings.Join(buildHelper(t, engine).Cmd, " ")
 	if !strings.Contains(args, "--secret id=npm_token,src=/secrets/npm_token") || strings.Contains(args, "s3cret") {
 		t.Fatalf("args = %s", args)
+	}
+}
+
+// buildHelper is the BuildKit run itself, skipping the step that clears a
+// lock left behind by a build that never finished.
+func buildHelper(t *testing.T, engine *fakeEngine) docker.Helper {
+	t.Helper()
+	for _, helper := range engine.helpers {
+		if helper.Name != "vd-build-unlock" {
+			return helper
+		}
+	}
+	t.Fatal("no build was run")
+	return docker.Helper{}
+}
+
+func TestALockLeftByABuildThatNeverFinishedIsClearedFirst(t *testing.T) {
+	source := archive(t, entry{name: "Dockerfile", body: "FROM alpine"})
+	builder, engine, req := setup(t, source)
+	if result := builder.Run(context.Background(), req); !result.OK {
+		t.Fatalf("result = %+v", result)
+	}
+	var unlock docker.Helper
+	for i, helper := range engine.helpers {
+		if helper.Name == "vd-build-unlock" {
+			unlock = helper
+			if i+1 == len(engine.helpers) {
+				t.Fatal("the lock was cleared after the build, not before it")
+			}
+		}
+	}
+	if unlock.Name == "" {
+		t.Fatalf("no lock was cleared: %+v", engine.helpers)
+	}
+	if !strings.Contains(strings.Join(unlock.Cmd, " "), "buildkitd.lock") {
+		t.Fatalf("the wrong file is removed: %v", unlock.Cmd)
+	}
+	// It touches nothing but the cache volume, and needs no network.
+	if unlock.Volumes[docker.BuildCacheVolume] == "" || unlock.Network != "none" || len(unlock.Binds) != 0 {
+		t.Fatalf("the unlock step reaches further than it should: %+v", unlock)
 	}
 }
 
@@ -305,7 +347,10 @@ func TestANetworkHiccupIsRetriedOnceButAnAppErrorIsNot(t *testing.T) {
 	source := archive(t, entry{name: "Dockerfile", body: "FROM alpine"})
 	builder, engine, req := setup(t, source)
 	runs := 0
-	engine.onRun = func(docker.Helper) {
+	engine.onRun = func(h docker.Helper) {
+		if h.Name == "vd-build-unlock" {
+			return
+		}
 		runs++
 		if runs == 1 {
 			engine.exit[docker.BuildkitImage] = 1
@@ -321,7 +366,10 @@ func TestANetworkHiccupIsRetriedOnceButAnAppErrorIsNot(t *testing.T) {
 
 	builder, engine, req = setup(t, source)
 	runs = 0
-	engine.onRun = func(docker.Helper) {
+	engine.onRun = func(h docker.Helper) {
+		if h.Name == "vd-build-unlock" {
+			return
+		}
 		runs++
 		engine.exit[docker.BuildkitImage] = 1
 		engine.output = "npm ERR! missing script: build"

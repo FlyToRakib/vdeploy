@@ -31,6 +31,13 @@ import (
 // MaxArchiveBytes is the largest source archive the agent downloads.
 const MaxArchiveBytes = 500 << 20
 
+// buildkitLock is the file BuildKit holds while it runs, inside the cache
+// volume. A build killed mid-flight — a reboot, a crash, a timeout — leaves
+// it behind, and every later build on that server then fails with "another
+// instance running?". Builds run one at a time, so a lock found before one
+// starts is always a dead one.
+const buildkitLock = "/home/user/.local/share/buildkit/buildkitd.lock"
+
 // Request is one build the control plane asked for.
 type Request struct {
 	BuildID    string            `json:"buildId"`
@@ -287,6 +294,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	if err := b.Engine.EnsureBuildCache(ctx); err != nil {
 		return "", detection, "", nil, fmt.Errorf("build cache: %w", err)
 	}
+	b.clearStaleLock(ctx)
 	name := "vd-build/" + strings.ToLower(strings.TrimPrefix(req.ProjectID, "prj_")) + ":" + strings.ToLower(req.BuildID)
 	args := append([]string{"build"}, frontend...)
 	args = append(args,
@@ -337,6 +345,25 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 		return "", detection, log, nil, err
 	}
 	return id, detection, log, ContainerFindings(ScanPersistence(buildDir), workdir), nil
+}
+
+// clearStaleLock removes a lock left by a build that never finished, so the
+// next one is not blocked forever by a process that no longer exists.
+func (b *Builder) clearStaleLock(ctx context.Context) {
+	code, _, err := b.Engine.RunHelper(ctx, docker.Helper{
+		Name:        "vd-build-unlock",
+		Image:       docker.BuildkitImage,
+		Entrypoint:  []string{"/bin/sh", "-c"},
+		Cmd:         []string{"rm -f " + buildkitLock},
+		Volumes:     map[string]string{docker.BuildCacheVolume: "/home/user/.local/share/buildkit"},
+		MemoryBytes: 64 << 20,
+		NanoCPUs:    500_000_000,
+		Network:     "none",
+		SecurityOpt: []string{"no-new-privileges:true"},
+	})
+	if err != nil || code != 0 {
+		b.logf("could not clear a leftover build lock", "code", code, "error", err)
+	}
 }
 
 func (b *Builder) logf(msg string, args ...any) {

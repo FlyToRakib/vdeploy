@@ -3,7 +3,7 @@
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
 **Task:** 4.2c — scheduled backups, offsite copies, and a restore verified on a schedule
 **Status:** in progress
-**Updated:** 2026-09-24 12:40 UTC
+**Updated:** 2026-09-24 13:15 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -123,6 +123,8 @@ image, an upload or GitHub already works, and the AI can do all three.
 - [x] 4.2a2 the copies nobody remembers to take (§17.4): every plan that deploys an app linked to a database takes a checked backup first — in one place, so it covers a redeploy, a rollback, a spec change and a commit alike, not only the paths someone remembered — and deleting a database takes one last copy before it goes. A backup that cannot be taken stops the deploy rather than letting a bad migration meet unsaved data. Deleting a database now frees its name, as deleting a project already did
 
 - [x] 4.2b putting a backup back (§17.5): restoring into a **new** database is the default and the recommended one, because checking that a backup is good must never mean touching what is live — VDeploy makes the new database itself, waits for the engine to come up, loads the dump into it and says "nothing existing was touched". Restoring over an existing database is Tier 3: it takes a copy of what is about to be replaced first, stops every app that reads it (restoring underneath a running app corrupts both), puts the data back, and starts the apps again whatever happened — they are never left stopped in silence. Postgres restores run `--clean --if-exists --single-transaction`, so a restore that fails part way leaves nothing half-loaded and says "nothing was changed"; Redis is refused in words, because its dump is a file the server loads at startup rather than something a client can send over the wire. A backup that was never checked cannot be restored at all. In the dashboard every checked backup offers "Put it back…", with the two choices worded as §17.5 asks and the destructive one gated behind typing the database's name
+
+- [x] 4.2a3 a build killed mid-flight no longer blocks the server (found by the testbed): BuildKit leaves a lock inside the build cache when it is killed — a reboot, a crash, a timeout — and every later build on that server then failed with "another instance running?", which tells a person nothing. Builds run one at a time, so a lock found before one starts is always a dead one; it is removed first, by a step that touches nothing but the cache and has no network
 
 ## Doing
 
