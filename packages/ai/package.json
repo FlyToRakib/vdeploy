@@ -20,6 +20,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@vdeploy/core": "workspace:*",
     "@vitest/coverage-v8": "^5.0.1"
   },
   "files": [
