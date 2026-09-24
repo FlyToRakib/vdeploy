@@ -147,6 +147,7 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 ## Decisions made
 
+- 2026-09-24 A managed database is not a project, and its backups are read back — docs/adr/0011-databases-and-backups.md
 - 2026-09-19 Spec identity lives on the envelope — docs/adr/0001-spec-identity-on-envelope.md
 - 2026-09-19 TypeScript 6.0 (not 7.x): typescript-eslint supports `<6.1`.
 - 2026-09-19 "2nd approver for T3" governs AI-proposed changes — docs/adr/0002-second-approver-for-ai-destructive.md
