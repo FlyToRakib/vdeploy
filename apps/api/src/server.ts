@@ -20,6 +20,7 @@ import { authRoutes } from './routes/auth.js';
 import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
 import { operationRoutes } from './routes/operations.js';
+import { backupDownloadRoutes } from './routes/backup-download.js';
 import { logRoutes } from './routes/logs.js';
 import { tcpProbe, type PortProbe } from './agents/reachability.js';
 import { githubFromConfig } from './github-config.js';
@@ -47,6 +48,8 @@ export interface ServerDeps {
   db: Database;
   /** Defaults to SMTP when configured, otherwise a logging mailer. */
   mailer?: Mailer;
+  /** How many requests one address may make a minute; tests raise it. */
+  requestsPerMinute?: number;
   /** Better Auth's per-IP limits; only lockout tests turn them off. */
   authRateLimit?: boolean;
   /** Where approved plans go to be applied. */
@@ -85,7 +88,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     referrerPolicy: { policy: 'no-referrer' },
     crossOriginResourcePolicy: { policy: 'same-origin' },
   });
-  await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
+  await app.register(rateLimit, { max: deps.requestsPerMinute ?? 300, timeWindow: '1 minute' });
 
   const mailer =
     deps.mailer ??
@@ -143,6 +146,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     publicUrl: config.PUBLIC_URL,
     now: deps.now ?? (() => new Date()),
     logs: gateway,
+    artifacts: gateway,
     connected: (serverId: string) => gateway.isConnected(serverId),
     probe,
     ...(github ? { github } : {}),
@@ -150,6 +154,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   };
   await app.register(operationRoutes(kernel));
   await app.register(logRoutes(kernel));
+  await app.register(backupDownloadRoutes(kernel));
   await app.register(uploadRoutes(kernel));
   await app.register(githubRoutes(kernel));
   await app.register(aiRoutes(kernel));

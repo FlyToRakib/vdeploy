@@ -1,9 +1,11 @@
-import { generateKeyPairSync, type KeyObject } from 'node:crypto';
+import { createHash, generateKeyPairSync, type KeyObject } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { ApplicationSpec, newId } from '@vdeploy/contracts';
 import { hashOf } from '@vdeploy/core';
 import {
   auditLog,
+  backups,
+  createDatabase,
   notifyDesiredState,
   observedState,
   projects,
@@ -21,6 +23,8 @@ let t: TestApp;
 let base: string;
 let owner: Browser;
 const PASSWORD = 'correct horse battery 42';
+let enrolled = 0;
+let seeded = 0;
 
 interface Agent {
   key: KeyObject;
@@ -49,9 +53,13 @@ function enrollBody(token: string, key: KeyObject) {
 
 async function enroll(name: string): Promise<Agent> {
   const { privateKey } = generateKeyPairSync('ed25519');
+  // Each server dials in from its own address, as a real fleet does: ten
+  // enrollments an hour from one address is a limit this file would hit.
+  enrolled += 1;
   const res = await t.app.inject({
     method: 'POST',
     url: '/api/v1/agent/enroll',
+    headers: { 'x-forwarded-for': `203.0.113.${String(enrolled)}` },
     payload: enrollBody(await enrollmentToken(name), privateKey),
   });
   expect(res.statusCode).toBe(201);
@@ -138,6 +146,64 @@ class FakeAgent {
   close() {
     this.socket.close();
   }
+}
+
+/** A database with one checked backup on it, ready to be handed back. */
+async function seedBackup(orgId: string, serverId: string, body: Buffer): Promise<string> {
+  const database = await createDatabase(t.database.db, Buffer.alloc(32, 4), {
+    orgId,
+    serverId,
+    name: `blog-${String((seeded += 1))}`,
+    engine: 'postgres',
+    version: '18',
+    image: 'postgres:18',
+    port: 5432,
+    user: 'vdeploy',
+    dbName: 'blog',
+    memoryLimit: '512Mi',
+    diskSize: '10Gi',
+  });
+  const id = newId('backup');
+  await t.database.db.insert(backups).values({
+    id,
+    orgId,
+    databaseId: database.id,
+    serverId,
+    fileName: 'blog-2026-09-25.dump',
+    status: 'done',
+    verified: true,
+    sizeBytes: body.length,
+    sha256: createHash('sha256').update(body).digest('hex'),
+  });
+  return id;
+}
+
+/**
+ * A real HTTP download, because the answer is streamed rather than returned:
+ * the bytes arrive as the server sends them, over a socket, like a browser's.
+ */
+async function fetchBackup(backupId: string) {
+  const res = await fetch(`${base}/api/v1/backups/${backupId}/download`, {
+    headers: { cookie: owner.cookieHeader(), origin: `http://127.0.0.1:${new URL(base).port}` },
+  });
+  const body = Buffer.from(await res.arrayBuffer());
+  return { status: res.status, disposition: res.headers.get('content-disposition') ?? '', body };
+}
+
+/** One connected server the download tests share: enrolling is rate-limited. */
+let downloads: { agent: Agent; fake: FakeAgent; orgId: string } | null = null;
+async function downloadServer() {
+  if (downloads) return downloads;
+  const agent = await enroll('server-download');
+  const fake = new FakeAgent(agent);
+  await fake.connect();
+  await fake.next(); // the first desired state
+  const [org] = await t.database.db
+    .select({ orgId: servers.orgId })
+    .from(servers)
+    .where(eq(servers.id, agent.serverId));
+  downloads = { agent, fake, orgId: org?.orgId ?? '' };
+  return downloads;
 }
 
 beforeAll(async () => {
@@ -445,6 +511,78 @@ describe('agent channel', () => {
     const after = await owner.request('POST', '/api/v1/operations/backup.offsite', { input: {} });
     expect(after.json<{ result: { warning: string | null } }>().result.warning).toBeNull();
     fake.close();
+  });
+
+  it('hands a backup back whole, paced by the person downloading it', async () => {
+    const { agent, fake, orgId } = await downloadServer();
+    const body = Buffer.from('PGDMP'.repeat(4000));
+    const backupId = await seedBackup(orgId, agent.serverId, body);
+
+    await owner.request('POST', '/api/v1/auth/step-up', { password: PASSWORD });
+    const download = fetchBackup(backupId);
+
+    const asked = await fake.next();
+    expect(asked).toMatchObject({
+      type: 'artifact',
+      artifact: { fileName: 'blog-2026-09-25.dump', image: 'postgres:18' },
+    });
+    const { requestId } = asked.artifact as { requestId: string };
+    // Two chunks, so the control plane has to hold one back and ask for more.
+    const half = body.length / 2;
+    for (const part of [body.subarray(0, half), body.subarray(half)]) {
+      fake.send({
+        ...fake.session.next('artifact_chunk'),
+        requestId,
+        data: part.toString('base64'),
+      });
+    }
+    fake.send({
+      ...fake.session.next('artifact_end'),
+      requestId,
+      sizeBytes: body.length,
+      sha256: createHash('sha256').update(body).digest('hex'),
+    });
+
+    const res = await download;
+    expect(res.status).toBe(200);
+    expect(res.disposition).toContain('blog-2026-09-25.dump');
+    expect(res.body.equals(body)).toBe(true);
+    // Every chunk handed on is one more the server may send.
+    expect(fake.inbox.filter((frame) => frame.type === 'artifact_ack').length).toBeGreaterThan(0);
+    fake.inbox.length = 0;
+  });
+
+  it('refuses to finish a download that is not the backup that was checked', async () => {
+    const { agent, fake, orgId } = await downloadServer();
+    const body = Buffer.from('PGDMP'.repeat(4000));
+    const backupId = await seedBackup(orgId, agent.serverId, body);
+
+    await owner.request('POST', '/api/v1/auth/step-up', { password: PASSWORD });
+    const download = fetchBackup(backupId);
+    const asked = await fake.next();
+    const { requestId } = asked.artifact as { requestId: string };
+
+    const wrong = Buffer.from('something else entirely'.repeat(800));
+    const half = wrong.length / 2;
+    for (const part of [wrong.subarray(0, half), wrong.subarray(half)]) {
+      fake.send({
+        ...fake.session.next('artifact_chunk'),
+        requestId,
+        data: part.toString('base64'),
+      });
+    }
+    fake.send({
+      ...fake.session.next('artifact_end'),
+      requestId,
+      sizeBytes: wrong.length,
+      sha256: createHash('sha256').update(wrong).digest('hex'),
+    });
+
+    // The last piece never goes out, so what arrives is short of what was
+    // promised: a failed download rather than a file nobody should trust.
+    const res = await download.catch(() => null);
+    expect(res?.body.length ?? 0).toBeLessThan(wrong.length);
+    fake.inbox.length = 0;
   });
 
   it('refuses a connection for a server that never enrolled', async () => {

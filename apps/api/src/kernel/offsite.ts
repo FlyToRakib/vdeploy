@@ -4,6 +4,8 @@ import {
   backupTargetView,
   databasesOf,
   dismissOffsiteWarning,
+  getBackup,
+  getDatabase,
   liveBackupTarget,
   offsiteDismissedAt,
   queueOffsiteCheck,
@@ -118,6 +120,43 @@ export const OFFSITE_ADMIN: Partial<Record<OperationName, Handler>> = {
       warning: supplied
         ? null
         : 'Keep this key somewhere safe and away from this server. Without it your offsite copies cannot be restored — not by you, and not by us. It will not be shown again.',
+    };
+  },
+  /**
+   * Says whether this backup may leave, and records that it did (§17.5). The
+   * bytes themselves go over `GET /api/v1/backups/:id/download`, which asks
+   * this same question first — so the audit trail holds every download, and
+   * a backup that was never checked is never handed out as if it were good.
+   */
+  'backup.download': async ({ deps, actor, args }) => {
+    const backup = await getBackup(deps.db, String(args.backupId));
+    if (backup?.orgId !== actor.orgId) {
+      throw new VDeployError('not_found', 'Backup not found');
+    }
+    if (backup.status !== 'done' || !backup.verified) {
+      throw new VDeployError(
+        'conflict',
+        'That backup was never checked, so there is nothing worth downloading',
+      );
+    }
+    if (backup.prunedAt) {
+      throw new VDeployError(
+        'not_found',
+        'That backup has been deleted to stay within the policy; take a new one',
+      );
+    }
+    const database = await getDatabase(deps.db, backup.databaseId);
+    if (!database) throw new VDeployError('not_found', 'Backup not found');
+    if (!deps.connected?.(database.serverId)) {
+      throw new VDeployError(
+        'unavailable',
+        'The server holding this backup is offline, so it cannot be downloaded now',
+      );
+    }
+    return {
+      fileName: backup.fileName,
+      sizeBytes: backup.sizeBytes,
+      url: `/api/v1/backups/${backup.id}/download`,
     };
   },
   'backup.check_offsite': async ({ deps, actor }) => {

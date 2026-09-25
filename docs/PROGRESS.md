@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.2e — downloading a dump, importing one, and a restore verified on a schedule
+**Task:** 4.2f — importing a dump from elsewhere
 **Status:** in progress
-**Updated:** 2026-09-25 14:35 UTC
+**Updated:** 2026-09-25 16:05 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -133,9 +133,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.2d offsite copies (§17.4, ADR 0012): a backup on the same server as the data is not a backup, so copies leaving the server are part of the feature. One restic repository per organization on any S3-compatible storage (S3, R2, B2, Spaces, MinIO), encrypted client-side with a key VDeploy makes and shows **once** — "without this key your copies cannot be restored, not by you and not by us" — or, for a repository that already holds copies, the key the person supplies. Every credential reaches the server sealed to its agent and lives only in the client's environment; the frame, the log and the process list never hold one. Order carries the safety: dump, read it back, copy it away, and only then apply local retention, so a prune list is never applied to a backup that reached nowhere else, and a copy that fails does not spoil the good backup that is here — the reason is recorded and told. Configuring a target proves it on a connected server (reach the repository, create it when new, write nothing), which also stops several servers racing to initialise it on the first night; a target set while every server was offline is proved when one dials in. Offsite retention counts each database's own snapshots. The standing warning stands on the Databases screen until copies leave or someone says in so many words that they accept the risk. Also: `backup_failed` now actually fires — a failed backup, or a good one that never left the server, is said out loud when it happens
 
+- [x] 4.2e downloading the dump (§17.5): a plain file the person owns is what makes VDeploy something they can leave, so a backup comes back over the signed agent channel — the server reads it out of the backup store through a container it creates and never starts (no shell, no host path, nothing running), and sends it in pieces. Each piece leaves only against an acknowledgement from the control plane, which sends one as it hands the bytes on, so a slow download paces the server instead of filling the control plane with a database's worth of bytes; and the last piece is held back until everything received hashes to what was recorded when the backup was checked, so a download that finishes is the backup that was taken and one that does not is visibly short. Asking goes through the gate as `backup.download` — admin, password again, in the audit log — because the whole database leaves with it; a backup that was never checked, or has been deleted by retention, is refused rather than handed over
+
 ## Doing
 
-- [ ] 4.2e the rest of §17.5: downloading the dump (a plain file the person owns), importing one from elsewhere as the migration on-ramp, and a restore verified on a schedule rather than assumed
+- [ ] 4.2f importing a dump from elsewhere (§17.5): the migration on-ramp from any other host
 
 ## Next
 

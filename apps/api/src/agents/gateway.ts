@@ -1,4 +1,4 @@
-import { randomBytes, type KeyObject } from 'node:crypto';
+import { createHash, randomBytes, type KeyObject } from 'node:crypto';
 import {
   AgentFrame,
   cleanLogText,
@@ -92,6 +92,29 @@ interface LogRequest {
   done: (error?: string) => void;
 }
 
+interface ArtifactRequest {
+  serverId: string;
+  onChunk: (data: Buffer) => void;
+  onEnd: (end: { sizeBytes: number; sha256?: string; error?: string }) => void;
+}
+
+/** What a backup on its way out of VDeploy needs from the server holding it. */
+export interface ArtifactSource {
+  /**
+   * Streams one backup artifact to `write`, which resolves when the bytes
+   * have been handed on. Nothing is written until the whole file hashes to
+   * `expectSha256`, except that the last chunk is held back until it does —
+   * so a download that completes is the backup that was checked, and one
+   * that does not is short, and visibly so.
+   */
+  artifact(
+    serverId: string,
+    request: { requestId: string; fileName: string; image: string; expectSha256: string | null },
+    write: (chunk: Buffer) => Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<{ sizeBytes: number }>;
+}
+
 /** Where live logs come from: the agent holding the project's containers. */
 export interface LogSource {
   /**
@@ -112,9 +135,10 @@ export interface LogSource {
  * records acks and observed state. Agent input is validated like any other
  * untrusted input: a compromised server cannot hurt the control plane.
  */
-export class Gateway implements LogSource {
+export class Gateway implements LogSource, ArtifactSource {
   private readonly connections = new Map<string, Connection>();
   private readonly logRequests = new Map<string, LogRequest>();
+  private readonly artifactRequests = new Map<string, ArtifactRequest>();
   private stopListening: (() => Promise<void>) | null = null;
   private stopBuildListening: (() => Promise<void>) | null = null;
   private stopBackupListening: (() => Promise<void>) | null = null;
@@ -380,6 +404,130 @@ export class Gateway implements LogSource {
     }
   }
 
+  /**
+   * Hands one backup back to the person who owns it (§17.5). The agent sends
+   * it in chunks and waits for an acknowledgement after every one, so a slow
+   * download paces the server rather than filling this process; and the last
+   * chunk is held until the bytes hash to what was recorded when the backup
+   * was checked, so a download that finishes is the backup that was taken.
+   */
+  artifact(
+    serverId: string,
+    request: { requestId: string; fileName: string; image: string; expectSha256: string | null },
+    write: (chunk: Buffer) => Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<{ sizeBytes: number }> {
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      return Promise.reject(
+        new VDeployError(
+          'unavailable',
+          'The server holding this backup is offline, so it cannot be downloaded now',
+        ),
+      );
+    }
+    const { requestId } = request;
+    return new Promise<{ sizeBytes: number }>((resolve, reject) => {
+      const running = createHash('sha256');
+      const queue: Buffer[] = [];
+      // The chunk just arrived waits here: it goes out only once the whole
+      // file has proved to be the one that was checked.
+      let held: Buffer | null = null;
+      let pumping = false;
+      let ended: { sizeBytes: number; sha256?: string; error?: string } | null = null;
+      let failed = false;
+      let settled = false;
+
+      const finish = (error?: string, sizeBytes = 0) => {
+        if (settled) return;
+        settled = true;
+        this.artifactRequests.delete(requestId);
+        signal?.removeEventListener('abort', abort);
+        if (error) reject(new VDeployError('unavailable', error));
+        else resolve({ sizeBytes });
+      };
+      const stop = () => {
+        const open = this.connections.get(serverId);
+        open?.socket.send(
+          seal(this.deps.key, { ...open.session.next('artifact_stop'), requestId }),
+        );
+      };
+      const abort = () => {
+        failed = true;
+        stop();
+        finish('The download was stopped');
+      };
+      const ack = () => {
+        const open = this.connections.get(serverId);
+        open?.socket.send(seal(this.deps.key, { ...open.session.next('artifact_ack'), requestId }));
+      };
+
+      const pump = () => {
+        if (pumping) return;
+        pumping = true;
+        void (async () => {
+          try {
+            while (queue.length > 0) {
+              const chunk = queue.shift();
+              if (!chunk) break;
+              await write(chunk);
+              ack(); // one chunk handed on, one more allowed to leave
+            }
+            if (!ended || failed) return;
+            const end = ended;
+            if (end.error) {
+              failed = true;
+              stop();
+              finish(end.error);
+              return;
+            }
+            const sum = running.digest('hex');
+            const expected = request.expectSha256 ?? end.sha256;
+            if (expected && sum !== expected) {
+              // The last chunk never goes: an incomplete download is honest,
+              // a complete one that is not the backup that was checked is not.
+              failed = true;
+              finish('What came back is not the backup that was checked');
+              return;
+            }
+            if (held) await write(held);
+            finish(undefined, end.sizeBytes);
+          } catch (err) {
+            failed = true;
+            stop();
+            finish(err instanceof Error ? err.message : 'The download stopped part way');
+          } finally {
+            pumping = false;
+          }
+          // A chunk or the end may have landed while this was running.
+          if (!settled && !failed && (queue.length > 0 || ended)) pump();
+        })();
+      };
+
+      this.artifactRequests.set(requestId, {
+        serverId,
+        onChunk: (data) => {
+          if (failed) return;
+          running.update(data);
+          if (held) queue.push(held);
+          held = data;
+          pump();
+        },
+        onEnd: (end) => {
+          ended = end;
+          pump();
+        },
+      });
+      signal?.addEventListener('abort', abort, { once: true });
+      connection.socket.send(
+        seal(this.deps.key, {
+          ...connection.session.next('artifact'),
+          artifact: { requestId, fileName: request.fileName, image: request.image },
+        }),
+      );
+    });
+  }
+
   stream(
     serverId: string,
     projectId: string,
@@ -501,6 +649,11 @@ export class Gateway implements LogSource {
       for (const request of this.logRequests.values()) {
         if (request.serverId === serverId) request.done('The connection to the server was lost');
       }
+      for (const request of this.artifactRequests.values()) {
+        if (request.serverId === serverId) {
+          request.onEnd({ sizeBytes: 0, error: 'The connection to the server was lost' });
+        }
+      }
       if (this.connections.get(serverId)?.socket === socket) {
         this.connections.delete(serverId);
         void db
@@ -613,6 +766,16 @@ export class Gateway implements LogSource {
         // loud now rather than discovered at restore time (§17.4).
         if (database) await notifyBackupResult(db, orgId, database, frame.result, now());
       }
+    } else if (frame.type === 'artifact_chunk' || frame.type === 'artifact_end') {
+      // Only the server a download went to may answer it.
+      const request = this.artifactRequests.get(frame.requestId);
+      if (request?.serverId !== serverId) return;
+      if (frame.type === 'artifact_end') {
+        const { sizeBytes, sha256, error } = frame;
+        request.onEnd({ sizeBytes, ...(sha256 ? { sha256 } : {}), ...(error ? { error } : {}) });
+        return;
+      }
+      request.onChunk(Buffer.from(frame.data, 'base64'));
     } else if (frame.type === 'logs_chunk' || frame.type === 'logs_end') {
       // Only the server a request went to may answer it.
       const request = this.logRequests.get(frame.requestId);

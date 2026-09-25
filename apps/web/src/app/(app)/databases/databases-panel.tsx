@@ -235,6 +235,26 @@ function DatabaseCard({
     if (ok) onChanged();
   }
 
+  /**
+   * A file the person owns, which is what makes VDeploy something they can
+   * leave (§17.5). Asking first goes through the gate — admin, password
+   * again, recorded — and then the browser fetches the bytes itself.
+   */
+  async function download(backup: BackupSummary) {
+    try {
+      const outcome = await stepUp(() =>
+        runOperation<{ url: string }>('backup.download', { backupId: backup.id }),
+      );
+      if (outcome.status !== 'done') return;
+      toast.success('Your download is starting. The file is yours to keep.');
+      window.location.assign(outcome.result.url);
+    } catch (err) {
+      if (!(err instanceof OperationError && err.code === 'cancelled')) {
+        toast.error(err instanceof Error ? err.message : 'That backup could not be downloaded.');
+      }
+    }
+  }
+
   return (
     <Card className="grid gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -277,15 +297,27 @@ function DatabaseCard({
                       : 'being taken…'}
                 </span>
                 {backup.status === 'done' && backup.verified && (
-                  <button
-                    type="button"
-                    className="text-accent underline"
-                    onClick={() => {
-                      setRestoring(backup.id);
-                    }}
-                  >
-                    Put it back…
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="text-accent underline"
+                      onClick={() => {
+                        setRestoring(backup.id);
+                      }}
+                    >
+                      Put it back…
+                    </button>
+                    <button
+                      type="button"
+                      className="text-accent underline"
+                      onClick={() => void download(backup)}
+                    >
+                      Download
+                    </button>
+                    {backup.offsiteAt && (
+                      <span className="text-muted-foreground">a copy is off the server</span>
+                    )}
+                  </>
                 )}
               </li>
             ))}

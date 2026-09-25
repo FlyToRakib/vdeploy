@@ -10,11 +10,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/backup"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
@@ -232,5 +235,152 @@ func TestAChallengeFromAnImpostorIsRefused(t *testing.T) {
 	err := h.client(srv.URL).session(context.Background())
 	if !errors.Is(err, protocol.ErrBadSignature) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// oneBackup stands in for the backup runner: it hands back a fixed number of
+// chunks, and records how many it was actually allowed to send.
+type oneBackup struct {
+	chunks int
+	sent   atomic.Int64
+}
+
+func (o *oneBackup) Take(context.Context, backup.Request) backup.Result { return backup.Result{} }
+func (o *oneBackup) Restore(context.Context, backup.RestoreRequest) backup.RestoreResult {
+	return backup.RestoreResult{}
+}
+func (o *oneBackup) CheckOffsite(context.Context, backup.CheckRequest) backup.CheckResult {
+	return backup.CheckResult{}
+}
+
+func (o *oneBackup) Send(
+	_ context.Context,
+	_ backup.ArtifactRequest,
+	each func([]byte) error,
+) (int64, string, error) {
+	for i := range o.chunks {
+		if err := each([]byte{byte(i)}); err != nil {
+			return o.sent.Load(), "", err
+		}
+		o.sent.Add(1)
+	}
+	return o.sent.Load(), strings.Repeat("a", 64), nil
+}
+
+// readWithin reads one frame, or reports that none came. A read that times
+// out ends the connection, so it is only ever used where one is expected.
+func (c *cp) readWithin() (map[string]any, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, wire, err := c.ws.Read(ctx)
+	if err != nil {
+		return nil, false
+	}
+	body, err := protocol.Open(c.h.agentPub, wire)
+	if err != nil {
+		c.t.Errorf("agent frame not signed by the agent: %v", err)
+		return nil, false
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		c.t.Error(err)
+		return nil, false
+	}
+	return out, true
+}
+
+func TestADownloadOnlyMovesAsFastAsTheControlPlaneTakesIt(t *testing.T) {
+	h := newHarness(t)
+	taker := &oneBackup{chunks: 20}
+	done := make(chan struct{})
+	url, _ := serve(t, h, func(c *cp) {
+		c.send(frame(c.session.Next(protocol.TypeArtifact), map[string]any{
+			"artifact": map[string]any{
+				"requestId": "req_1",
+				"fileName":  "blog.dump",
+				"image":     "postgres:18",
+			},
+		}))
+		// The window, and not a chunk more, until the control plane says so.
+		for range initialArtifactWindow {
+			got, ok := c.readWithin()
+			if !ok || got["type"] != protocol.TypeArtifactChunk {
+				t.Errorf("frame = %v", got)
+			}
+		}
+		// Given time to run ahead, it does not: the ninth chunk waits.
+		time.Sleep(300 * time.Millisecond)
+		if sent := taker.sent.Load(); sent > int64(initialArtifactWindow) {
+			t.Errorf("%d chunks were sent into a window of %d", sent, initialArtifactWindow)
+		}
+
+		for range taker.chunks - initialArtifactWindow {
+			c.send(frame(c.session.Next(protocol.TypeArtifactAck), map[string]any{"requestId": "req_1"}))
+		}
+		for range taker.chunks - initialArtifactWindow {
+			if got, ok := c.readWithin(); !ok || got["type"] != protocol.TypeArtifactChunk {
+				t.Errorf("frame = %v", got)
+			}
+		}
+		end, ok := c.readWithin()
+		if !ok || end["type"] != protocol.TypeArtifactEnd || end["sizeBytes"] != float64(20) {
+			t.Errorf("end = %v", end)
+		}
+		close(done)
+	})
+	client := h.client(url)
+	client.Backups = taker
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.loop(ctx)
+	go func() { _ = client.session(ctx) }()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the download never finished")
+	}
+}
+
+func TestADownloadStopsWhenTheOtherEndGivesUp(t *testing.T) {
+	h := newHarness(t)
+	taker := &oneBackup{chunks: 1000}
+	done := make(chan struct{})
+	url, _ := serve(t, h, func(c *cp) {
+		c.send(frame(c.session.Next(protocol.TypeArtifact), map[string]any{
+			"artifact": map[string]any{"requestId": "req_1", "fileName": "blog.dump", "image": "postgres:18"},
+		}))
+		if got, ok := c.readWithin(); !ok || got["type"] != protocol.TypeArtifactChunk {
+			t.Errorf("frame = %v", got)
+		}
+		c.send(frame(c.session.Next(protocol.TypeArtifactStop), map[string]any{"requestId": "req_1"}))
+		// Whatever was already in flight arrives; then it ends, and says why.
+		for range initialArtifactWindow + 2 {
+			got, ok := c.readWithin()
+			if !ok {
+				t.Error("nothing said the download had stopped")
+				break
+			}
+			if got["type"] == protocol.TypeArtifactEnd {
+				if got["error"] != "the download was stopped" {
+					t.Errorf("end = %v", got)
+				}
+				break
+			}
+		}
+		if sent := taker.sent.Load(); sent >= int64(taker.chunks) {
+			t.Errorf("the agent kept reading after being told to stop: %d", sent)
+		}
+		close(done)
+	})
+	client := h.client(url)
+	client.Backups = taker
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.loop(ctx)
+	go func() { _ = client.session(ctx) }()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the download never stopped")
 	}
 }

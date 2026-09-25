@@ -50,6 +50,8 @@ export async function startTestApp(
     db: database.db,
     mailer,
     authRateLimit: options.authRateLimit ?? false,
+    // A test file makes far more requests a minute than one person ever would.
+    requestsPerMinute: 10_000,
     queue: {
       enqueue: (planId) => {
         queued.push(planId);
@@ -109,6 +111,11 @@ export class Browser {
       else this.cookies.set(c.name, c.value);
     }
     return res;
+  }
+
+  /** The cookies as a real request would carry them, for tests that use fetch. */
+  cookieHeader(): string {
+    return [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ');
   }
 
   signIn(email: string, password: string) {

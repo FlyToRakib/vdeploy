@@ -12,6 +12,16 @@ import { Hostname } from './spec/sections.js';
 /** Bumped on any breaking change to what the agent receives (§25 version negotiation). */
 export const AGENT_PROTOCOL = 2;
 
+/**
+ * How much of a backup travels in one frame (§17.5). Base64 makes it a third
+ * larger on the wire, and the control plane refuses a websocket payload over
+ * a megabyte, so this leaves room for the frame around it.
+ */
+export const ARTIFACT_CHUNK_BYTES = 256 * 1024;
+
+/** How many chunks may be in flight before the control plane asks for more. */
+export const ARTIFACT_WINDOW = 8;
+
 /** One project as the agent must converge it: a whole release, never a container spec. */
 export const DesiredProject = z.strictObject({
   projectId: idSchema('project'),
@@ -160,6 +170,31 @@ export const AgentFrame = z.discriminatedUnion('type', [
     ...FrameHeader,
     type: z.literal('offsite_check_result'),
     result: OffsiteCheckResult,
+  }),
+  /**
+   * One piece of a backup on its way to the person who owns it (§17.5).
+   * Chunks are paced by the control plane's acknowledgements, so a slow
+   * download cannot fill this process with a database's worth of bytes.
+   */
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('artifact_chunk'),
+    requestId: z.string().max(64),
+    // No index: frames of one connection are handled in the order they
+    // arrived, and a second sequence number beside the header's own would be
+    // one more thing that can disagree with reality.
+    data: z.base64().max(ARTIFACT_CHUNK_BYTES * 2),
+  }),
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('artifact_end'),
+    requestId: z.string().max(64),
+    sizeBytes: z.number().int().min(0),
+    sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    error: z.string().max(4096).optional(),
   }),
   z.strictObject({
     ...FrameHeader,

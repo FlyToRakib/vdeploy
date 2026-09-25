@@ -553,13 +553,6 @@ export const OPERATIONS = [
     }),
   ),
   operation(
-    'backup.download',
-    'sensitive',
-    'project',
-    'Download a backup file',
-    obj({ ...P, backupId: idSchema('backup') }),
-  ),
-  operation(
     'registry.add',
     'sensitive',
     'org',
@@ -693,6 +686,14 @@ export const OPERATIONS = [
       password: z.string().min(8).max(512).optional(),
     }),
     { minRole: 'admin', stepUp: true },
+  ),
+  operation(
+    'backup.download',
+    'human_only',
+    'org',
+    'Download a backup as a plain file you own — the whole database leaves VDeploy',
+    obj({ backupId: idSchema('backup') }),
+    { stepUp: true },
   ),
   operation(
     'backup.remove_offsite',

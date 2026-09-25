@@ -16,6 +16,7 @@ type fakeEngine struct {
 	runs    []docker.Helper
 	dump    func(docker.Helper) (int, string, error)
 	checked string // "<size> <sha> <magic hex>"
+	stored  map[string]string
 	volumes map[string]bool
 }
 
@@ -28,6 +29,27 @@ func (f *fakeEngine) RunHelper(_ context.Context, h docker.Helper) (int, string,
 		return f.dump(h)
 	}
 	return 0, "pg_dump: saving database definition\n", nil
+}
+
+// stored is what the backup store holds, by file name.
+func (f *fakeEngine) ReadVolumeFile(
+	_ context.Context,
+	_, _, _, _, file string,
+	each func([]byte) error,
+) (int64, error) {
+	body, ok := f.stored[file]
+	if !ok {
+		return 0, docker.ErrNoArtifact
+	}
+	var total int64
+	for start := 0; start < len(body); start += 8 {
+		end := min(start+8, len(body))
+		total += int64(end - start)
+		if err := each([]byte(body[start:end])); err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }
 
 func (f *fakeEngine) EnsureVolume(_ context.Context, name, _ string) (bool, error) {

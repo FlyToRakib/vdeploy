@@ -11,6 +11,8 @@ package backup
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -82,6 +84,12 @@ type Result struct {
 type Engine interface {
 	RunHelper(ctx context.Context, h docker.Helper) (int, string, error)
 	EnsureVolume(ctx context.Context, name, owner string) (bool, error)
+	// ReadVolumeFile reads one file back out of the store, without running anything.
+	ReadVolumeFile(
+		ctx context.Context,
+		name, image, volume, mountPath, file string,
+		each func([]byte) error,
+	) (int64, error)
 }
 
 // Opener opens a value sealed to this agent.
@@ -435,4 +443,45 @@ func (r *Runner) Restore(ctx context.Context, req RestoreRequest) RestoreResult 
 		return fail(fmt.Sprintf("the restore failed (exit %d); nothing was changed", code), log)
 	}
 	return RestoreResult{RestoreID: req.RestoreID, OK: true, Log: log}
+}
+
+// ArtifactRequest is the control plane asking for a backup file, on its way
+// to the person who owns it (§17.5). A dump they can download is what makes
+// this platform something they can leave.
+type ArtifactRequest struct {
+	RequestID string `json:"requestId"`
+	FileName  string `json:"fileName"`
+	// Image is a container image already on this server, used only as a shell
+	// around the backup store; nothing in it runs.
+	Image string `json:"image"`
+}
+
+// Send streams one artifact out of the backup store, chunk by chunk, and
+// reports its size and hash so the control plane can say whether what
+// arrived is what was taken.
+func (r *Runner) Send(
+	ctx context.Context,
+	req ArtifactRequest,
+	each func([]byte) error,
+) (int64, string, error) {
+	if !safeName.MatchString(req.FileName) {
+		return 0, "", errors.New("the backup file name is not allowed")
+	}
+	sum := sha256.New()
+	size, err := r.Engine.ReadVolumeFile(
+		ctx,
+		"vd-artifact-"+shortID(req.RequestID),
+		req.Image,
+		Volume,
+		mountPath,
+		req.FileName,
+		func(chunk []byte) error {
+			sum.Write(chunk)
+			return each(chunk)
+		},
+	)
+	if err != nil {
+		return size, "", err
+	}
+	return size, hex.EncodeToString(sum.Sum(nil)), nil
 }

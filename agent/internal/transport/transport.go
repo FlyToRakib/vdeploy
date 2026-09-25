@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,10 +23,18 @@ import (
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/backup"
 	"github.com/FlyToRakib/vdeploy/agent/internal/build"
+	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
+)
+
+// maxArtifactWindow and initialArtifactWindow bound how much of a download
+// is in flight: chunks leave only against credits the control plane grants.
+const (
+	maxArtifactWindow     = 16
+	initialArtifactWindow = 8
 )
 
 // maxFrameBytes bounds any frame the control plane may send.
@@ -65,6 +74,9 @@ type Client struct {
 	restoreResults chan backup.RestoreResult
 	checks         map[string]*backup.CheckResult // by check id: nil while running
 	checkResults   chan backup.CheckResult
+
+	artifactMu sync.Mutex
+	artifacts  map[string]*artifactSend // by request id, while a download is running
 }
 
 // BackupTaker takes one backup to completion, and puts one back.
@@ -72,6 +84,7 @@ type BackupTaker interface {
 	Take(ctx context.Context, req backup.Request) backup.Result
 	Restore(ctx context.Context, req backup.RestoreRequest) backup.RestoreResult
 	CheckOffsite(ctx context.Context, req backup.CheckRequest) backup.CheckResult
+	Send(ctx context.Context, req backup.ArtifactRequest, each func([]byte) error) (int64, string, error)
 }
 
 // Builder runs one build to completion.
@@ -100,6 +113,11 @@ func (c *Client) Run(ctx context.Context) {
 		c.checks = map[string]*backup.CheckResult{}
 	}
 	c.backupMu.Unlock()
+	c.artifactMu.Lock()
+	if c.artifacts == nil {
+		c.artifacts = map[string]*artifactSend{}
+	}
+	c.artifactMu.Unlock()
 	backoff := time.Second
 	for ctx.Err() == nil {
 		started := time.Now()
@@ -325,6 +343,32 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 			return err
 		}
 		c.startRestore(ctx, frame.Restore)
+		return nil
+	}
+	switch head.Type {
+	case protocol.TypeArtifact:
+		var frame artifactFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startArtifact(ctx, k, frame.Artifact)
+		return nil
+	case protocol.TypeArtifactAck, protocol.TypeArtifactStop:
+		var frame artifactControlFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		if head.Type == protocol.TypeArtifactAck {
+			c.grantArtifact(frame.RequestID)
+		} else {
+			c.stopArtifact(frame.RequestID)
+		}
 		return nil
 	}
 	if head.Type == protocol.TypeOffsiteCheck {
@@ -720,5 +764,139 @@ func (c *Client) forwardCheckResults(ctx context.Context, k *conn) {
 				return
 			}
 		}
+	}
+}
+
+type artifactFrame struct {
+	protocol.Header
+	Artifact backup.ArtifactRequest `json:"artifact"`
+}
+
+type artifactControlFrame struct {
+	protocol.Header
+	RequestID string `json:"requestId"`
+}
+
+type artifactChunkFrame struct {
+	protocol.Header
+	RequestID string `json:"requestId"`
+	Data      string `json:"data"`
+}
+
+type artifactEndFrame struct {
+	protocol.Header
+	RequestID string `json:"requestId"`
+	SizeBytes int64  `json:"sizeBytes"`
+	SHA256    string `json:"sha256,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// artifactSend is one download in progress: the credits the control plane has
+// granted, and the way to stop it when the person closes the page.
+type artifactSend struct {
+	credits chan struct{}
+	stop    context.CancelFunc
+}
+
+// startArtifact sends one backup back, paced by the control plane. A chunk
+// leaves only against a credit, so a slow download cannot make this agent
+// push a database's worth of bytes into a socket nobody is reading.
+func (c *Client) startArtifact(ctx context.Context, k *conn, req backup.ArtifactRequest) {
+	c.artifactMu.Lock()
+	if c.artifacts == nil {
+		c.artifacts = map[string]*artifactSend{}
+	}
+	if _, busy := c.artifacts[req.RequestID]; busy {
+		c.artifactMu.Unlock()
+		return
+	}
+	if c.Backups == nil {
+		c.artifactMu.Unlock()
+		c.sendArtifactEnd(ctx, k, artifactEndFrame{
+			RequestID: req.RequestID,
+			Error:     "this server does not keep backups",
+		})
+		return
+	}
+	sendCtx, cancel := context.WithCancel(ctx)
+	send := &artifactSend{credits: make(chan struct{}, maxArtifactWindow), stop: cancel}
+	for range initialArtifactWindow {
+		send.credits <- struct{}{}
+	}
+	c.artifacts[req.RequestID] = send
+	c.artifactMu.Unlock()
+
+	go func() {
+		defer cancel()
+		defer func() {
+			c.artifactMu.Lock()
+			delete(c.artifacts, req.RequestID)
+			c.artifactMu.Unlock()
+		}()
+		size, sum, err := c.Backups.Send(sendCtx, req, func(chunk []byte) error {
+			select {
+			case <-send.credits:
+			case <-sendCtx.Done():
+				return sendCtx.Err() //nolint:wrapcheck // the reason is the context's own
+			}
+			frame := artifactChunkFrame{
+				RequestID: req.RequestID,
+				Data:      base64.StdEncoding.EncodeToString(chunk),
+			}
+			return k.send(sendCtx, protocol.TypeArtifactChunk, func(h protocol.Header) any {
+				frame.Header = h
+				return frame
+			})
+		})
+		end := artifactEndFrame{RequestID: req.RequestID, SizeBytes: size, SHA256: sum}
+		if err != nil {
+			end.SHA256 = ""
+			end.Error = artifactReason(err)
+		}
+		c.sendArtifactEnd(ctx, k, end)
+	}()
+}
+
+// artifactReason keeps the words a person reads free of Go's plumbing.
+func artifactReason(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "the download was stopped"
+	}
+	if errors.Is(err, docker.ErrNoArtifact) {
+		return docker.ErrNoArtifact.Error()
+	}
+	return "the backup could not be read from this server"
+}
+
+func (c *Client) sendArtifactEnd(ctx context.Context, k *conn, end artifactEndFrame) {
+	if err := k.send(ctx, protocol.TypeArtifactEnd, func(h protocol.Header) any {
+		end.Header = h
+		return end
+	}); err != nil {
+		c.Log.Warn("a download could not be finished", "request", end.RequestID, "error", err)
+	}
+}
+
+// grantArtifact lets one more chunk go, once the control plane has passed the
+// last one on to whoever asked for it.
+func (c *Client) grantArtifact(requestID string) {
+	c.artifactMu.Lock()
+	send := c.artifacts[requestID]
+	c.artifactMu.Unlock()
+	if send == nil {
+		return
+	}
+	select {
+	case send.credits <- struct{}{}:
+	default: // the window is already full; nothing to grant
+	}
+}
+
+func (c *Client) stopArtifact(requestID string) {
+	c.artifactMu.Lock()
+	send := c.artifacts[requestID]
+	c.artifactMu.Unlock()
+	if send != nil {
+		send.stop()
 	}
 }

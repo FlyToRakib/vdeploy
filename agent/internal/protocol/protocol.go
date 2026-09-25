@@ -35,10 +35,16 @@ const (
 
 	TypeOffsiteCheck       = "offsite_check"
 	TypeOffsiteCheckResult = "offsite_check_result"
-	TypeLogs               = "logs"
-	TypeLogsStop           = "logs_stop"
-	TypeLogsChunk          = "logs_chunk"
-	TypeLogsEnd            = "logs_end"
+
+	TypeArtifact      = "artifact"
+	TypeArtifactAck   = "artifact_ack"
+	TypeArtifactStop  = "artifact_stop"
+	TypeArtifactChunk = "artifact_chunk"
+	TypeArtifactEnd   = "artifact_end"
+	TypeLogs          = "logs"
+	TypeLogsStop      = "logs_stop"
+	TypeLogsChunk     = "logs_chunk"
+	TypeLogsEnd       = "logs_end"
 )
 
 // MaxClockSkew bounds how far a frame's timestamp may be from ours.
