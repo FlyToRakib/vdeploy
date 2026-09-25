@@ -24,6 +24,8 @@ export interface KernelDeps {
   now: () => Date;
   /** Live container output, through the agent channel; absent in tests without agents. */
   logs?: LogSource;
+  /** Whether a server's agent is on this connection right now; absent in tests. */
+  connected?: (serverId: string) => boolean;
   /** Connects to a server's web ports from here; tests replace it. */
   probe: PortProbe;
   /** The VDeploy GitHub App, when this installation has one (M2 2.15). */

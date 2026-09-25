@@ -385,3 +385,50 @@ export async function notifyUnreachable(
     now,
   );
 }
+
+/**
+ * What became of a backup (§17.4). A backup that failed, or one that never
+ * left the server it protects, is exactly the thing people discover at
+ * restore time — so it is said out loud when it happens, not later.
+ */
+export async function notifyBackupResult(
+  db: Executor,
+  orgId: string,
+  database: { id: string; name: string },
+  result: {
+    ok: boolean;
+    verified: boolean;
+    error?: string | undefined;
+    offsite?: { ok: boolean; error?: string | undefined } | undefined;
+  },
+  now: Date,
+): Promise<void> {
+  const stamp = now.toISOString().slice(0, 16);
+  if (!result.ok || !result.verified) {
+    await notify(
+      db,
+      orgId,
+      {
+        trigger: 'backup_failed',
+        key: `backup_failed:${database.id}:${stamp}`,
+        title: `The backup of ${database.name} did not work`,
+        message: `${result.error ?? 'The backup could not be taken.'} Until one works, the data in ${database.name} exists in exactly one place.`,
+      },
+      now,
+    );
+    return;
+  }
+  if (result.offsite && !result.offsite.ok) {
+    await notify(
+      db,
+      orgId,
+      {
+        trigger: 'backup_failed',
+        key: `backup_offsite_failed:${database.id}:${stamp}`,
+        title: `The backup of ${database.name} never left the server`,
+        message: `${database.name} was backed up and checked, but the copy to your own storage did not go: ${result.offsite.error ?? 'the storage did not say why'}. The backup and the data it protects are on the same server until this is fixed.`,
+      },
+      now,
+    );
+  }
+}

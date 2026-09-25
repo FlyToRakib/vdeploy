@@ -63,12 +63,15 @@ type Client struct {
 	restores       map[string]*backup.RestoreResult // by restore id: nil while running
 	backupResults  chan backup.Result
 	restoreResults chan backup.RestoreResult
+	checks         map[string]*backup.CheckResult // by check id: nil while running
+	checkResults   chan backup.CheckResult
 }
 
 // BackupTaker takes one backup to completion, and puts one back.
 type BackupTaker interface {
 	Take(ctx context.Context, req backup.Request) backup.Result
 	Restore(ctx context.Context, req backup.RestoreRequest) backup.RestoreResult
+	CheckOffsite(ctx context.Context, req backup.CheckRequest) backup.CheckResult
 }
 
 // Builder runs one build to completion.
@@ -93,6 +96,8 @@ func (c *Client) Run(ctx context.Context) {
 		c.backups = map[string]*backup.Result{}
 		c.restoreResults = make(chan backup.RestoreResult, 16)
 		c.restores = map[string]*backup.RestoreResult{}
+		c.checkResults = make(chan backup.CheckResult, 8)
+		c.checks = map[string]*backup.CheckResult{}
 	}
 	c.backupMu.Unlock()
 	backoff := time.Second
@@ -233,6 +238,7 @@ func (c *Client) session(ctx context.Context) error {
 	go c.forwardBuildResults(ctx, k)
 	go c.forwardBackupResults(ctx, k)
 	go c.forwardRestoreResults(ctx, k)
+	go c.forwardCheckResults(ctx, k)
 	for {
 		if err := c.receive(ctx, k); err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
@@ -319,6 +325,17 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 			return err
 		}
 		c.startRestore(ctx, frame.Restore)
+		return nil
+	}
+	if head.Type == protocol.TypeOffsiteCheck {
+		var frame offsiteCheckFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startOffsiteCheck(ctx, frame.Check)
 		return nil
 	}
 	if head.Type == protocol.TypeBackup {
@@ -638,6 +655,68 @@ func (c *Client) forwardBuildResults(ctx context.Context, k *conn) {
 			})
 			if err != nil {
 				c.queueResult(result) // the next connection sends it
+				return
+			}
+		}
+	}
+}
+
+type offsiteCheckFrame struct {
+	protocol.Header
+	Check backup.CheckRequest `json:"check"`
+}
+
+type offsiteCheckResultFrame struct {
+	protocol.Header
+	Result backup.CheckResult `json:"result"`
+}
+
+// startOffsiteCheck proves the organization's offsite target from this
+// server. Asked twice, it answers with the result it already has.
+func (c *Client) startOffsiteCheck(ctx context.Context, req backup.CheckRequest) {
+	c.backupMu.Lock()
+	defer c.backupMu.Unlock()
+	if done, seen := c.checks[req.CheckID]; seen {
+		if done != nil {
+			c.queueCheckResult(*done)
+		}
+		return
+	}
+	if c.Backups == nil {
+		result := backup.CheckResult{CheckID: req.CheckID, Error: "this server does not take backups"}
+		c.checks[req.CheckID] = &result
+		c.queueCheckResult(result)
+		return
+	}
+	c.checks[req.CheckID] = nil
+	go func() {
+		result := c.Backups.CheckOffsite(context.WithoutCancel(ctx), req)
+		c.backupMu.Lock()
+		c.checks[req.CheckID] = &result
+		c.backupMu.Unlock()
+		c.queueCheckResult(result)
+	}()
+}
+
+func (c *Client) queueCheckResult(result backup.CheckResult) {
+	select {
+	case c.checkResults <- result:
+	default:
+		c.Log.Warn("offsite check result dropped: queue full", "check", result.CheckID)
+	}
+}
+
+func (c *Client) forwardCheckResults(ctx context.Context, k *conn) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case result := <-c.checkResults:
+			err := k.send(ctx, protocol.TypeOffsiteCheckResult, func(h protocol.Header) any {
+				return offsiteCheckResultFrame{Header: h, Result: result}
+			})
+			if err != nil {
+				c.queueCheckResult(result) // the next connection sends it
 				return
 			}
 		}

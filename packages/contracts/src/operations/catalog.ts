@@ -131,6 +131,13 @@ export const OPERATIONS = [
     obj({ databaseId }),
   ),
   query(
+    'backup.offsite',
+    'org',
+    'config',
+    'Show where copies of the backups go, away from the server that made them',
+    obj({}),
+  ),
+  query(
     'backup.list',
     'org',
     'config',
@@ -224,6 +231,13 @@ export const OPERATIONS = [
     'database',
     'Take a backup of this database now, and check that it can be read',
     obj({ databaseId }),
+  ),
+  operation(
+    'backup.check_offsite',
+    'safe',
+    'org',
+    'Prove the offsite target still accepts copies, and say so if it does not',
+    obj({}),
   ),
 
   // ── Tier 2 · sensitive ──────────────────────────────────────────────────
@@ -462,6 +476,14 @@ export const OPERATIONS = [
     obj({ databaseId, policy: BackupPolicy }),
   ),
   operation(
+    'backup.dismiss_offsite_warning',
+    'sensitive',
+    'org',
+    'Accept that backups live only on the servers that made them, and stop warning about it',
+    obj({ dismissed: z.boolean().default(true) }),
+    { minRole: 'admin' },
+  ),
+  operation(
     'database.stop',
     'sensitive',
     'database',
@@ -653,6 +675,32 @@ export const OPERATIONS = [
     'Reveal a secret value',
     obj({ ...P, secretId: idSchema('secret') }),
     { stepUp: true },
+  ),
+  operation(
+    'backup.set_offsite',
+    'human_only',
+    'org',
+    'Send copies of every backup to storage of your own, away from the servers',
+    obj({
+      repository: z.string().min(1).max(512),
+      accessKeyId: z.string().min(1).max(256),
+      secretAccessKey: z.string().min(1).max(512),
+      region: z.string().max(64).optional(),
+      /**
+       * The key that unlocks the repository. Left out, VDeploy makes one and
+       * shows it once; given, it is an existing repository being re-attached.
+       */
+      password: z.string().min(8).max(512).optional(),
+    }),
+    { minRole: 'admin', stepUp: true },
+  ),
+  operation(
+    'backup.remove_offsite',
+    'human_only',
+    'org',
+    'Stop sending copies away; what is already there stays where it is',
+    obj({}),
+    { minRole: 'admin', stepUp: true },
   ),
   operation(
     'server.add',

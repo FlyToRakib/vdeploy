@@ -20,6 +20,7 @@ export const ID_PREFIXES = {
   database: 'db',
   volume: 'vol',
   backup: 'bkp',
+  backupTarget: 'bkt',
   restore: 'rst',
   auditEntry: 'aud',
   session: 'ses',

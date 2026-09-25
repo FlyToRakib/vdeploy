@@ -258,6 +258,8 @@ export async function finishBackup(
     verified: boolean;
     error?: string | undefined;
     log: string;
+    offsite?:
+      { ok: boolean; snapshotId?: string | undefined; error?: string | undefined } | undefined;
   },
   now: Date,
 ): Promise<void> {
@@ -271,6 +273,11 @@ export async function finishBackup(
       error: result.error ?? null,
       log: result.log.slice(-20_000),
       finishedAt: now,
+      // A copy that did not leave the server does not spoil the one that is
+      // here: the backup is good, and the reason it went nowhere is recorded.
+      offsiteAt: result.offsite?.ok ? now : null,
+      offsiteSnapshot: result.offsite?.snapshotId ?? null,
+      offsiteError: result.offsite && !result.offsite.ok ? (result.offsite.error ?? null) : null,
     })
     .where(eq(backups.id, result.backupId));
 }
@@ -318,6 +325,8 @@ export function backupView(row: BackupRow, databaseName: string): BackupView {
     error: row.error,
     startedAt: (row.startedAt ?? row.createdAt).toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
+    offsiteAt: row.offsiteAt?.toISOString() ?? null,
+    offsiteError: row.offsiteError,
   };
 }
 

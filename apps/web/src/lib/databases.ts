@@ -86,6 +86,57 @@ export interface BackupSummary {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+  offsiteAt: string | null;
+  offsiteError: string | null;
+}
+
+/** Where copies go, as `backup.offsite` returns it. */
+export interface OffsiteSummary {
+  target: {
+    id: string;
+    kind: 's3';
+    repository: string;
+    region: string | null;
+    status: 'pending' | 'checking' | 'ok' | 'failed';
+    checkedAt: string | null;
+    error: string | null;
+    createdAt: string;
+  } | null;
+  databasesAtRisk: number;
+  warning: string | null;
+  dismissedAt: string | null;
+}
+
+/** What the offsite target is doing, said plainly (§17.4). */
+export function offsiteWords(offsite: OffsiteSummary): {
+  health: 'healthy' | 'warning' | 'failed' | 'neutral';
+  words: string;
+} {
+  const target = offsite.target;
+  if (!target) {
+    return {
+      health: offsite.databasesAtRisk > 0 && !offsite.dismissedAt ? 'warning' : 'neutral',
+      words: 'Copies stay on the servers that made them.',
+    };
+  }
+  const where = target.repository.replace(/^[a-z0-9]+:/, '').replace(/^https?:\/\//, '');
+  switch (target.status) {
+    case 'ok':
+      return { health: 'healthy', words: `Copies go to ${where}.` };
+    case 'failed':
+      return {
+        health: 'failed',
+        words: `${where} could not be reached — ${target.error ?? 'it did not say why'}.`,
+      };
+    case 'checking':
+      return { health: 'warning', words: `Checking whether ${where} accepts copies…` };
+    default:
+      // Nothing has reached it yet, so nothing may claim it works.
+      return {
+        health: 'warning',
+        words: `Copies will go to ${where}, once a server has reached it.`,
+      };
+  }
 }
 
 /** "4 hours ago", for a person who wants to know if it is recent. */
@@ -124,10 +175,14 @@ export function dataLine(
         : 'No backups yet — your data exists in exactly one place.',
     };
   }
-  return {
-    tone: 'good',
-    words: `Last backup ${ago(last.finishedAt, now)}, ${sizeWords(last.sizeBytes)}, checked and readable.`,
-  };
+  const here = `Last backup ${ago(last.finishedAt, now)}, ${sizeWords(last.sizeBytes)}, checked and readable.`;
+  // A backup on the same server as the data is one disk away from being no
+  // backup at all, so the line says which it is (§17.4).
+  if (last.offsiteAt) return { tone: 'good', words: `${here} A copy is off the server.` };
+  if (last.offsiteError) {
+    return { tone: 'warning', words: `${here} The copy did not leave: ${last.offsiteError}` };
+  }
+  return { tone: 'good', words: here };
 }
 
 /** When a database is backed up and how many copies stay (§17.4). */

@@ -6,6 +6,7 @@ import {
   ENGINE_VERSIONS,
   ENGINE_WORDS,
   ENGINES,
+  offsiteWords,
   reachWords,
   SCHEDULES,
   scheduleWords,
@@ -13,6 +14,7 @@ import {
   statusWords,
   type BackupSummary,
   type DatabaseSummary,
+  type OffsiteSummary,
 } from './databases';
 
 const database: DatabaseSummary = {
@@ -89,6 +91,8 @@ const backup = (over: Partial<BackupSummary> = {}): BackupSummary => ({
   error: null,
   startedAt: '2026-09-24T00:00:00.000Z',
   finishedAt: '2026-09-24T00:01:00.000Z',
+  offsiteAt: null,
+  offsiteError: null,
   ...over,
 });
 
@@ -117,6 +121,17 @@ describe('what a person is told about their data', () => {
       tone: 'good',
       words: 'Last backup 4 hours ago, 4.0 MB, checked and readable.',
     });
+  });
+
+  it('says whether the copy left the server, because that is the whole point', () => {
+    const away = dataLine([backup({ offsiteAt: '2026-09-24T00:02:00.000Z' })], now);
+    expect(away).toEqual({
+      tone: 'good',
+      words: 'Last backup 4 hours ago, 4.0 MB, checked and readable. A copy is off the server.',
+    });
+    const stuck = dataLine([backup({ offsiteError: 'your storage refused the copy' })], now);
+    expect(stuck.tone).toBe('warning');
+    expect(stuck.words).toContain('The copy did not leave: your storage refused the copy');
   });
 
   it('writes sizes and ages the way people read them', () => {
@@ -148,5 +163,74 @@ describe('the backup schedule, in words', () => {
 
   it('says plainly when nothing is scheduled', () => {
     expect(scheduleWords({ ...policy, enabled: false })).toBe('Not backed up automatically.');
+  });
+});
+
+describe('where copies go', () => {
+  const offsite = (over: Partial<OffsiteSummary> = {}): OffsiteSummary => ({
+    target: {
+      id: 'bkt_1',
+      kind: 's3',
+      repository: 's3:https://s3.eu-central-1.amazonaws.com/acme-backups/vdeploy',
+      region: 'eu-central-1',
+      status: 'ok',
+      checkedAt: '2026-09-24T00:00:00.000Z',
+      error: null,
+      createdAt: '2026-09-24T00:00:00.000Z',
+    },
+    databasesAtRisk: 1,
+    warning: null,
+    dismissedAt: null,
+    ...over,
+  });
+
+  it('says where they go, without the scheme nobody reads', () => {
+    expect(offsiteWords(offsite())).toEqual({
+      health: 'healthy',
+      words: 'Copies go to s3.eu-central-1.amazonaws.com/acme-backups/vdeploy.',
+    });
+  });
+
+  it('warns while data exists in exactly one place', () => {
+    const none = offsiteWords(offsite({ target: null }));
+    expect(none.health).toBe('warning');
+    expect(none.words).toContain('stay on the servers');
+    // Nothing to protect, or someone said they accept it: no standing warning.
+    expect(offsiteWords(offsite({ target: null, databasesAtRisk: 0 })).health).toBe('neutral');
+    expect(
+      offsiteWords(offsite({ target: null, dismissedAt: '2026-09-24T00:00:00.000Z' })).health,
+    ).toBe('neutral');
+  });
+
+  it('repeats the reason storage gave when it refused', () => {
+    const broken = offsiteWords(
+      offsite({
+        target: { ...offsite().target!, status: 'failed', error: 'the key does not unlock it' },
+      }),
+    );
+    expect(broken.health).toBe('failed');
+    expect(broken.words).toContain('the key does not unlock it');
+  });
+});
+
+describe('a target nobody has reached yet', () => {
+  it('does not claim it works until a server says so', () => {
+    const pending = offsiteWords({
+      target: {
+        id: 'bkt_1',
+        kind: 's3',
+        repository: 's3:https://s3.example.com/acme/vdeploy',
+        region: null,
+        status: 'pending',
+        checkedAt: null,
+        error: null,
+        createdAt: '2026-09-25T00:00:00.000Z',
+      },
+      databasesAtRisk: 1,
+      warning: null,
+      dismissedAt: null,
+    });
+    expect(pending.health).toBe('warning');
+    expect(pending.words).toContain('once a server has reached it');
   });
 });

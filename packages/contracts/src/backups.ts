@@ -2,6 +2,65 @@ import { z } from 'zod';
 import { DatabaseEngine } from './databases.js';
 import { idSchema } from './ids.js';
 
+/** One sealed environment value for a client the agent runs (§22). */
+const Sealed = z.strictObject({
+  key: z.string().max(64),
+  version: z.number().int().positive(),
+  sealed: z.string().max(50_000),
+});
+
+/**
+ * Where copies go that are not on this server (§17.4). A backup on the same
+ * VPS is not a backup: if the server dies, the provider suspends the account
+ * or the disk fails, the data and its copies die together. restic encrypts
+ * and deduplicates client-side, so the target never sees readable data.
+ */
+export const OffsiteTarget = z.strictObject({
+  targetId: idSchema('backupTarget'),
+  /** A restic repository, e.g. `s3:https://s3.eu-central-1.amazonaws.com/bucket/path`. */
+  repository: z.string().min(1).max(512),
+  /** The repository password and the target's access keys, sealed to this agent. */
+  credentials: z.array(Sealed).max(8),
+  /** Plain settings the client needs — a region, never a credential. */
+  env: z.array(z.strictObject({ key: z.string().max(64), value: z.string().max(256) })).max(8),
+  /** Groups this database's snapshots, so retention counts only its own. */
+  tag: z.string().max(64),
+  /** How many snapshots stay offsite; 0 keeps every one of them. */
+  keepLast: z.number().int().min(0).max(3650),
+});
+export type OffsiteTarget = z.infer<typeof OffsiteTarget>;
+
+/** What happened to the copy that left the server. */
+export const OffsiteResult = z.strictObject({
+  ok: z.boolean(),
+  /** The restic snapshot the copy landed in. */
+  snapshotId: z
+    .string()
+    .regex(/^[0-9a-f]{6,64}$/)
+    .optional(),
+  error: z.string().max(4096).optional(),
+});
+export type OffsiteResult = z.infer<typeof OffsiteResult>;
+
+/**
+ * Proving an offsite target works before anything depends on it — and
+ * creating the repository, so the first night's backups do not race each
+ * other to initialise it.
+ */
+export const OffsiteCheckRequest = z.strictObject({
+  checkId: z.string().max(64),
+  target: OffsiteTarget,
+});
+export type OffsiteCheckRequest = z.infer<typeof OffsiteCheckRequest>;
+
+export const OffsiteCheckResult = z.strictObject({
+  checkId: z.string().max(64),
+  ok: z.boolean(),
+  error: z.string().max(4096).optional(),
+  log: z.string().max(20_000),
+});
+export type OffsiteCheckResult = z.infer<typeof OffsiteCheckResult>;
+
 /**
  * A backup the agent must take (§17.4). It never uses `docker exec`: a
  * short-lived sidecar on the database's own network runs the engine's own
@@ -19,17 +78,11 @@ export const BackupRequest = z.strictObject({
   user: z.string().max(64),
   dbName: z.string().max(64).nullable(),
   /** The credential environment, sealed to this agent (§22). */
-  credentials: z
-    .array(
-      z.strictObject({
-        key: z.string().max(64),
-        version: z.number().int().positive(),
-        sealed: z.string().max(50_000),
-      }),
-    )
-    .max(8),
+  credentials: z.array(Sealed).max(8),
   /** What the file is called inside the backup store. */
   fileName: z.string().max(200),
+  /** Where a copy goes once this one is written and checked; absent means nowhere. */
+  offsite: OffsiteTarget.optional(),
   /**
    * Older artifacts this server may delete — but only once the new one is
    * written and checked, so retention can never take the last good backup.
@@ -61,6 +114,8 @@ export const BackupResult = z.strictObject({
   error: z.string().max(4096).optional(),
   /** The files that were actually deleted afterwards. */
   removed: z.array(z.string().max(200)).max(50).default([]),
+  /** What became of the copy that was supposed to leave the server. */
+  offsite: OffsiteResult.optional(),
   /** The end of the client's output, for a person to read. */
   log: z.string().max(20_000),
 });
@@ -83,8 +138,42 @@ export const BackupView = z.strictObject({
   error: z.string().nullable(),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime().nullable(),
+  /** When a copy of this backup reached the offsite target, if one has. */
+  offsiteAt: z.iso.datetime().nullable(),
+  offsiteError: z.string().nullable(),
 });
 export type BackupView = z.infer<typeof BackupView>;
+
+/**
+ * The offsite target as people see it: where copies go and whether that has
+ * been proved. The keys and the repository password are never in here.
+ */
+export const BackupTargetView = z.strictObject({
+  id: idSchema('backupTarget'),
+  kind: z.literal('s3'),
+  repository: z.string().max(512),
+  region: z.string().max(64).nullable(),
+  /** `pending` and `checking` mean nobody has proved it works yet. */
+  status: z.enum(['pending', 'checking', 'ok', 'failed']),
+  checkedAt: z.iso.datetime().nullable(),
+  error: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type BackupTargetView = z.infer<typeof BackupTargetView>;
+
+/**
+ * Where an organization's copies go, and — while they go nowhere — the
+ * standing warning that says so (§17.4).
+ */
+export const OffsiteView = z.strictObject({
+  target: BackupTargetView.nullable(),
+  /** How many managed databases exist only on their own server right now. */
+  databasesAtRisk: z.number().int().min(0),
+  /** Null when there is nothing to warn about, or someone accepted the risk. */
+  warning: z.string().nullable(),
+  dismissedAt: z.iso.datetime().nullable(),
+});
+export type OffsiteView = z.infer<typeof OffsiteView>;
 
 /**
  * Putting a backup back (§17.5). Restoring to a new database is the default

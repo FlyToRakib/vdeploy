@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.2d — offsite copies, downloading a dump, and a restore verified on a schedule
+**Task:** 4.2e — downloading a dump, importing one, and a restore verified on a schedule
 **Status:** in progress
-**Updated:** 2026-09-25 07:15 UTC
+**Updated:** 2026-09-25 14:35 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -131,9 +131,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.2c backups that happen by themselves (§17.4, §17.6): a five-field schedule read in **the person's own timezone** — "back up at 3 in the morning" means their 3, and the screen says the resolved UTC time next to it. The worker looks at the schedules once a minute; a run missed while it was busy or restarting is late, never lost, and a database that is off when its backup is due raises a notification rather than being passed over in silence. Retention keeps the newest checked copies and deletes the rest **only after a new one is written and read back** — the order is the guarantee, so the last good backup can never be the one that goes, and a backup still being taken is never a candidate. A schedule VDeploy cannot read is refused when it is set, not the first time it quietly fails to fire. The cron evaluator skips days and hours that cannot match, so looking a year ahead costs hundreds of checks instead of half a million — and an impossible date (31 February) returns "never" instead of hanging
 
+- [x] 4.2d offsite copies (§17.4, ADR 0012): a backup on the same server as the data is not a backup, so copies leaving the server are part of the feature. One restic repository per organization on any S3-compatible storage (S3, R2, B2, Spaces, MinIO), encrypted client-side with a key VDeploy makes and shows **once** — "without this key your copies cannot be restored, not by you and not by us" — or, for a repository that already holds copies, the key the person supplies. Every credential reaches the server sealed to its agent and lives only in the client's environment; the frame, the log and the process list never hold one. Order carries the safety: dump, read it back, copy it away, and only then apply local retention, so a prune list is never applied to a backup that reached nowhere else, and a copy that fails does not spoil the good backup that is here — the reason is recorded and told. Configuring a target proves it on a connected server (reach the repository, create it when new, write nothing), which also stops several servers racing to initialise it on the first night; a target set while every server was offline is proved when one dials in. Offsite retention counts each database's own snapshots. The standing warning stands on the Databases screen until copies leave or someone says in so many words that they accept the risk. Also: `backup_failed` now actually fires — a failed backup, or a good one that never left the server, is said out loud when it happens
+
 ## Doing
 
-- [ ] 4.2d the rest of §17.4–17.5: offsite copies with restic (a backup on the same server is not a backup), downloading the dump, importing one from elsewhere, and a restore verified on a schedule rather than assumed
+- [ ] 4.2e the rest of §17.5: downloading the dump (a plain file the person owns), importing one from elsewhere as the migration on-ramp, and a restore verified on a schedule rather than assumed
 
 ## Next
 

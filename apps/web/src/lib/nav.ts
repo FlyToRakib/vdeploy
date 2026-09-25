@@ -4,6 +4,7 @@ import {
   ClipboardCheck,
   FolderKanban,
   GitBranch,
+  HardDriveDownload,
   LayoutDashboard,
   Server,
   ShieldCheck,
@@ -40,6 +41,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Approvals',
     icon: ClipboardCheck,
     keywords: ['approve', 'confirm', 'waiting', 'plans'],
+  },
+  {
+    href: '/settings/backups',
+    label: 'Backups',
+    icon: HardDriveDownload,
+    keywords: ['offsite', 'restic', 's3', 'copies', 'restore', 'storage'],
   },
   {
     href: '/settings/notifications',

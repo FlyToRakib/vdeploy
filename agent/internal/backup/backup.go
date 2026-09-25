@@ -58,7 +58,9 @@ type Request struct {
 	FileName    string       `json:"fileName"`
 	// Remove are older artifacts the control plane says may go — but only
 	// once this one is written and checked.
-	Remove         []string `json:"remove"`
+	Remove []string `json:"remove"`
+	// Offsite is where a copy goes afterwards; nil means it stays here alone.
+	Offsite        *Offsite `json:"offsite,omitempty"`
 	TimeoutSeconds int      `json:"timeoutSeconds"`
 }
 
@@ -71,7 +73,9 @@ type Result struct {
 	Verified  bool     `json:"verified"`
 	Error     string   `json:"error,omitempty"`
 	Removed   []string `json:"removed"`
-	Log       string   `json:"log"`
+	// Offsite is what became of the copy that was to leave this server.
+	Offsite *OffsiteOutcome `json:"offsite,omitempty"`
+	Log     string          `json:"log"`
 }
 
 // Engine is what taking a backup needs from Docker.
@@ -212,6 +216,12 @@ func (r *Runner) Take(ctx context.Context, req Request) Result {
 		return result
 	}
 	result.OK = true
+	// A copy leaves before anything here is deleted, so retention never runs
+	// against a backup that reached nowhere else.
+	if req.Offsite != nil {
+		outcome := r.PushOffsite(ctx, req, *req.Offsite)
+		result.Offsite = &outcome
+	}
 	// Only now, with a good backup on disk, may the old ones go.
 	result.Removed = r.prune(runCtx, req, helper)
 	return result

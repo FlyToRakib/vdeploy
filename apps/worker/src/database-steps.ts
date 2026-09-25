@@ -259,8 +259,14 @@ export async function takeBackupStep(
   for (;;) {
     const backup = await getBackup(deps.db, queued.id);
     if (backup?.status === 'done') {
+      // Where the copy went matters as much as that it was taken (§17.4).
+      const copy = backup.offsiteAt
+        ? ' A copy is off the server.'
+        : backup.offsiteError
+          ? ` The copy did not leave the server: ${backup.offsiteError}`
+          : '';
       state.notes.push(
-        `Backed up ${row.name}: ${String(Math.round((backup.sizeBytes ?? 0) / 1024))} KB, checked and readable.`,
+        `Backed up ${row.name}: ${String(Math.round((backup.sizeBytes ?? 0) / 1024))} KB, checked and readable.${copy}`,
       );
       return;
     }

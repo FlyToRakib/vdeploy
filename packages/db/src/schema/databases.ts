@@ -136,12 +136,80 @@ export const backups = pgTable(
     log: text('log').notNull().default(''),
     /** Set when the artifact was deleted to keep within the policy; the record stays. */
     prunedAt: timestamp('pruned_at', { withTimezone: true }),
+    /** When a copy of this backup reached the offsite target, and in which snapshot. */
+    offsiteAt: timestamp('offsite_at', { withTimezone: true }),
+    offsiteSnapshot: text('offsite_snapshot'),
+    /** Why the copy did not leave the server; the local backup is still good. */
+    offsiteError: text('offsite_error'),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   (t) => [index('backups_database_created').on(t.databaseId, t.createdAt)],
 );
+
+/**
+ * Where an organization's backups also go (§17.4). A backup on the same VPS
+ * is not a backup, so the target is part of the feature: a restic repository
+ * on any S3-compatible storage, encrypted client-side with a key the target
+ * never sees.
+ */
+export const backupTargets = pgTable(
+  'backup_targets',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<'s3'>().notNull().default('s3'),
+    /** The restic repository, e.g. `s3:https://…/bucket/path`; not a credential. */
+    repository: text('repository').notNull(),
+    region: text('region'),
+    /** The repository password and the storage keys, under this target's own key. */
+    passwordSealed: text('password_sealed').notNull(),
+    accessKeySealed: text('access_key_sealed').notNull(),
+    secretKeySealed: text('secret_key_sealed').notNull(),
+    version: integer('version').notNull().default(1),
+    /** Nothing depends on a target until a server has actually reached it. */
+    status: text('status').$type<'pending' | 'checking' | 'ok' | 'failed'>().notNull(),
+    /** The server asked to prove it; the check runs where backups will run. */
+    checkServerId: text('check_server_id').references(() => servers.id, { onDelete: 'set null' }),
+    checkId: text('check_id'),
+    checkedAt: timestamp('checked_at', { withTimezone: true }),
+    error: text('error'),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [
+    // One place copies go: a second target would quietly halve what is protected.
+    uniqueIndex('backup_targets_org_live')
+      .on(t.orgId)
+      .where(sql`${t.deletedAt} is null`),
+  ],
+);
+
+/** The target's data key, wrapped by the installation key (§22). */
+export const backupTargetKeys = pgTable('backup_target_keys', {
+  targetId: text('target_id')
+    .primaryKey()
+    .references(() => backupTargets.id, { onDelete: 'cascade' }),
+  wrapped: text('wrapped').notNull(),
+  createdAt: createdAt(),
+});
+
+/**
+ * Whether someone has accepted that backups live only on the servers that
+ * made them. Without a row, the standing warning stands.
+ */
+export const backupSettings = pgTable('backup_settings', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id, { onDelete: 'cascade' }),
+  offsiteDismissedAt: timestamp('offsite_dismissed_at', { withTimezone: true }),
+  offsiteDismissedBy: text('offsite_dismissed_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Putting a backup back (§17.5): to a new database, or over an existing one. */
 export const restores = pgTable(

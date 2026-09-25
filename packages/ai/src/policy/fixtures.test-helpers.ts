@@ -154,6 +154,12 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'database.unlink': { databaseId: newId('database') },
   'database.restore': { backupId: newId('backup'), mode: 'new' },
   'database.backup_policy': { policy: DEFAULT_BACKUP_POLICY },
+  'backup.set_offsite': {
+    repository: 's3:https://s3.eu-central-1.amazonaws.com/example/vdeploy',
+    accessKeyId: 'AKIAEXAMPLE',
+    secretAccessKey: 'not-a-real-key',
+  },
+  'backup.dismiss_offsite_warning': { dismissed: true },
   'server.set_address': { ipv4: '8.8.4.4' },
   'server.check_reachability': {},
   'notification.channel_create': {

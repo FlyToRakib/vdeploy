@@ -19,6 +19,12 @@ import {
   finishRestore,
   getRestore,
   RESTORES_CHANNEL,
+  OFFSITE_CHANNEL,
+  backupTargetSecrets,
+  claimOffsiteChecks,
+  finishOffsiteCheck,
+  liveBackupTarget,
+  type BackupTargetRow,
   databasePassword,
   finishBackup,
   getBackup,
@@ -30,6 +36,7 @@ import {
   observedState,
   readSecret,
   recordEvents,
+  notifyBackupResult,
   notifyFromReport,
   notifyUnreachable,
   refreshInstantHosts,
@@ -112,6 +119,7 @@ export class Gateway implements LogSource {
   private stopBuildListening: (() => Promise<void>) | null = null;
   private stopBackupListening: (() => Promise<void>) | null = null;
   private stopRestoreListening: (() => Promise<void>) | null = null;
+  private stopOffsiteListening: (() => Promise<void>) | null = null;
 
   /** When each server's ports were last checked from here (ms). */
   private readonly reachChecked = new Map<string, number>();
@@ -141,12 +149,74 @@ export class Gateway implements LogSource {
         });
       },
     );
+    this.stopOffsiteListening = await listen(this.deps.databaseUrl, OFFSITE_CHANNEL, (serverId) => {
+      void this.dispatchOffsiteChecks(serverId).catch((err: unknown) => {
+        this.deps.log.error({ err, serverId }, 'could not check the offsite target');
+      });
+    });
   }
 
   /**
    * Sends a server's queued builds to its agent (ADR 0008), each with a
    * one-time token for its source and its build secrets sealed to the agent.
    */
+  /**
+   * The offsite target as this server must see it (§17.4): the repository in
+   * the clear, every key sealed to this agent, and the retention that applies
+   * to this database's own snapshots and no one else's.
+   */
+  private async offsiteFor(
+    serverId: string,
+    agentBoxKey: string,
+    target: BackupTargetRow,
+    tag: string,
+    keepLast: number,
+  ) {
+    const secrets = await backupTargetSecrets(this.deps.db, this.deps.secretsKey, target);
+    const sealValue = (key: string, value: string) => ({
+      key,
+      version: target.version,
+      sealed: sealTo(agentBoxKey, value, deliveryContext(serverId, target.id, key, target.version)),
+    });
+    return {
+      targetId: target.id,
+      repository: target.repository,
+      credentials: [
+        sealValue('RESTIC_PASSWORD', secrets.password),
+        sealValue('AWS_ACCESS_KEY_ID', secrets.accessKeyId),
+        sealValue('AWS_SECRET_ACCESS_KEY', secrets.secretAccessKey),
+      ],
+      env: target.region ? [{ key: 'AWS_DEFAULT_REGION', value: target.region }] : [],
+      tag,
+      keepLast,
+    };
+  }
+
+  /**
+   * Asks a server to prove the organization's offsite target, and to create
+   * the repository when it is new — so nothing depends on storage nobody has
+   * reached, and the first night's backups do not race to initialise it.
+   */
+  async dispatchOffsiteChecks(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const { db, key, now } = this.deps;
+    const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+    if (!server?.agentBoxKey) return;
+    for (const target of await claimOffsiteChecks(db, serverId, now())) {
+      if (!target.checkId) continue;
+      connection.socket.send(
+        seal(key, {
+          ...connection.session.next('offsite_check'),
+          check: {
+            checkId: target.checkId,
+            target: await this.offsiteFor(serverId, server.agentBoxKey, target, 'vdeploy', 0),
+          },
+        }),
+      );
+    }
+  }
+
   /**
    * Sends a server's queued backups to its agent (§17.4): the engine's own
    * client, version-matched, with the password sealed to that agent.
@@ -158,11 +228,23 @@ export class Gateway implements LogSource {
     const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
     // Without the agent's box key nothing can be sealed to it, so nothing is sent.
     if (!server?.agentBoxKey) return;
+    const target = await liveBackupTarget(db, server.orgId);
     for (const backup of await claimBackups(db, serverId, now())) {
       const database = await getDatabase(db, backup.databaseId);
       if (!database) continue;
       const profile = engineProfile(database.engine);
       const password = await databasePassword(db, secretsKey, database);
+      // A copy leaves for storage of the owner's own, tagged so retention
+      // counts this database's snapshots and nobody else's (§17.4).
+      const offsite = target
+        ? await this.offsiteFor(
+            serverId,
+            server.agentBoxKey,
+            target,
+            database.id,
+            database.backupPolicy.keepOffsite,
+          )
+        : undefined;
       connection.socket.send(
         seal(key, {
           ...connection.session.next('backup'),
@@ -197,6 +279,7 @@ export class Gateway implements LogSource {
             remove: (await prunableBackups(db, database.id, database.backupPolicy.keepLocal)).map(
               (old) => old.fileName,
             ),
+            ...(offsite ? { offsite } : {}),
             timeoutSeconds: 3600,
           },
         }),
@@ -341,6 +424,9 @@ export class Gateway implements LogSource {
       socket.close(1001, 'control plane stopping');
     await this.stopListening?.();
     await this.stopBuildListening?.();
+    await this.stopBackupListening?.();
+    await this.stopRestoreListening?.();
+    await this.stopOffsiteListening?.();
   }
 
   isConnected(serverId: string): boolean {
@@ -399,6 +485,9 @@ export class Gateway implements LogSource {
             this.connections.set(serverId, { socket, session });
             await this.push(serverId);
             await this.dispatchBuilds(serverId);
+            // A target configured while this server was away is proved now,
+            // rather than waiting for someone to notice nothing happened.
+            await this.dispatchOffsiteChecks(serverId);
             return;
           }
           await this.receive(serverId, server.orgId, frame);
@@ -507,12 +596,22 @@ export class Gateway implements LogSource {
     } else if (frame.type === 'restore_result') {
       const restore = await getRestore(db, frame.result.restoreId);
       if (restore?.serverId === serverId) await finishRestore(db, frame.result, now());
+    } else if (frame.type === 'offsite_check_result') {
+      // Only the server that was asked may answer, about the check it was asked.
+      const target = await liveBackupTarget(db, orgId);
+      if (target?.checkServerId === serverId && target.checkId === frame.result.checkId) {
+        await finishOffsiteCheck(db, frame.result, now());
+      }
     } else if (frame.type === 'backup_result') {
       // Only the server that was asked may answer, and only about its own backup.
       const backup = await getBackup(db, frame.result.backupId);
       if (backup?.serverId === serverId) {
         await finishBackup(db, frame.result, now());
         await markBackupsPruned(db, frame.result.removed, backup.databaseId, now());
+        const database = await getDatabase(db, backup.databaseId);
+        // A backup that failed, or one that never left the server, is said out
+        // loud now rather than discovered at restore time (§17.4).
+        if (database) await notifyBackupResult(db, orgId, database, frame.result, now());
       }
     } else if (frame.type === 'logs_chunk' || frame.type === 'logs_end') {
       // Only the server a request went to may answer it.

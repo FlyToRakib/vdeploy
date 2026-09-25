@@ -21,6 +21,7 @@ import {
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { AI_QUERIES } from './ai-settings.js';
 import { DATABASE_QUERIES } from './database-queries.js';
+import { OFFSITE_QUERIES } from './offsite.js';
 import { GITHUB_QUERIES } from './github.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
 import type { Handler } from './context.js';
@@ -48,6 +49,7 @@ const notYet: Handler = () =>
 export const QUERIES: Partial<Record<OperationName, Handler>> = {
   ...AI_QUERIES,
   ...DATABASE_QUERIES,
+  ...OFFSITE_QUERIES,
   ...NOTIFICATION_QUERIES,
   ...GITHUB_QUERIES,
   'project.list': async ({ deps, actor }) => projectSummaries(deps.db, actor.orgId),

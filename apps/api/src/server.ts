@@ -143,6 +143,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     publicUrl: config.PUBLIC_URL,
     now: deps.now ?? (() => new Date()),
     logs: gateway,
+    connected: (serverId: string) => gateway.isConnected(serverId),
     probe,
     ...(github ? { github } : {}),
     ...(model ? { model } : {}),

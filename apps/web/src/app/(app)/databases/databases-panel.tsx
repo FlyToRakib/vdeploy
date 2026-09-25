@@ -27,6 +27,7 @@ import {
   type BackupSummary,
   type DatabaseEngine,
   type DatabaseSummary,
+  type OffsiteSummary,
 } from '@/lib/databases';
 import { cn } from '@/lib/cn';
 import { formText } from '@/lib/forms';
@@ -701,6 +702,7 @@ export function DatabasesPanel() {
   const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [servers, setServers] = useState<ServerSummary[]>([]);
+  const [offsite, setOffsite] = useState<OffsiteSummary | null>(null);
   const [adding, setAdding] = useState(false);
   const [version, setVersion] = useState(0);
 
@@ -710,12 +712,14 @@ export function DatabasesPanel() {
       query<ProjectSummary[]>('project.list').catch(() => []),
       query<ServerSummary[]>('server.list').catch(() => []),
       query<BackupSummary[]>('backup.list').catch(() => []),
+      query<OffsiteSummary>('backup.offsite').catch(() => null),
     ]).then(
-      ([list, apps, machines, taken]) => {
+      ([list, apps, machines, taken, copies]) => {
         setDatabases(list);
         setProjects(apps);
         setServers(machines);
         setBackups(taken);
+        setOffsite(copies);
       },
       () => {
         setDatabases([]);
@@ -752,6 +756,14 @@ export function DatabasesPanel() {
           so you never copy a password anywhere.
           <div className="mt-4">{add}</div>
         </EmptyState>
+      )}
+      {offsite?.warning && (
+        <Card className="flex flex-wrap items-center gap-3 border-status-warning">
+          <p className="min-w-60 flex-1 text-sm">{offsite.warning}</p>
+          <Button asChild size="sm" variant="secondary">
+            <Link href="/settings/backups">Send copies somewhere else</Link>
+          </Button>
+        </Card>
       )}
       {databases?.map((database) => (
         <DatabaseCard

@@ -32,10 +32,13 @@ const (
 	TypeBackupResult  = "backup_result"
 	TypeRestore       = "restore"
 	TypeRestoreResult = "restore_result"
-	TypeLogs          = "logs"
-	TypeLogsStop      = "logs_stop"
-	TypeLogsChunk     = "logs_chunk"
-	TypeLogsEnd       = "logs_end"
+
+	TypeOffsiteCheck       = "offsite_check"
+	TypeOffsiteCheckResult = "offsite_check_result"
+	TypeLogs               = "logs"
+	TypeLogsStop           = "logs_stop"
+	TypeLogsChunk          = "logs_chunk"
+	TypeLogsEnd            = "logs_end"
 )
 
 // MaxClockSkew bounds how far a frame's timestamp may be from ours.

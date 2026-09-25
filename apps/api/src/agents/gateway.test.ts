@@ -65,6 +65,10 @@ async function enroll(name: string): Promise<Agent> {
 
 /** A minimal agent speaking the real protocol. */
 class FakeAgent {
+  readonly boxKey = generateKeyPairSync('x25519')
+    .publicKey.export({ type: 'spki', format: 'der' })
+    .subarray(-32)
+    .toString('base64');
   readonly inbox: Record<string, unknown>[] = [];
   closed: number | null = null;
   session!: FrameSession;
@@ -93,6 +97,8 @@ class FakeAgent {
       agentVersion: 'test',
       protocol: 1,
       generation: -1,
+      // The agent's X25519 public key: everything secret is sealed to it.
+      boxKey: this.boxKey,
       hostname: 'vps-1',
       arch: 'amd64',
       os: 'linux',
@@ -383,6 +389,62 @@ describe('agent channel', () => {
       attack(fake);
       expect(await fake.waitClosed(), name).toBe(1008);
     }
+  });
+
+  it('proves the offsite target from a server, with every key sealed on the way', async () => {
+    const agent = await enroll('server-offsite');
+    const fake = new FakeAgent(agent);
+    await fake.connect();
+    await fake.next(); // the first desired state
+
+    await owner.request('POST', '/api/v1/auth/step-up', { password: PASSWORD });
+    const saved = await owner.request('POST', '/api/v1/operations/backup.set_offsite', {
+      input: {
+        repository: 's3:https://s3.eu-central-1.amazonaws.com/acme/vdeploy',
+        accessKeyId: 'AKIAEXAMPLE',
+        secretAccessKey: 'a-secret-nobody-should-see',
+        region: 'eu-central-1',
+      },
+    });
+    // The key that unlocks the copies is made here and shown exactly once.
+    const outcome = saved.json<{ result: { password: string; warning: string } }>().result;
+    expect(outcome.password).toHaveLength(32);
+    expect(outcome.warning).toContain('not by us');
+
+    const check = await fake.next();
+    expect(check).toMatchObject({
+      type: 'offsite_check',
+      check: {
+        target: {
+          repository: 's3:https://s3.eu-central-1.amazonaws.com/acme/vdeploy',
+          env: [{ key: 'AWS_DEFAULT_REGION', value: 'eu-central-1' }],
+          // A check reaches the repository; it never writes a snapshot.
+          keepLast: 0,
+        },
+      },
+    });
+    // Nothing in the frame is readable by anyone but this agent.
+    const frame = JSON.stringify(check);
+    expect(frame).not.toContain('a-secret-nobody-should-see');
+    expect(frame).not.toContain(outcome.password);
+    expect(frame).toContain('RESTIC_PASSWORD');
+
+    const { checkId } = check.check as { checkId: string };
+    fake.send({
+      ...fake.session.next('offsite_check_result'),
+      result: { checkId, ok: true, log: 'created restic repository 4f1a' },
+    });
+    await expect
+      .poll(async () => {
+        const res = await owner.request('POST', '/api/v1/operations/backup.offsite', { input: {} });
+        return res.json<{ result: { target: { status: string } | null } }>().result.target?.status;
+      })
+      .toBe('ok');
+
+    // With copies leaving the server, the standing warning stops standing.
+    const after = await owner.request('POST', '/api/v1/operations/backup.offsite', { input: {} });
+    expect(after.json<{ result: { warning: string | null } }>().result.warning).toBeNull();
+    fake.close();
   });
 
   it('refuses a connection for a server that never enrolled', async () => {
