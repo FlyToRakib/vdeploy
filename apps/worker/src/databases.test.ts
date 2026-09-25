@@ -87,6 +87,8 @@ async function run(operation: OperationName, args: Record<string, unknown>) {
 let agentTimer: NodeJS.Timeout;
 /** What the stand-in agent reports about the next backup it is asked for. */
 let restoreWorks = true;
+let agentStopped = false;
+let ticking: Promise<void> = Promise.resolve();
 let backupOutcome = {
   ok: true,
   sizeBytes: 4096,
@@ -194,11 +196,18 @@ beforeAll(async () => {
       throw error;
     },
   };
-  agentTimer = setInterval(() => void agentTick(), 50);
+  // One agent, one thing at a time — and nothing in flight when the test
+  // database goes away, which would otherwise fail a passing run.
+  agentTimer = setInterval(() => {
+    if (agentStopped) return;
+    ticking = ticking.then(() => agentTick()).catch(() => undefined);
+  }, 50);
 }, 120_000);
 
 afterAll(async () => {
+  agentStopped = true;
   clearInterval(agentTimer);
+  await ticking;
   await t.stop();
 });
 

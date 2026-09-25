@@ -162,6 +162,13 @@
       "when": 1790351577422,
       "tag": "0022_import_a_dump",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790352645069,
+      "tag": "0023_verified_restores",
+      "breakpoints": true
     }
   ]
 }

@@ -131,6 +131,13 @@ export const OPERATIONS = [
     obj({ databaseId }),
   ),
   query(
+    'backup.checks',
+    'org',
+    'config',
+    'Show whether the backups have actually been put back, and when',
+    obj({}),
+  ),
+  query(
     'backup.offsite',
     'org',
     'config',

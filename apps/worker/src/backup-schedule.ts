@@ -2,6 +2,9 @@ import type { DatabaseEngine } from '@vdeploy/contracts';
 import { dueSince, engineProfile } from '@vdeploy/core';
 import {
   markBackupChecked,
+  markVerifyChecked,
+  newestGoodBackup,
+  queueVerification,
   notify,
   queueBackup,
   schedulableDatabases,
@@ -68,4 +71,43 @@ export async function runDueBackups(deps: ScheduleDeps): Promise<number> {
 /** The client image a scheduled backup will use, for the settings screen. */
 export function clientImage(engine: DatabaseEngine, version: string): string {
   return `${engineProfile(engine).repository}:${version}`;
+}
+
+/**
+ * Backups proved by putting them back (§17.5). On a schedule, the newest
+ * checked backup of each database is restored into a throwaway engine and
+ * looked at. A backup system nobody exercises is a checkbox; this is the
+ * difference, and it runs without anyone remembering it.
+ */
+export async function runDueVerifications(deps: ScheduleDeps): Promise<number> {
+  const now = deps.now();
+  let queued = 0;
+  for (const database of await schedulableDatabases(deps.db)) {
+    const { backupPolicy: policy } = database;
+    if (!policy.enabled || policy.verifyEveryDays <= 0) continue;
+    // The clock starts at the last check, or at the last time we looked, so
+    // turning checks on does not immediately run one for every database.
+    const since = database.verifiedAt ?? database.verifyCheckedAt ?? database.createdAt;
+    const due = since.getTime() + policy.verifyEveryDays * 24 * 60 * 60_000;
+    if (now.getTime() < due) continue;
+    try {
+      const backup = await newestGoodBackup(deps.db, database.id);
+      await deps.db.transaction(async (tx) => {
+        await markVerifyChecked(tx, database.id, now);
+        // Nothing to prove yet: the backup schedule's own alerting covers a
+        // database with no good backup, so this stays quiet.
+        if (!backup) return;
+        await queueVerification(tx, {
+          orgId: database.orgId,
+          databaseId: database.id,
+          backupId: backup.id,
+          serverId: database.serverId,
+        });
+        queued += 1;
+      });
+    } catch (err) {
+      deps.logError(err, database.id);
+    }
+  }
+  return queued;
 }

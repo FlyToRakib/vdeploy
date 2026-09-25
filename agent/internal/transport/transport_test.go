@@ -253,6 +253,10 @@ func (o *oneBackup) CheckOffsite(context.Context, backup.CheckRequest) backup.Ch
 	return backup.CheckResult{}
 }
 
+func (o *oneBackup) Verify(context.Context, backup.VerifyRequest) backup.VerifyResult {
+	return backup.VerifyResult{}
+}
+
 func (o *oneBackup) Send(
 	_ context.Context,
 	_ backup.ArtifactRequest,

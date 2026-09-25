@@ -52,6 +52,10 @@ export const databases = pgTable(
     passwordVersion: integer('password_version').notNull().default(1),
     /** When backups run and how many are kept (§17.4); daily, 7 local, 30 offsite. */
     backupPolicy: jsonb('backup_policy').$type<BackupPolicy>().notNull().default(DEFAULT_POLICY),
+    /** The last time a backup was proved by putting it back (§17.5). */
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    /** When the schedule for that was last looked at. */
+    verifyCheckedAt: timestamp('verify_checked_at', { withTimezone: true }),
     /** The last time the schedule was looked at, so a missed run is late, not skipped. */
     backupCheckedAt: timestamp('backup_checked_at', { withTimezone: true }),
     createdAt: createdAt(),
@@ -212,6 +216,39 @@ export const backupSettings = pgTable('backup_settings', {
   offsiteDismissedBy: text('offsite_dismissed_by'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Proving a backup by putting it back (§17.5). It happens on a schedule,
+ * into a throwaway engine that exists for the length of the check, so the
+ * answer to "can this actually be restored?" is measured rather than hoped.
+ */
+export const verifications = pgTable(
+  'verifications',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'restrict' }),
+    databaseId: text('database_id')
+      .notNull()
+      .references(() => databases.id, { onDelete: 'cascade' }),
+    backupId: text('backup_id')
+      .notNull()
+      .references(() => backups.id, { onDelete: 'cascade' }),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'restrict' }),
+    status: text('status').$type<'queued' | 'running' | 'done' | 'failed'>().notNull(),
+    /** How many tables came back: an empty restore is a failed one. */
+    tables: integer('tables'),
+    error: text('error'),
+    log: text('log').notNull().default(''),
+    createdAt: createdAt(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [index('verifications_database_created').on(t.databaseId, t.createdAt)],
+);
 
 /** Putting a backup back (§17.5): to a new database, or over an existing one. */
 export const restores = pgTable(

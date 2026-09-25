@@ -14,7 +14,7 @@ import { createTransport } from 'nodemailer';
 import { pino } from 'pino';
 import { z } from 'zod';
 import { applyPlan } from './apply.js';
-import { runDueBackups } from './backup-schedule.js';
+import { runDueBackups, runDueVerifications } from './backup-schedule.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
 import { safePoster, sendDueNotifications } from './notifications.js';
 import { publicRegistries } from './registry.js';
@@ -142,6 +142,27 @@ const backupTimer = setInterval(() => {
     });
 }, 60_000);
 
+// Proving those backups by putting them back (§17.5). Checked every ten
+// minutes: a weekly check does not need a closer watch than that.
+let verifying = false;
+const verifyTimer = setInterval(() => {
+  if (verifying) return;
+  verifying = true;
+  runDueVerifications({
+    db,
+    now: () => new Date(),
+    logError: (err, databaseId) => {
+      log.error({ err, databaseId }, 'could not start a restore check');
+    },
+  })
+    .catch((err: unknown) => {
+      log.error({ err }, 'restore check round failed');
+    })
+    .finally(() => {
+      verifying = false;
+    });
+}, 10 * 60_000);
+
 // The project timeline keeps 30 days; pruned hourly.
 const pruneTimer = setInterval(() => {
   pruneEvents(db, new Date()).catch((err: unknown) => {
@@ -189,6 +210,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     clearInterval(dnsTimer);
     clearInterval(backupTimer);
+    clearInterval(verifyTimer);
     clearInterval(pruneTimer);
     clearInterval(notifyTimer);
     clearInterval(offlineTimer);

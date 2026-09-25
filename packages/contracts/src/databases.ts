@@ -19,6 +19,8 @@ export const BackupPolicy = z.strictObject({
   timezone: z.string().min(1).max(64).default('UTC'),
   keepLocal: z.number().int().min(1).max(365).default(7),
   keepOffsite: z.number().int().min(0).max(3650).default(30),
+  /** How often a backup is proved by putting it back; 0 never does (§17.5). */
+  verifyEveryDays: z.number().int().min(0).max(365).default(7),
 });
 export type BackupPolicy = z.infer<typeof BackupPolicy>;
 
@@ -29,6 +31,7 @@ export const DEFAULT_BACKUP_POLICY: BackupPolicy = {
   timezone: 'UTC',
   keepLocal: 7,
   keepOffsite: 30,
+  verifyEveryDays: 7,
 };
 
 /** What a database is, to everyone outside the data layer. */
@@ -49,6 +52,8 @@ export const DatabaseView = z.strictObject({
   dbName: z.string().max(64).nullable(),
   memoryLimit: Memory,
   diskSize: Memory,
+  /** The last time a backup of it was proved by putting it back (§17.5). */
+  verifiedAt: z.iso.datetime().nullable(),
   /** When it is backed up and how many copies stay (§17.4). */
   backupPolicy: BackupPolicy,
   /** Projects this database is linked to, and the variable each one gets. */

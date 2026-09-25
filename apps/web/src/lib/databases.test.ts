@@ -12,6 +12,7 @@ import {
   scheduleWords,
   sizeWords,
   statusWords,
+  verifiedWords,
   type BackupSummary,
   type DatabaseSummary,
   type OffsiteSummary,
@@ -40,7 +41,9 @@ const database: DatabaseSummary = {
     timezone: 'UTC',
     keepLocal: 7,
     keepOffsite: 30,
+    verifyEveryDays: 7,
   },
+  verifiedAt: null,
   createdAt: '2026-09-24T00:00:00.000Z',
 };
 
@@ -152,6 +155,7 @@ describe('the backup schedule, in words', () => {
     timezone: 'UTC',
     keepLocal: 7,
     keepOffsite: 30,
+    verifyEveryDays: 7,
   };
 
   it('offers schedules people recognise, and says what one means', () => {
@@ -251,5 +255,43 @@ describe('a dump from somewhere else', () => {
     expect(dumpWords(dump())).toBe('A PostgreSQL 16.2 dump, 4.0 MB');
     expect(dumpWords(dump({ version: null }))).toBe('A PostgreSQL dump, 4.0 MB');
     expect(dumpWords(dump({ engine: null, version: null }))).toBe('A database dump, 4.0 MB');
+  });
+});
+
+describe('whether a backup would actually come back', () => {
+  const now = Date.parse('2026-09-26T04:00:00.000Z');
+  const policy = {
+    enabled: true,
+    expr: '0 3 * * *',
+    timezone: 'UTC',
+    keepLocal: 7,
+    keepOffsite: 30,
+    verifyEveryDays: 7,
+  };
+
+  it('says plainly when nobody has ever tried', () => {
+    const never = verifiedWords({ verifiedAt: null, backupPolicy: policy }, now);
+    expect(never.tone).toBe('warning');
+    expect(never.words).toContain('nobody knows whether one would work');
+  });
+
+  it('says when it was last put back, because that is the whole point', () => {
+    const done = verifiedWords(
+      { verifiedAt: '2026-09-24T04:00:00.000Z', backupPolicy: policy },
+      now,
+    );
+    expect(done).toEqual({
+      tone: 'good',
+      words: 'Last put back and checked 2 days ago — it worked.',
+    });
+  });
+
+  it('does not nag when someone turned the checks off', () => {
+    const off = verifiedWords(
+      { verifiedAt: null, backupPolicy: { ...policy, verifyEveryDays: 0 } },
+      now,
+    );
+    expect(off.tone).toBe('neutral');
+    expect(off.words).toContain('Nobody checks');
   });
 });

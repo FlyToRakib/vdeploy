@@ -9,17 +9,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 )
 
 // fakeEngine answers helper runs from a script, and records what it was asked.
 type fakeEngine struct {
-	runs    []docker.Helper
-	dump    func(docker.Helper) (int, string, error)
-	checked string // "<size> <sha> <magic hex>"
-	stored  map[string]string
-	removed []string
-	volumes map[string]bool
+	runs     []docker.Helper
+	dump     func(docker.Helper) (int, string, error)
+	checked  string // "<size> <sha> <magic hex>"
+	stored   map[string]string
+	removed  []string
+	made     []string
+	gone     []string
+	created  []compose.Container
+	started  []string
+	managed  []docker.Container
+	imageErr error
+	startErr error
+	volumes  map[string]bool
 }
 
 func (f *fakeEngine) RunHelper(_ context.Context, h docker.Helper) (int, string, error) {
@@ -74,6 +82,35 @@ func (f *fakeEngine) WriteVolumeFile(
 func (f *fakeEngine) RemoveVolumeFile(_ context.Context, _, _, _, _, file string) error {
 	delete(f.stored, file)
 	f.removed = append(f.removed, file)
+	return nil
+}
+
+// The throwaway engine of a restore check: what was made, and what went.
+func (f *fakeEngine) EnsureImage(context.Context, string) error { return f.imageErr }
+
+func (f *fakeEngine) EnsureNetwork(_ context.Context, name, _ string) error {
+	f.made = append(f.made, name)
+	return nil
+}
+
+func (f *fakeEngine) RemoveNetwork(_ context.Context, name string) error {
+	f.gone = append(f.gone, name)
+	return nil
+}
+
+func (f *fakeEngine) Create(_ context.Context, ct compose.Container) (string, error) {
+	f.created = append(f.created, ct)
+	f.made = append(f.made, ct.Name)
+	return ct.Name, nil
+}
+
+func (f *fakeEngine) Start(_ context.Context, id string) error {
+	f.started = append(f.started, id)
+	return f.startErr
+}
+
+func (f *fakeEngine) RemoveWithVolumes(_ context.Context, id string) error {
+	f.gone = append(f.gone, id)
 	return nil
 }
 
@@ -326,4 +363,8 @@ func TestAPruneListCannotReachOutsideTheStore(t *testing.T) {
 	if !slices.Equal(result.Removed, []string{"fine.dump"}) {
 		t.Fatalf("removed = %v", result.Removed)
 	}
+}
+
+func (f *fakeEngine) ListManaged(context.Context) ([]docker.Container, error) {
+	return f.managed, nil
 }

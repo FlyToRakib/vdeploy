@@ -24,6 +24,7 @@ import {
   scheduleWords,
   sizeWords,
   statusWords,
+  verifiedWords,
   type BackupSummary,
   type DatabaseEngine,
   type DatabaseSummary,
@@ -223,6 +224,7 @@ function DatabaseCard({
   const [dump, setDump] = useState<UploadedDump | null>(null);
   const status = statusWords(database.status);
   const data = dataLine(backups);
+  const verified = verifiedWords(database);
   const linked = new Set(database.links.map((link) => link.projectId));
   const free = projects.filter((project) => !linked.has(project.id));
 
@@ -290,6 +292,15 @@ function DatabaseCard({
       <p className="text-sm text-muted-foreground">{reachWords(database)}</p>
       <p className={cn('text-sm', data.tone === 'warning' ? 'text-status-failed' : '')}>
         <span className="font-medium">Data:</span> {data.words}
+      </p>
+      {/* A backup nobody has ever put back is a hope, not a backup (§17.5). */}
+      <p
+        className={cn(
+          'text-sm',
+          verified.tone === 'warning' ? 'text-status-warning' : 'text-muted-foreground',
+        )}
+      >
+        {verified.words}
       </p>
       <p className="text-sm text-muted-foreground">
         {scheduleWords(database.backupPolicy)}{' '}
@@ -520,6 +531,7 @@ function DatabaseCard({
                   timezone: formText(form, 'timezone') || 'UTC',
                   keepLocal: Number(formText(form, 'keepLocal') || '7'),
                   keepOffsite: database.backupPolicy.keepOffsite,
+                  verifyEveryDays: Number(formText(form, 'verifyEveryDays') || '0'),
                 },
               },
               {
@@ -576,6 +588,15 @@ function DatabaseCard({
               max={365}
               defaultValue={database.backupPolicy.keepLocal}
               hint="Older ones go only after a new one is checked."
+            />
+            <Field
+              label="Put one back to check it, every"
+              name="verifyEveryDays"
+              type="number"
+              min={0}
+              max={365}
+              defaultValue={database.backupPolicy.verifyEveryDays}
+              hint="Days. Into a copy of the engine that is thrown away afterwards; 0 never does it."
             />
           </div>
           <div className="flex justify-end gap-2">

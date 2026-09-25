@@ -4,6 +4,8 @@ import {
   backupsFor,
   restoreView,
   restoresFor,
+  verificationView,
+  verificationsFor,
   databaseView,
   databasesOf,
   getDatabase,
@@ -62,6 +64,11 @@ export const DATABASE_QUERIES: Partial<Record<OperationName, Handler>> = {
   'backup.restores': async ({ deps, actor }) => {
     const rows = await restoresFor(deps.db, actor.orgId);
     return rows.map((row) => restoreView(row.restore, row.databaseName));
+  },
+  /** Whether the backups have actually been put back, and when (§17.5). */
+  'backup.checks': async ({ deps, actor }) => {
+    const rows = await verificationsFor(deps.db, actor.orgId);
+    return rows.map((row) => verificationView(row.verification, row.databaseName));
   },
   'database.get': async ({ deps, args }) => {
     if (typeof args.databaseId !== 'string') {

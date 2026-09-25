@@ -15,6 +15,7 @@ export interface DatabaseSummary {
   diskSize: string;
   links: { projectId: string; envKey: string }[];
   backupPolicy: BackupPolicy;
+  verifiedAt: string | null;
   createdAt: string;
 }
 
@@ -157,6 +158,30 @@ export function sizeWords(bytes: number | null): string {
 }
 
 /**
+ * Whether the backups have actually been put back, and when (§17.5). The
+ * difference between a backup system and a checkbox is this sentence, so it
+ * is shown even — especially — when the answer is "never".
+ */
+export function verifiedWords(
+  database: Pick<DatabaseSummary, 'verifiedAt' | 'backupPolicy'>,
+  now = Date.now(),
+): { tone: 'good' | 'warning' | 'neutral'; words: string } {
+  if (database.backupPolicy.verifyEveryDays <= 0) {
+    return { tone: 'neutral', words: 'Nobody checks that these backups can be put back.' };
+  }
+  if (!database.verifiedAt) {
+    return {
+      tone: 'warning',
+      words: 'No backup has been put back yet, so nobody knows whether one would work.',
+    };
+  }
+  return {
+    tone: 'good',
+    words: `Last put back and checked ${ago(database.verifiedAt, now)} — it worked.`,
+  };
+}
+
+/**
  * The one line every database shows about its data (§17.5). It says the
  * uncomfortable thing when it is true: one copy is not a backup.
  */
@@ -192,6 +217,7 @@ export interface BackupPolicy {
   timezone: string;
   keepLocal: number;
   keepOffsite: number;
+  verifyEveryDays: number;
 }
 
 /** The schedules people actually pick, in their own words. */

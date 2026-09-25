@@ -185,6 +185,63 @@ export type OffsiteView = z.infer<typeof OffsiteView>;
 export const RestoreMode = z.enum(['new', 'in_place']);
 export type RestoreMode = z.infer<typeof RestoreMode>;
 
+/**
+ * Proving a backup by putting it back (§17.5). On a schedule, the newest
+ * checked backup is restored into a throwaway engine of its own — its own
+ * container, volume, network and password, none of which outlive the
+ * check — and then looked at. A backup system nobody exercises is a
+ * checkbox, and people find out which they have at the worst moment.
+ */
+export const VerifyRequest = z.strictObject({
+  verifyId: idSchema('restoreCheck'),
+  databaseId: idSchema('database'),
+  engine: DatabaseEngine,
+  /** The engine's own image, the same version the backup came from. */
+  image: z.string().max(256),
+  /** Where the engine keeps its files inside the container. */
+  dataPath: z.string().max(256),
+  port: z.number().int().min(1).max(65535),
+  user: z.string().max(64),
+  dbName: z.string().max(64).nullable(),
+  /** Plain environment the throwaway engine needs; never a credential. */
+  env: z.array(z.strictObject({ key: z.string().max(64), value: z.string().max(4096) })).max(32),
+  /** Its password, made for this check alone and sealed to this agent. */
+  credentials: z.array(Sealed).max(8),
+  /** The artifact to put back, in the backup store. */
+  fileName: z.string().max(200),
+  memoryBytes: z.number().int().positive(),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(30)
+    .max(6 * 3600),
+});
+export type VerifyRequest = z.infer<typeof VerifyRequest>;
+
+export const VerifyResult = z.strictObject({
+  verifyId: idSchema('restoreCheck'),
+  ok: z.boolean(),
+  /** How many tables came back: the difference between data and an empty file. */
+  tables: z.number().int().min(0).nullable(),
+  error: z.string().max(4096).optional(),
+  log: z.string().max(20_000),
+});
+export type VerifyResult = z.infer<typeof VerifyResult>;
+
+/** The last time a database's backup was proved by putting it back. */
+export const VerificationView = z.strictObject({
+  id: idSchema('restoreCheck'),
+  databaseId: idSchema('database'),
+  databaseName: z.string().max(100),
+  backupId: idSchema('backup'),
+  status: z.enum(['queued', 'running', 'done', 'failed']),
+  tables: z.number().int().min(0).nullable(),
+  error: z.string().nullable(),
+  startedAt: z.iso.datetime(),
+  finishedAt: z.iso.datetime().nullable(),
+});
+export type VerificationView = z.infer<typeof VerificationView>;
+
 export const RestoreResult = z.strictObject({
   restoreId: idSchema('restore'),
   ok: z.boolean(),

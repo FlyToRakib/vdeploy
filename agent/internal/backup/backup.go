@@ -100,6 +100,15 @@ type Engine interface {
 		body io.Reader,
 	) error
 	RemoveVolumeFile(ctx context.Context, name, image, volume, mountPath, file string) error
+	// What a restore check needs to stand a throwaway engine up and take it
+	// down again (§17.5). Nothing here touches the database being checked.
+	EnsureImage(ctx context.Context, ref string) error
+	EnsureNetwork(ctx context.Context, name, owner string) error
+	RemoveNetwork(ctx context.Context, name string) error
+	Create(ctx context.Context, ct compose.Container) (string, error)
+	Start(ctx context.Context, id string) error
+	RemoveWithVolumes(ctx context.Context, id string) error
+	ListManaged(ctx context.Context) ([]docker.Container, error)
 }
 
 // Opener opens a value sealed to this agent.
@@ -361,6 +370,9 @@ type RestoreRequest struct {
 	Credentials []Credential `json:"credentials"`
 	// FileName is the artifact in the backup store; it is never a path.
 	FileName string `json:"fileName"`
+	// network is set only from inside this package, for a restore into a
+	// throwaway engine; a frame can never choose where a restore connects.
+	network string
 	// Download is set when the dump came from another host (§17.5): it is
 	// fetched into the store first, used, and removed again.
 	Download       *DumpSource `json:"download,omitempty"`
@@ -457,7 +469,7 @@ func (r *Runner) Restore(ctx context.Context, req RestoreRequest) RestoreResult 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	code, log, err := r.Engine.RunHelper(runCtx, docker.Helper{
-		Name:        "vd-restore-" + compose.DatabaseKey(req.DatabaseID),
+		Name:        "vd-restore-" + shortID(req.RestoreID),
 		Image:       req.Image,
 		Entrypoint:  steps.entrypoint,
 		Cmd:         steps.args,
@@ -465,7 +477,7 @@ func (r *Runner) Restore(ctx context.Context, req RestoreRequest) RestoreResult 
 		Volumes:     map[string]string{Volume: mountPath},
 		MemoryBytes: MemoryBytes,
 		NanoCPUs:    NanoCPUs,
-		Network:     compose.DatabaseNetwork(req.DatabaseID),
+		Network:     restoreNetwork(req),
 		SecurityOpt: []string{"no-new-privileges:true"},
 	})
 	if err != nil {
@@ -519,4 +531,13 @@ func (r *Runner) Send(
 		return size, "", err
 	}
 	return size, hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+// restoreNetwork is the database's own network, unless this restore is a
+// check running against a throwaway engine of its own.
+func restoreNetwork(req RestoreRequest) string {
+	if req.network != "" {
+		return req.network
+	}
+	return compose.DatabaseNetwork(req.DatabaseID)
 }

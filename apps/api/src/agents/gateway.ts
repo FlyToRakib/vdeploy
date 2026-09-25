@@ -2,11 +2,19 @@ import { createHash, randomBytes, type KeyObject } from 'node:crypto';
 import {
   AgentFrame,
   cleanLogText,
+  memoryBytes,
   EnrollRequest,
   VDeployError,
   type LogLine,
 } from '@vdeploy/contracts';
-import { databaseHost, deliveryContext, engineProfile, isPublicIpv4, sealTo } from '@vdeploy/core';
+import {
+  databaseHost,
+  deliveryContext,
+  engineProfile,
+  generateSecret,
+  isPublicIpv4,
+  sealTo,
+} from '@vdeploy/core';
 import {
   appendAudit,
   BACKUPS_CHANNEL,
@@ -14,6 +22,10 @@ import {
   claimBackups,
   claimBuilds,
   claimRestores,
+  claimVerifications,
+  VERIFY_CHANNEL,
+  finishVerification,
+  getVerification,
   markBackupsPruned,
   prunableBackups,
   finishRestore,
@@ -39,6 +51,7 @@ import {
   readSecret,
   recordEvents,
   notifyBackupResult,
+  notifyRestoreCheck,
   notifyFromReport,
   notifyUnreachable,
   refreshInstantHosts,
@@ -146,6 +159,7 @@ export class Gateway implements LogSource, ArtifactSource {
   private stopBackupListening: (() => Promise<void>) | null = null;
   private stopRestoreListening: (() => Promise<void>) | null = null;
   private stopOffsiteListening: (() => Promise<void>) | null = null;
+  private stopVerifyListening: (() => Promise<void>) | null = null;
 
   /** When each server's ports were last checked from here (ms). */
   private readonly reachChecked = new Map<string, number>();
@@ -178,6 +192,11 @@ export class Gateway implements LogSource, ArtifactSource {
     this.stopOffsiteListening = await listen(this.deps.databaseUrl, OFFSITE_CHANNEL, (serverId) => {
       void this.dispatchOffsiteChecks(serverId).catch((err: unknown) => {
         this.deps.log.error({ err, serverId }, 'could not check the offsite target');
+      });
+    });
+    this.stopVerifyListening = await listen(this.deps.databaseUrl, VERIFY_CHANNEL, (serverId) => {
+      void this.dispatchVerifications(serverId).catch((err: unknown) => {
+        this.deps.log.error({ err, serverId }, 'could not send a restore check');
       });
     });
   }
@@ -306,6 +325,63 @@ export class Gateway implements LogSource, ArtifactSource {
               (old) => old.fileName,
             ),
             ...(offsite ? { offsite } : {}),
+            timeoutSeconds: 3600,
+          },
+        }),
+      );
+    }
+  }
+
+  /**
+   * Sends a server's queued restore checks (§17.5). The throwaway engine
+   * gets a password made for the check alone — never the database's own, so
+   * a copy standing up beside it cannot be reached with the real one.
+   */
+  async dispatchVerifications(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const { db, key, now } = this.deps;
+    const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+    if (!server?.agentBoxKey) return;
+    for (const check of await claimVerifications(db, serverId, now())) {
+      const [database, backup] = await Promise.all([
+        getDatabase(db, check.databaseId),
+        getBackup(db, check.backupId),
+      ]);
+      if (!database || !backup) continue;
+      const profile = engineProfile(database.engine);
+      const password = generateSecret(32, 'alphanumeric');
+      connection.socket.send(
+        seal(key, {
+          ...connection.session.next('verify'),
+          verify: {
+            verifyId: check.id,
+            databaseId: database.id,
+            engine: database.engine,
+            image: database.image,
+            dataPath: profile.dataPath,
+            port: database.port,
+            user: database.user,
+            dbName: database.dbName ?? '',
+            env: profile.env({ user: database.user, dbName: database.dbName }),
+            credentials: [
+              {
+                key: profile.passwordKey,
+                version: database.passwordVersion,
+                sealed: sealTo(
+                  server.agentBoxKey,
+                  password,
+                  deliveryContext(
+                    serverId,
+                    database.id,
+                    profile.passwordKey,
+                    database.passwordVersion,
+                  ),
+                ),
+              },
+            ],
+            fileName: backup.fileName,
+            memoryBytes: memoryBytes(database.memoryLimit),
             timeoutSeconds: 3600,
           },
         }),
@@ -590,6 +666,7 @@ export class Gateway implements LogSource, ArtifactSource {
     await this.stopBackupListening?.();
     await this.stopRestoreListening?.();
     await this.stopOffsiteListening?.();
+    await this.stopVerifyListening?.();
   }
 
   isConnected(serverId: string): boolean {
@@ -764,6 +841,23 @@ export class Gateway implements LogSource, ArtifactSource {
     } else if (frame.type === 'restore_result') {
       const restore = await getRestore(db, frame.result.restoreId);
       if (restore?.serverId === serverId) await finishRestore(db, frame.result, now());
+    } else if (frame.type === 'verify_result') {
+      // Only the server the check went to may answer it.
+      const check = await getVerification(db, frame.result.verifyId);
+      if (check?.serverId === serverId) {
+        const { verifyId, ok, tables, error, log } = frame.result;
+        const finished = await finishVerification(
+          db,
+          { verifyId, ok, tables, ...(error ? { error } : {}), log },
+          now(),
+        );
+        const database = await getDatabase(db, check.databaseId);
+        // A backup that will not come back is the thing this whole layer is
+        // for, so it is said out loud rather than left on a screen.
+        if (finished?.status === 'failed' && database) {
+          await notifyRestoreCheck(db, orgId, database, finished.error, now());
+        }
+      }
     } else if (frame.type === 'offsite_check_result') {
       // Only the server that was asked may answer, about the check it was asked.
       const target = await liveBackupTarget(db, orgId);

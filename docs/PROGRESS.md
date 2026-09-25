@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.2g — a restore verified on a schedule rather than assumed
+**Task:** 4.3 — the rest of M4 (§17.6 guards done; volumes, tasks, terminal, metrics next)
 **Status:** in progress
-**Updated:** 2026-09-25 17:20 UTC
+**Updated:** 2026-09-25 18:30 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -137,9 +137,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.2f importing a dump from elsewhere (§17.5): the way in from any other host. A file is uploaded as the request body and read rather than trusted — what it is comes from its bytes, so the screen can say "a PostgreSQL 16.2 dump, 4.0 MB" before anyone commits to loading it. A dump from a newer engine than the database it is going into is refused **before** anything is created, with what to do instead, rather than failing half way through a restore; so is a file that is not a dump, and one from another engine family. The server fetches it with a one-time token, checks its size and hash on disk before it goes anywhere near a database, loads it, and removes it again — an imported dump is not a backup and nothing else would ever prune it. Into a new database by default; over an existing one only as a destructive plan, with the name typed, a copy taken first and the apps stopped while it loads. A restore now records where its data came from: a backup taken here or an upload from elsewhere, never both and never neither, enforced in the database
 
+- [x] 4.2g a restore verified on a schedule rather than assumed (§17.5, ADR 0013): every seven days by default, the newest checked backup is restored into an engine that exists only for the check — its own container, its own storage, its own network, its own password, none of which outlive it — and the tables are counted. A restore that finishes with nothing in it is a failure, not a success: that is the comfortable lie the check exists to catch. Nothing about it touches the database being checked, which is the point of checking a backup this way. Everything it made goes again whatever the answer was, and an agent killed mid-check sweeps up at startup, removing only what carries the check's own label and name. A check that fails is told to whoever asked to be told, and the database screen says either when a backup was last put back or, plainly, that nobody has ever tried
+
 ## Doing
 
-- [ ] 4.2g a restore verified on a schedule rather than assumed (§17.5): the latest backup restored into a throwaway container and checked, so the dashboard can say "last verified restore: 2 days ago"
+- [ ] 4.3 the rest of M4: snapshot-before-destroy for volumes, cron jobs and one-off tasks, web terminal (audited, human-only), file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
 
 ## Next
 

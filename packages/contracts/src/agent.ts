@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
-import { BackupResult, OffsiteCheckResult, RestoreResult } from './backups.js';
+import { BackupResult, OffsiteCheckResult, RestoreResult, VerifyResult } from './backups.js';
 import { BuildResult } from './builds.js';
 import { DesiredDatabase, ObservedDatabase } from './databases.js';
 import { ReplicaEvidence } from './diagnosis.js';
@@ -166,6 +166,7 @@ export const AgentFrame = z.discriminatedUnion('type', [
   z.strictObject({ ...FrameHeader, type: z.literal('build_result'), result: BuildResult }),
   z.strictObject({ ...FrameHeader, type: z.literal('backup_result'), result: BackupResult }),
   z.strictObject({ ...FrameHeader, type: z.literal('restore_result'), result: RestoreResult }),
+  z.strictObject({ ...FrameHeader, type: z.literal('verify_result'), result: VerifyResult }),
   z.strictObject({
     ...FrameHeader,
     type: z.literal('offsite_check_result'),

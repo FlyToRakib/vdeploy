@@ -287,3 +287,12 @@ func (c *Client) DisconnectNetwork(ctx context.Context, id, network string) erro
 	}
 	return err
 }
+
+// RemoveWithVolumes deletes a container and the anonymous volumes Docker
+// made for it. Named volumes — every volume VDeploy creates on purpose —
+// are left alone by the engine itself, so this cannot take data with it.
+// It is how a throwaway database from a restore check disappears whole.
+func (c *Client) RemoveWithVolumes(ctx context.Context, id string) error {
+	query := url.Values{"force": {"true"}, "v": {"1"}}
+	return c.do(ctx, http.MethodDelete, "/containers/"+url.PathEscape(id), query, nil, nil)
+}

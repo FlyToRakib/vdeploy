@@ -8,12 +8,13 @@ import {
   organization,
   prunableBackups,
   servers,
+  verifications,
   user,
 } from '@vdeploy/db';
 import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { runDueBackups } from './backup-schedule.js';
+import { runDueBackups, runDueVerifications } from './backup-schedule.js';
 
 let t: TestDatabase;
 let orgId: string;
@@ -120,6 +121,7 @@ describe('backups nobody has to remember', () => {
           timezone: 'UTC',
           keepLocal: 7,
           keepOffsite: 30,
+          verifyEveryDays: 7,
         },
       })
       .where(eq(databases.id, databaseId));
@@ -136,6 +138,7 @@ describe('backups nobody has to remember', () => {
           timezone: 'Asia/Dhaka',
           keepLocal: 7,
           keepOffsite: 30,
+          verifyEveryDays: 7,
         },
         backupCheckedAt: new Date('2026-09-24T20:59:00Z'),
       })
@@ -185,5 +188,98 @@ describe('what may be deleted to stay within the policy', () => {
     await add(2, { status: 'running', verified: false });
     const prunable = await prunableBackups(t.db, databaseId, 1);
     expect(prunable.map((row) => row.fileName)).toEqual([]);
+  });
+});
+
+describe('backups proved by putting them back', () => {
+  const policy = (over: Record<string, unknown> = {}) => ({
+    enabled: true,
+    expr: '0 3 * * *',
+    timezone: 'UTC',
+    keepLocal: 7,
+    keepOffsite: 30,
+    verifyEveryDays: 7,
+    ...over,
+  });
+
+  /** One backup of the database, as a real one would be recorded. */
+  async function goodBackup(day: number, over: Record<string, unknown> = {}) {
+    const [row] = await t.db
+      .insert(backups)
+      .values({
+        id: newId('backup'),
+        orgId,
+        databaseId,
+        serverId,
+        fileName: `blog-${String(day)}.dump`,
+        status: 'done',
+        verified: true,
+        createdAt: new Date(`2026-09-${String(day).padStart(2, '0')}T03:00:00Z`),
+        ...over,
+      })
+      .returning();
+    return row;
+  }
+
+  beforeEach(async () => {
+    await t.db.delete(verifications);
+    await t.db
+      .update(databases)
+      .set({ backupPolicy: policy(), verifiedAt: null, verifyCheckedAt: null })
+      .where(eq(databases.id, databaseId));
+  });
+
+  it('checks the newest good backup once the interval has passed', async () => {
+    await goodBackup(10);
+    const newest = await goodBackup(20);
+    // Six days after the database was made: not yet.
+    expect(
+      await runDueVerifications({ ...deps(), now: () => new Date('2026-09-30T03:00:00Z') }),
+    ).toBe(0);
+
+    expect(
+      await runDueVerifications({ ...deps(), now: () => new Date('2026-10-05T03:00:00Z') }),
+    ).toBe(1);
+    const [queued] = await t.db.select().from(verifications);
+    expect(queued).toMatchObject({ status: 'queued', databaseId, backupId: newest?.id });
+
+    // Looking again the same day does not queue a second one.
+    expect(
+      await runDueVerifications({ ...deps(), now: () => new Date('2026-10-05T03:10:00Z') }),
+    ).toBe(0);
+  });
+
+  it('never offers a backup that was never checked, or one already deleted', async () => {
+    await goodBackup(10, { status: 'failed', verified: false });
+    await goodBackup(11, { prunedAt: new Date('2026-09-12T00:00:00Z') });
+    expect(
+      await runDueVerifications({ ...deps(), now: () => new Date('2026-10-05T03:00:00Z') }),
+    ).toBe(0);
+    expect(await t.db.select().from(verifications)).toHaveLength(0);
+  });
+
+  it('does nothing for a database whose checks are turned off', async () => {
+    await goodBackup(10);
+    await t.db
+      .update(databases)
+      .set({ backupPolicy: policy({ verifyEveryDays: 0 }) })
+      .where(eq(databases.id, databaseId));
+    expect(
+      await runDueVerifications({ ...deps(), now: () => new Date('2026-10-05T03:00:00Z') }),
+    ).toBe(0);
+  });
+
+  it('counts from the last check that worked, not from the first backup', async () => {
+    await goodBackup(10);
+    await t.db
+      .update(databases)
+      .set({ verifiedAt: new Date('2026-10-04T03:00:00Z') })
+      .where(eq(databases.id, databaseId));
+    expect(
+      await runDueVerifications({ ...deps(), now: () => new Date('2026-10-05T03:00:00Z') }),
+    ).toBe(0);
+    expect(
+      await runDueVerifications({ ...deps(), now: () => new Date('2026-10-12T03:00:00Z') }),
+    ).toBe(1);
   });
 });

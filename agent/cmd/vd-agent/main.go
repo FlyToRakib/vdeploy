@@ -243,6 +243,11 @@ func serve(configPath string, log *slog.Logger) error {
 			log.Warn("imported dumps have nowhere to land", "error", err)
 			backups.TempDir = ""
 		}
+		// A check that was cut short leaves a database engine running; no
+		// check can be in flight now, so anything left is rubbish.
+		if swept := backups.Sweep(ctx); swept > 0 {
+			log.Info("removed throwaway databases left by an interrupted check", "count", swept)
+		}
 		client := &transport.Client{
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
 			BoxKey:  sealed.PublicKey(box),

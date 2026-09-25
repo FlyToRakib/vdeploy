@@ -432,3 +432,28 @@ export async function notifyBackupResult(
     );
   }
 }
+
+/**
+ * A backup that would not come back (§17.5). This is the failure the whole
+ * data layer exists to catch before the day it matters, so it is never
+ * left sitting quietly on a screen nobody is looking at.
+ */
+export async function notifyRestoreCheck(
+  db: Executor,
+  orgId: string,
+  database: { id: string; name: string },
+  reason: string | null,
+  now: Date,
+): Promise<void> {
+  await notify(
+    db,
+    orgId,
+    {
+      trigger: 'backup_failed',
+      key: `restore_check_failed:${database.id}:${now.toISOString().slice(0, 10)}`,
+      title: `The backup of ${database.name} could not be restored`,
+      message: `VDeploy put the newest backup of ${database.name} into a copy of the engine to check it, and it did not come back: ${reason ?? 'no reason was given'}. Until this works, treat that backup as if it were not there.`,
+    },
+    now,
+  );
+}

@@ -5,6 +5,7 @@ import {
   type BackupPolicy,
   type BackupView,
   type RestoreView,
+  type VerificationView,
   type DatabaseEngine,
   type DatabaseView,
   type Id,
@@ -27,6 +28,7 @@ import {
   databases,
   restores,
   uploads,
+  verifications,
 } from './schema/index.js';
 
 export type DatabaseRow = typeof databases.$inferSelect;
@@ -180,6 +182,7 @@ export function databaseView(
     dbName: row.dbName,
     memoryLimit: row.memoryLimit,
     diskSize: row.diskSize,
+    verifiedAt: row.verifiedAt?.toISOString() ?? null,
     backupPolicy: row.backupPolicy,
     links: links.map((link) => ({
       projectId: link.projectId as Id<'project'>,
@@ -537,4 +540,129 @@ export async function setBackupPolicy(
     .update(databases)
     .set({ backupPolicy: policy, updatedAt: now })
     .where(eq(databases.id, databaseId));
+}
+
+export type VerificationRow = typeof verifications.$inferSelect;
+
+/** Channel on which the worker tells the gateway a server has a check to run. */
+export const VERIFY_CHANNEL = 'vdeploy_verifications';
+
+/** Queues a check: the newest good backup, put back into a throwaway engine. */
+export async function queueVerification(
+  tx: Executor,
+  input: { orgId: string; databaseId: string; backupId: string; serverId: string },
+): Promise<VerificationRow> {
+  const [row] = await tx
+    .insert(verifications)
+    .values({ id: newId('restoreCheck'), ...input, status: 'queued' })
+    .returning();
+  if (!row) throw new VDeployError('internal', 'The check was not queued');
+  await tx.execute(sql`select pg_notify(${VERIFY_CHANNEL}, ${input.serverId})`);
+  return row;
+}
+
+export async function claimVerifications(
+  tx: Executor,
+  serverId: string,
+  now: Date,
+): Promise<VerificationRow[]> {
+  return tx
+    .update(verifications)
+    .set({ status: 'running', startedAt: now })
+    .where(and(eq(verifications.serverId, serverId), eq(verifications.status, 'queued')))
+    .returning();
+}
+
+/**
+ * Records what came back. A database counts as verified only when the data
+ * actually arrived: a restore that finished with nothing in it is a failure,
+ * and saying otherwise is exactly the comfortable lie this check exists to
+ * prevent.
+ */
+export async function finishVerification(
+  tx: Executor,
+  result: { verifyId: string; ok: boolean; tables: number | null; error?: string; log: string },
+  now: Date,
+): Promise<VerificationRow | null> {
+  const good = result.ok && (result.tables ?? 0) > 0;
+  const [row] = await tx
+    .update(verifications)
+    .set({
+      status: good ? 'done' : 'failed',
+      tables: result.tables,
+      error: good
+        ? null
+        : (result.error ?? 'the backup restored, but there was nothing in it afterwards'),
+      log: result.log.slice(-20_000),
+      finishedAt: now,
+    })
+    .where(eq(verifications.id, result.verifyId))
+    .returning();
+  if (row && good) {
+    await tx.update(databases).set({ verifiedAt: now }).where(eq(databases.id, row.databaseId));
+  }
+  return row ?? null;
+}
+
+export async function getVerification(
+  tx: Executor,
+  verifyId: string,
+): Promise<VerificationRow | null> {
+  const [row] = await tx.select().from(verifications).where(eq(verifications.id, verifyId));
+  return row ?? null;
+}
+
+/** Every organization's checks, newest first. */
+export async function verificationsFor(tx: Executor, orgId: string, limit = 50) {
+  return tx
+    .select({ verification: verifications, databaseName: databases.name })
+    .from(verifications)
+    .innerJoin(databases, eq(databases.id, verifications.databaseId))
+    .where(eq(verifications.orgId, orgId))
+    .orderBy(desc(verifications.createdAt))
+    .limit(limit);
+}
+
+export function verificationView(row: VerificationRow, databaseName: string): VerificationView {
+  return {
+    id: row.id as Id<'restoreCheck'>,
+    databaseId: row.databaseId as Id<'database'>,
+    databaseName,
+    backupId: row.backupId as Id<'backup'>,
+    status: row.status,
+    tables: row.tables,
+    error: row.error,
+    startedAt: (row.startedAt ?? row.createdAt).toISOString(),
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  };
+}
+
+/** The newest backup worth proving: checked, still here, and not being taken. */
+export async function newestGoodBackup(
+  tx: Executor,
+  databaseId: string,
+): Promise<BackupRow | null> {
+  const [row] = await tx
+    .select()
+    .from(backups)
+    .where(
+      and(
+        eq(backups.databaseId, databaseId),
+        eq(backups.status, 'done'),
+        eq(backups.verified, true),
+        isNull(backups.prunedAt),
+      ),
+    )
+    .orderBy(desc(backups.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Notes that a database's verification schedule has been looked at. */
+export async function markVerifyChecked(
+  tx: Executor,
+  databaseId: string,
+  now: Date,
+): Promise<void> {
+  await tx.update(databases).set({ verifyCheckedAt: now }).where(eq(databases.id, databaseId));
 }

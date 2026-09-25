@@ -74,6 +74,8 @@ type Client struct {
 	restoreResults chan backup.RestoreResult
 	checks         map[string]*backup.CheckResult // by check id: nil while running
 	checkResults   chan backup.CheckResult
+	verifies       map[string]*backup.VerifyResult // by check id: nil while running
+	verifyResults  chan backup.VerifyResult
 
 	artifactMu sync.Mutex
 	artifacts  map[string]*artifactSend // by request id, while a download is running
@@ -85,6 +87,7 @@ type BackupTaker interface {
 	Restore(ctx context.Context, req backup.RestoreRequest) backup.RestoreResult
 	CheckOffsite(ctx context.Context, req backup.CheckRequest) backup.CheckResult
 	Send(ctx context.Context, req backup.ArtifactRequest, each func([]byte) error) (int64, string, error)
+	Verify(ctx context.Context, req backup.VerifyRequest) backup.VerifyResult
 }
 
 // Builder runs one build to completion.
@@ -111,6 +114,8 @@ func (c *Client) Run(ctx context.Context) {
 		c.restores = map[string]*backup.RestoreResult{}
 		c.checkResults = make(chan backup.CheckResult, 8)
 		c.checks = map[string]*backup.CheckResult{}
+		c.verifyResults = make(chan backup.VerifyResult, 8)
+		c.verifies = map[string]*backup.VerifyResult{}
 	}
 	c.backupMu.Unlock()
 	c.artifactMu.Lock()
@@ -257,6 +262,7 @@ func (c *Client) session(ctx context.Context) error {
 	go c.forwardBackupResults(ctx, k)
 	go c.forwardRestoreResults(ctx, k)
 	go c.forwardCheckResults(ctx, k)
+	go c.forwardVerifyResults(ctx, k)
 	for {
 		if err := c.receive(ctx, k); err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
@@ -369,6 +375,17 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 		} else {
 			c.stopArtifact(frame.RequestID)
 		}
+		return nil
+	}
+	if head.Type == protocol.TypeVerify {
+		var frame verifyFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startVerify(ctx, frame.Verify)
 		return nil
 	}
 	if head.Type == protocol.TypeOffsiteCheck {
@@ -898,5 +915,67 @@ func (c *Client) stopArtifact(requestID string) {
 	c.artifactMu.Unlock()
 	if send != nil {
 		send.stop()
+	}
+}
+
+type verifyFrame struct {
+	protocol.Header
+	Verify backup.VerifyRequest `json:"verify"`
+}
+
+type verifyResultFrame struct {
+	protocol.Header
+	Result backup.VerifyResult `json:"result"`
+}
+
+// startVerify proves one backup by putting it back. Asked twice, it answers
+// with the result it already has rather than standing up a second engine.
+func (c *Client) startVerify(ctx context.Context, req backup.VerifyRequest) {
+	c.backupMu.Lock()
+	defer c.backupMu.Unlock()
+	if done, seen := c.verifies[req.VerifyID]; seen {
+		if done != nil {
+			c.queueVerifyResult(*done)
+		}
+		return
+	}
+	if c.Backups == nil {
+		result := backup.VerifyResult{VerifyID: req.VerifyID, Error: "this server does not keep backups"}
+		c.verifies[req.VerifyID] = &result
+		c.queueVerifyResult(result)
+		return
+	}
+	c.verifies[req.VerifyID] = nil
+	go func() {
+		result := c.Backups.Verify(context.WithoutCancel(ctx), req)
+		c.backupMu.Lock()
+		c.verifies[req.VerifyID] = &result
+		c.backupMu.Unlock()
+		c.queueVerifyResult(result)
+	}()
+}
+
+func (c *Client) queueVerifyResult(result backup.VerifyResult) {
+	select {
+	case c.verifyResults <- result:
+	default:
+		c.Log.Warn("restore check result dropped: queue full", "check", result.VerifyID)
+	}
+}
+
+func (c *Client) forwardVerifyResults(ctx context.Context, k *conn) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case result := <-c.verifyResults:
+			err := k.send(ctx, protocol.TypeVerifyResult, func(h protocol.Header) any {
+				return verifyResultFrame{Header: h, Result: result}
+			})
+			if err != nil {
+				c.queueVerifyResult(result) // the next connection sends it
+				return
+			}
+		}
 	}
 }
