@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ type fakeEngine struct {
 	dump    func(docker.Helper) (int, string, error)
 	checked string // "<size> <sha> <magic hex>"
 	stored  map[string]string
+	removed []string
 	volumes map[string]bool
 }
 
@@ -50,6 +52,29 @@ func (f *fakeEngine) ReadVolumeFile(
 		}
 	}
 	return total, nil
+}
+
+func (f *fakeEngine) WriteVolumeFile(
+	_ context.Context,
+	_, _, _, _, file string,
+	_ int64,
+	body io.Reader,
+) error {
+	written, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	if f.stored == nil {
+		f.stored = map[string]string{}
+	}
+	f.stored[file] = string(written)
+	return nil
+}
+
+func (f *fakeEngine) RemoveVolumeFile(_ context.Context, _, _, _, _, file string) error {
+	delete(f.stored, file)
+	f.removed = append(f.removed, file)
+	return nil
 }
 
 func (f *fakeEngine) EnsureVolume(_ context.Context, name, _ string) (bool, error) {

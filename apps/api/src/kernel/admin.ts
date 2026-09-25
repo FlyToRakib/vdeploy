@@ -67,6 +67,19 @@ async function memberRole({ deps, actor }: HandlerContext, userId: string) {
  * the gate allowed them, inside the same pipeline and audit as every
  * other operation — there is no side door through Better Auth's endpoints.
  */
+/** Records an upload the gate has allowed; the bytes follow, once, over HTTP. */
+async function storeUpload({ deps, actor, args }: HandlerContext) {
+  const uploadId = newId('upload');
+  await deps.db.insert(uploads).values({
+    id: uploadId,
+    orgId: actor.orgId,
+    sha256: String(args.sha256),
+    size: Number(args.size),
+    createdBy: { userId: actor.userId, origin: actor.origin },
+  });
+  return { uploadId };
+}
+
 export const ADMIN: Partial<Record<OperationName, Handler>> = {
   ...NOTIFICATION_ADMIN,
   ...OFFSITE_ADMIN,
@@ -209,17 +222,10 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
     await deps.db.update(projects).set({ ignoredPaths }).where(eq(projects.id, projectId));
     return { ignoredPaths };
   },
-  'source.upload': async ({ deps, actor, args }) => {
-    const uploadId = newId('upload');
-    await deps.db.insert(uploads).values({
-      id: uploadId,
-      orgId: actor.orgId,
-      sha256: String(args.sha256),
-      size: Number(args.size),
-      createdBy: { userId: actor.userId, origin: actor.origin },
-    });
-    return { uploadId };
-  },
+  // A dump from another host is stored exactly as source code is: a row
+  // first, bytes only once the gate has allowed it (§17.5).
+  'dump.upload': async (context) => storeUpload(context),
+  'source.upload': async (context) => storeUpload(context),
   'source.detect': async ({ deps, actor, args }) => {
     const [upload] = await deps.db
       .select({ id: uploads.id, received: isNotNull(uploads.data) })

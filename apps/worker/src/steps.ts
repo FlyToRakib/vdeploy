@@ -43,6 +43,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { bumpGeneration, waitForConvergence, type Expectation } from './converge.js';
 import {
   createDatabaseStep,
+  importDumpStep,
   restoreBackupStep,
   setBackupPolicyStep,
   takeBackupStep,
@@ -589,6 +590,8 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return createDatabaseStep(deps, state);
     case 'restore_backup':
       return restoreBackupStep(deps, state, step.backupId, step.mode);
+    case 'import_dump':
+      return importDumpStep(deps, state, step.uploadId, step.mode);
     case 'set_backup_policy':
       return setBackupPolicyStep(deps, state, step.databaseId);
     case 'take_backup':

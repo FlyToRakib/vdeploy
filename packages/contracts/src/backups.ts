@@ -195,7 +195,10 @@ export type RestoreResult = z.infer<typeof RestoreResult>;
 
 export const RestoreView = z.strictObject({
   id: idSchema('restore'),
-  backupId: idSchema('backup'),
+  /** The backup it came from; null when the data came from another host. */
+  backupId: idSchema('backup').nullable(),
+  /** The upload it came from, for an import (§17.5). */
+  uploadId: idSchema('upload').nullable(),
   databaseId: idSchema('database'),
   databaseName: z.string().max(100),
   mode: RestoreMode,

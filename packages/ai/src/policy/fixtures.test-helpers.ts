@@ -154,6 +154,8 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'database.unlink': { databaseId: newId('database') },
   'database.restore': { backupId: newId('backup'), mode: 'new' },
   'database.backup_policy': { policy: DEFAULT_BACKUP_POLICY },
+  'database.import': { uploadId: newId('upload'), mode: 'new' },
+  'dump.upload': { sha256: 'a'.repeat(64), size: 4096 },
   'backup.set_offsite': {
     repository: 's3:https://s3.eu-central-1.amazonaws.com/example/vdeploy',
     accessKeyId: 'AKIAEXAMPLE',

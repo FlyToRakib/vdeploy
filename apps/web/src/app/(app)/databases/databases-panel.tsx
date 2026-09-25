@@ -28,6 +28,10 @@ import {
   type DatabaseEngine,
   type DatabaseSummary,
   type OffsiteSummary,
+  type UploadedDump,
+  uploadDump,
+  dumpWords,
+  MAX_DUMP_MB,
 } from '@/lib/databases';
 import { cn } from '@/lib/cn';
 import { formText } from '@/lib/forms';
@@ -214,6 +218,9 @@ function DatabaseCard({
   const [scheduling, setScheduling] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
   const [confirmName, setConfirmName] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [dump, setDump] = useState<UploadedDump | null>(null);
   const status = statusWords(database.status);
   const data = dataLine(backups);
   const linked = new Set(database.links.map((link) => link.projectId));
@@ -233,6 +240,22 @@ function DatabaseCard({
       },
     );
     if (ok) onChanged();
+  }
+
+  /**
+   * Sends the file up and says what VDeploy makes of it, before anyone
+   * commits to loading it into anything (§17.5).
+   */
+  async function readDump(file: File) {
+    setReading(true);
+    setDump(null);
+    try {
+      setDump(await uploadDump(file));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'That file could not be read.');
+    } finally {
+      setReading(false);
+    }
   }
 
   /**
@@ -406,6 +429,15 @@ function DatabaseCard({
             Stop
           </Button>
         )}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setImporting(true);
+          }}
+        >
+          Load a file
+        </Button>
         <Button
           variant="danger"
           size="sm"
@@ -674,6 +706,142 @@ function DatabaseCard({
             </Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog
+        open={importing}
+        onOpenChange={(open) => {
+          if (!open) {
+            setImporting(false);
+            setDump(null);
+            setOverwrite(false);
+            setConfirmName('');
+          }
+        }}
+        title="Load a file from somewhere else"
+        description="A dump exported from another host — this is the way in from anywhere."
+      >
+        <div className="grid gap-4">
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-medium">The file</span>
+            <input
+              type="file"
+              accept=".sql,.dump,.backup,text/plain,application/sql,application/octet-stream"
+              disabled={reading}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void readDump(file);
+              }}
+              className="text-sm"
+            />
+            <span className="text-xs text-muted-foreground">
+              Made with <code>pg_dump</code>, <code>mysqldump</code>, or saved as plain SQL. Up to{' '}
+              {String(MAX_DUMP_MB)} MB.
+            </span>
+          </label>
+          {reading && <p className="text-sm text-muted-foreground">Reading your file…</p>}
+          {dump && (
+            <p className="text-sm">
+              <Status health="healthy">{dumpWords(dump)}</Status>
+            </p>
+          )}
+          {dump && (
+            <>
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="radio"
+                  name="importMode"
+                  checked={!overwrite}
+                  onChange={() => {
+                    setOverwrite(false);
+                  }}
+                  className="mt-1 size-4"
+                />
+                <span>
+                  <span className="font-medium">Load into a new database</span>
+                  <span className="block text-muted-foreground">
+                    Safe, and what we suggest: {database.name}-imported. Nothing existing is
+                    touched.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="radio"
+                  name="importMode"
+                  checked={overwrite}
+                  onChange={() => {
+                    setOverwrite(true);
+                  }}
+                  className="mt-1 size-4"
+                />
+                <span>
+                  <span className="font-medium">Load over {database.name}</span>
+                  <span className="block text-status-failed">
+                    Replaces everything in it now. A copy is taken first, and the apps using it stop
+                    while the data goes in.
+                  </span>
+                </span>
+              </label>
+              {overwrite && (
+                <label className="grid gap-1.5 text-sm">
+                  <span>
+                    Type <strong className="font-mono">{database.name}</strong> to confirm
+                  </span>
+                  <input
+                    value={confirmName}
+                    onChange={(event) => {
+                      setConfirmName(event.target.value);
+                    }}
+                    autoComplete="off"
+                    className="h-10 rounded-md border border-border bg-surface-raised px-3"
+                  />
+                </label>
+              )}
+            </>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setImporting(false);
+                setDump(null);
+                setOverwrite(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={overwrite ? 'danger' : 'primary'}
+              disabled={!dump || (overwrite && confirmName.trim() !== database.name)}
+              onClick={() => {
+                const uploadId = dump?.uploadId;
+                const mode = overwrite ? 'in_place' : 'new';
+                if (!uploadId) return;
+                setImporting(false);
+                setDump(null);
+                setOverwrite(false);
+                setConfirmName('');
+                void run(
+                  'database.import',
+                  mode === 'new'
+                    ? { uploadId, mode, newName: `${database.name}-imported` }
+                    : { uploadId, mode },
+                  {
+                    doing: 'Loading your file…',
+                    done:
+                      mode === 'new'
+                        ? 'Loaded into a new database. Nothing existing was touched.'
+                        : 'Loaded. The apps using it are starting again.',
+                  },
+                );
+              }}
+            >
+              {overwrite ? 'Replace the data' : 'Load into a new database'}
+            </Button>
+          </div>
+        </div>
       </Dialog>
 
       <Dialog

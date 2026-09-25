@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { newId, type OperationName } from '@vdeploy/contracts';
 import { buildPlan, connectionUrl, databaseHost } from '@vdeploy/core';
 import {
@@ -20,6 +20,7 @@ import {
   readSecret,
   releases,
   secrets,
+  uploads,
   servers,
   user,
 } from '@vdeploy/db';
@@ -97,7 +98,7 @@ async function agentTick() {
     await finishRestore(
       t.db,
       {
-        restoreId: claimed.id,
+        restoreId: claimed.restore.id,
         ok: restoreWorks,
         ...(restoreWorks ? {} : { error: 'the restore failed (exit 1); nothing was changed' }),
         log: 'pg_restore: connecting to database',
@@ -407,6 +408,77 @@ describe('managed databases', () => {
     expect(res.outcome).toBe('failed');
     const [plan] = await t.db.select().from(plans).where(eq(plans.id, res.planId));
     expect(plan?.error?.message).toContain('never checked');
+  });
+
+  /** A dump somebody exported from another host, already uploaded here. */
+  async function uploaded(body: string) {
+    const [row] = await t.db
+      .insert(uploads)
+      .values({
+        id: newId('upload'),
+        orgId,
+        sha256: createHash('sha256').update(body).digest('hex'),
+        size: Buffer.byteLength(body),
+        data: Buffer.from(body),
+        createdBy: { userId, origin: 'dashboard' },
+      })
+      .returning();
+    return row?.id ?? '';
+  }
+
+  it('loads a dump from another host into a new database', async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    const uploadId = await uploaded('-- Dumped from database version 16.2\nCREATE TABLE posts ();');
+
+    const imported = await run('database.import', {
+      databaseId,
+      uploadId,
+      mode: 'new',
+      newName: 'blog-db-from-elsewhere',
+    });
+    expect(imported.outcome).toBe('applied');
+    const made = await t.db
+      .select()
+      .from(databases)
+      .where(and(eq(databases.name, 'blog-db-from-elsewhere'), isNull(databases.deletedAt)));
+    expect(made).toHaveLength(1);
+    // The restore records where the data came from: an upload, not a backup.
+    const [record] = await t.db
+      .select()
+      .from(restores)
+      .where(eq(restores.databaseId, made[0]?.id ?? ''));
+    expect(record).toMatchObject({ mode: 'new', status: 'done', uploadId, backupId: null });
+  });
+
+  it('refuses a dump from a newer engine before anything is created', async () => {
+    const row = await theDatabase();
+    const before = await t.db.select().from(databases);
+    const uploadId = await uploaded('-- Dumped from database version 99.1\nCREATE TABLE t ();');
+
+    const res = await run('database.import', {
+      databaseId: row?.id ?? '',
+      uploadId,
+      mode: 'new',
+      newName: 'blog-db-too-new',
+    });
+    expect(res.outcome).toBe('failed');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, res.planId));
+    expect(plan?.error?.message).toContain('cannot read a newer');
+    // Nothing was made to hold data that was never going to load.
+    expect(await t.db.select().from(databases)).toHaveLength(before.length);
+  });
+
+  it('refuses a file that is not a dump at all', async () => {
+    const row = await theDatabase();
+    const res = await run('database.import', {
+      databaseId: row?.id ?? '',
+      uploadId: await uploaded('just some notes I wrote'),
+      mode: 'new',
+    });
+    expect(res.outcome).toBe('failed');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, res.planId));
+    expect(plan?.error?.message).toContain('not a database dump');
   });
 
   it('refuses to pretend it backed up a database that is off', async () => {

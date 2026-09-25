@@ -209,3 +209,45 @@ export function scheduleWords(policy: BackupPolicy): string {
   const when = known ? known.label.toLowerCase() : `on the schedule ${policy.expr}`;
   return `Backed up ${when} (${policy.timezone}), keeping ${String(policy.keepLocal)} copies.`;
 }
+
+/** As much of a dump as VDeploy will take in one upload. */
+export const MAX_DUMP_MB = 200;
+
+/** What came back when a dump was uploaded: what it is, not just its size. */
+export interface UploadedDump {
+  uploadId: string;
+  size: number;
+  format: 'postgres-custom' | 'sql' | 'redis-rdb' | null;
+  engine: 'postgres' | 'mysql' | 'mariadb' | null;
+  version: string | null;
+}
+
+/** "A PostgreSQL 16 dump, 4.2 MB" — what the file actually is. */
+export function dumpWords(dump: UploadedDump): string {
+  const size = sizeWords(dump.size);
+  if (!dump.engine) return `A database dump, ${size}`;
+  const engine = ENGINE_WORDS[dump.engine].label;
+  return dump.version ? `A ${engine} ${dump.version} dump, ${size}` : `A ${engine} dump, ${size}`;
+}
+
+/**
+ * Sends a dump up as the request body, the way source archives go. The
+ * answer says what the bytes turned out to be, which is the only honest
+ * thing to show someone before they load it into a database.
+ */
+export async function uploadDump(file: File): Promise<UploadedDump> {
+  if (file.size > MAX_DUMP_MB * 1024 * 1024) {
+    throw new Error(`That file is larger than ${String(MAX_DUMP_MB)} MB.`);
+  }
+  const res = await fetch('/api/v1/dumps', {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: file,
+  });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
+    throw new Error(typeof message === 'string' ? message : 'That file could not be read.');
+  }
+  return body as UploadedDump;
+}

@@ -15,7 +15,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -90,6 +92,14 @@ type Engine interface {
 		name, image, volume, mountPath, file string,
 		each func([]byte) error,
 	) (int64, error)
+	// WriteVolumeFile puts one file into the store, the same way round.
+	WriteVolumeFile(
+		ctx context.Context,
+		name, image, volume, mountPath, file string,
+		size int64,
+		body io.Reader,
+	) error
+	RemoveVolumeFile(ctx context.Context, name, image, volume, mountPath, file string) error
 }
 
 // Opener opens a value sealed to this agent.
@@ -100,6 +110,10 @@ type Runner struct {
 	Engine Engine
 	Open   Opener
 	Log    *slog.Logger
+	// HTTP fetches an imported dump from this agent's own control plane.
+	HTTP *http.Client
+	// TempDir is where a dump lands to be checked before it is used.
+	TempDir string
 }
 
 var safeName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,200}$`)
@@ -346,8 +360,21 @@ type RestoreRequest struct {
 	DBName      string       `json:"dbName"`
 	Credentials []Credential `json:"credentials"`
 	// FileName is the artifact in the backup store; it is never a path.
-	FileName       string `json:"fileName"`
-	TimeoutSeconds int    `json:"timeoutSeconds"`
+	FileName string `json:"fileName"`
+	// Download is set when the dump came from another host (§17.5): it is
+	// fetched into the store first, used, and removed again.
+	Download       *DumpSource `json:"download,omitempty"`
+	TimeoutSeconds int         `json:"timeoutSeconds"`
+}
+
+// DumpSource is where an imported dump is fetched from: this agent's own
+// control plane, with a one-time token, checked by size and hash before
+// anything reads it — the shape a build's source arrives in (ADR 0008).
+type DumpSource struct {
+	URL       string `json:"url"`
+	Token     string `json:"token"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"sizeBytes"`
 }
 
 // RestoreResult is what happened. A restore that did not finish cleanly must
@@ -399,6 +426,14 @@ func (r *Runner) Restore(ctx context.Context, req RestoreRequest) RestoreResult 
 	steps, err := restorePlan(req)
 	if err != nil {
 		return fail(err.Error(), "")
+	}
+	// A dump from another host is brought here and checked before anything
+	// reads it, and goes again whatever happens next.
+	if req.Download != nil {
+		if err := r.fetchDump(ctx, req); err != nil {
+			return fail(err.Error(), "")
+		}
+		defer r.dropDump(ctx, req)
 	}
 	env, err := r.credentials(Request{
 		BackupID:    req.RestoreID,

@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   newId,
   VDeployError,
@@ -19,7 +20,14 @@ import {
 } from '@vdeploy/core';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
-import { backups, databaseKeys, databaseLinks, databases, restores } from './schema/index.js';
+import {
+  backups,
+  databaseKeys,
+  databaseLinks,
+  databases,
+  restores,
+  uploads,
+} from './schema/index.js';
 
 export type DatabaseRow = typeof databases.$inferSelect;
 
@@ -339,7 +347,9 @@ export async function queueRestore(
   tx: Executor,
   input: {
     orgId: string;
-    backupId: string;
+    /** A backup taken here, or an upload from another host — one of the two. */
+    backupId?: string;
+    uploadId?: string;
     databaseId: string;
     serverId: string;
     mode: 'new' | 'in_place';
@@ -354,16 +364,65 @@ export async function queueRestore(
   return row;
 }
 
+/**
+ * Claims the restores waiting for one server. An imported dump comes with a
+ * one-time token so that server can fetch it; only the token's hash is kept.
+ */
 export async function claimRestores(
   tx: Executor,
   serverId: string,
   now: Date,
-): Promise<RestoreRow[]> {
-  return tx
+): Promise<{ restore: RestoreRow; token: string | null }[]> {
+  const rows = await tx
     .update(restores)
     .set({ status: 'running', startedAt: now })
     .where(and(eq(restores.serverId, serverId), eq(restores.status, 'queued')))
     .returning();
+  const claimed: { restore: RestoreRow; token: string | null }[] = [];
+  for (const restore of rows) {
+    if (!restore.uploadId) {
+      claimed.push({ restore, token: null });
+      continue;
+    }
+    const token = randomBytes(32).toString('base64url');
+    const [withToken] = await tx
+      .update(restores)
+      .set({
+        tokenHash: hashToken(token),
+        tokenExpiresAt: new Date(now.getTime() + DUMP_TOKEN_TTL_MS),
+      })
+      .where(eq(restores.id, restore.id))
+      .returning();
+    claimed.push({ restore: withToken ?? restore, token });
+  }
+  return claimed;
+}
+
+/** How long a server has to fetch an imported dump with its token. */
+const DUMP_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+/**
+ * The dump a running import is for, if the token is its current one. It is
+ * the same one-time-token shape builds use for their sources (ADR 0008).
+ */
+export async function dumpForRestore(
+  tx: Executor,
+  restoreId: string,
+  token: string,
+  now: Date,
+): Promise<Buffer | null> {
+  const [row] = await tx
+    .select({ restore: restores, data: uploads.data })
+    .from(restores)
+    .innerJoin(uploads, eq(uploads.id, restores.uploadId))
+    .where(eq(restores.id, restoreId));
+  if (!row?.restore.tokenHash || row.restore.status !== 'running' || !row.data) return null;
+  if (!row.restore.tokenExpiresAt || row.restore.tokenExpiresAt < now) return null;
+  const given = Buffer.from(hashToken(token), 'hex');
+  const stored = Buffer.from(row.restore.tokenHash, 'hex');
+  return given.length === stored.length && timingSafeEqual(given, stored) ? row.data : null;
 }
 
 export async function finishRestore(
@@ -377,6 +436,9 @@ export async function finishRestore(
       status: result.ok ? 'done' : 'failed',
       error: result.error ?? null,
       log: result.log.slice(-20_000),
+      // The token dies with the job, whatever became of it.
+      tokenHash: null,
+      tokenExpiresAt: null,
       finishedAt: now,
     })
     .where(eq(restores.id, result.restoreId));
@@ -401,7 +463,8 @@ export async function restoresFor(tx: Executor, orgId: string, limit = 50) {
 export function restoreView(row: RestoreRow, databaseName: string): RestoreView {
   return {
     id: row.id as Id<'restore'>,
-    backupId: row.backupId as Id<'backup'>,
+    backupId: row.backupId as Id<'backup'> | null,
+    uploadId: row.uploadId as Id<'upload'> | null,
     databaseId: row.databaseId as Id<'database'>,
     databaseName,
     mode: row.mode,

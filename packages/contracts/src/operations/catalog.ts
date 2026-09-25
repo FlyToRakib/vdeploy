@@ -249,6 +249,13 @@ export const OPERATIONS = [
     obj({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive() }),
   ),
   operation(
+    'dump.upload',
+    'sensitive',
+    'org',
+    'Upload a database dump from somewhere else, to load into a database here',
+    obj({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive() }),
+  ),
+  operation(
     'source.detect',
     'safe',
     'org',
@@ -592,6 +599,20 @@ export const OPERATIONS = [
     obj({
       databaseId,
       backupId: idSchema('backup'),
+      mode: RestoreMode.default('new'),
+      newName: ResourceName.optional(),
+    }),
+  ),
+  // The way in from anywhere else (§17.5). Sensitive as an intent; the plan
+  // raises it to destructive when it would load over data that is already here.
+  operation(
+    'database.import',
+    'sensitive',
+    'database',
+    'Load a dump from somewhere else into a database here — the way in from another host',
+    obj({
+      databaseId,
+      uploadId: idSchema('upload'),
       mode: RestoreMode.default('new'),
       newName: ResourceName.optional(),
     }),

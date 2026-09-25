@@ -7,11 +7,13 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  check,
   index,
   boolean,
 } from 'drizzle-orm/pg-core';
 import { organization } from './identity.js';
 import { projects, servers, secrets } from './kernel.js';
+import { uploads } from './builds.js';
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const DEFAULT_POLICY = DEFAULT_BACKUP_POLICY;
@@ -219,23 +221,32 @@ export const restores = pgTable(
     orgId: text('org_id')
       .notNull()
       .references(() => organization.id, { onDelete: 'restrict' }),
-    backupId: text('backup_id')
-      .notNull()
-      .references(() => backups.id, { onDelete: 'cascade' }),
+    /** The backup being put back; null when the data came from another host. */
+    backupId: text('backup_id').references(() => backups.id, { onDelete: 'cascade' }),
     /** The database the data goes into: a new one, or the one it came from. */
     databaseId: text('database_id')
       .notNull()
       .references(() => databases.id, { onDelete: 'cascade' }),
+    /** A dump from another host instead of a backup taken here (§17.5). */
+    uploadId: text('upload_id').references(() => uploads.id, { onDelete: 'set null' }),
     serverId: text('server_id')
       .notNull()
       .references(() => servers.id, { onDelete: 'restrict' }),
     mode: text('mode').$type<'new' | 'in_place'>().notNull(),
     status: text('status').$type<'queued' | 'running' | 'done' | 'failed'>().notNull(),
+    /** Lets the agent fetch an imported dump once; only the hash is kept. */
+    tokenHash: text('token_hash'),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     error: text('error'),
     log: text('log').notNull().default(''),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  (t) => [index('restores_database_created').on(t.databaseId, t.createdAt)],
+  (t) => [
+    index('restores_database_created').on(t.databaseId, t.createdAt),
+    // Data comes from a backup taken here or a dump from elsewhere, never
+    // both and never neither: a restore with no source restores nothing.
+    check('restores_one_source', sql`(${t.backupId} is null) <> (${t.uploadId} is null)`),
+  ],
 );

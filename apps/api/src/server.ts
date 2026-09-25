@@ -21,6 +21,7 @@ import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
 import { operationRoutes } from './routes/operations.js';
 import { backupDownloadRoutes } from './routes/backup-download.js';
+import { dumpRoutes } from './routes/dumps.js';
 import { logRoutes } from './routes/logs.js';
 import { tcpProbe, type PortProbe } from './agents/reachability.js';
 import { githubFromConfig } from './github-config.js';
@@ -156,6 +157,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(logRoutes(kernel));
   await app.register(backupDownloadRoutes(kernel));
   await app.register(uploadRoutes(kernel));
+  await app.register(dumpRoutes(kernel));
   await app.register(githubRoutes(kernel));
   await app.register(aiRoutes(kernel));
   await app.register(

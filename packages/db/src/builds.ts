@@ -212,3 +212,30 @@ export async function storageStatus(
     unsaved,
   };
 }
+
+/** One upload's record — its size and hash, never its bytes. */
+export async function getUpload(tx: Executor, uploadId: string) {
+  const [row] = await tx
+    .select({
+      id: uploads.id,
+      orgId: uploads.orgId,
+      sha256: uploads.sha256,
+      size: uploads.size,
+      createdAt: uploads.createdAt,
+    })
+    .from(uploads)
+    .where(eq(uploads.id, uploadId));
+  return row ?? null;
+}
+
+/**
+ * The first bytes of an upload, for working out what a dump actually is
+ * (§17.5) without reading a whole database into memory.
+ */
+export async function uploadHead(tx: Executor, uploadId: string, bytes: number) {
+  const [row] = await tx
+    .select({ head: sql<Buffer>`substring(${uploads.data} from 1 for ${bytes})` })
+    .from(uploads)
+    .where(eq(uploads.id, uploadId));
+  return row?.head ?? null;
+}

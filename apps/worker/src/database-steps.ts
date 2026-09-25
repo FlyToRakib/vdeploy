@@ -9,6 +9,9 @@ import {
   defaultVersion,
   engineProfile,
   hashOf,
+  DUMP_HEAD_BYTES,
+  dumpRefusal,
+  sniffDump,
   specAfter,
 } from '@vdeploy/core';
 import {
@@ -18,6 +21,8 @@ import {
   finishRestore,
   getBackup,
   getRestore,
+  getUpload,
+  uploadHead,
   linksOf,
   observedState,
   queueBackup,
@@ -30,6 +35,8 @@ import {
   projects,
   putSecret,
   type Database,
+  type Executor,
+  type DatabaseRow,
 } from '@vdeploy/db';
 import { and, eq } from 'drizzle-orm';
 import { bumpGeneration } from './converge.js';
@@ -366,12 +373,92 @@ export async function restoreBackupStep(
   }
   const source = await getDatabase(deps.db, backup.databaseId);
   if (!source) throw new VDeployError('not_found', 'The database that backup came from is gone');
+  await loadInto(deps, state, {
+    source,
+    mode,
+    queue: (tx, target) =>
+      queueRestore(tx, {
+        orgId: state.orgId,
+        backupId,
+        databaseId: target.id,
+        serverId: target.serverId,
+        mode,
+      }),
+    done: (target) =>
+      mode === 'new'
+        ? `Restored into ${target.name}. Nothing existing was touched; link an app to it when you have checked it.`
+        : `Restored into ${target.name} from the backup taken ${backup.createdAt.toISOString()}.`,
+    failed: 'The restore did not work.',
+  });
+}
 
+/**
+ * Loads a dump from another host (§17.5). This is the way in from anywhere
+ * else, so what it refuses matters as much as what it does: a file that is
+ * not a dump, or came from a newer engine than the one it is going into, is
+ * turned away here rather than failing half way through.
+ */
+export async function importDumpStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+  uploadId: string,
+  mode: 'new' | 'in_place',
+): Promise<void> {
+  const source = await getDatabase(deps.db, arg(state, 'databaseId'));
+  if (!source) throw new VDeployError('not_found', 'The database no longer exists');
+  const upload = await getUpload(deps.db, uploadId);
+  if (upload?.orgId !== state.orgId) {
+    throw new VDeployError('not_found', 'That upload no longer exists');
+  }
+  const head = await uploadHead(deps.db, uploadId, DUMP_HEAD_BYTES);
+  if (!head) throw new VDeployError('conflict', 'That upload never finished arriving');
+  const refusal = dumpRefusal(sniffDump(head), {
+    engine: source.engine,
+    version: source.version,
+  });
+  if (refusal) throw new VDeployError('invalid_input', refusal);
+
+  await loadInto(deps, state, {
+    source,
+    mode,
+    suffix: 'imported',
+    queue: (tx, target) =>
+      queueRestore(tx, {
+        orgId: state.orgId,
+        uploadId,
+        databaseId: target.id,
+        serverId: target.serverId,
+        mode,
+      }),
+    done: (target) =>
+      mode === 'new'
+        ? `Loaded your file into ${target.name}. Nothing existing was touched; link an app to it when you have checked it.`
+        : `Loaded your file into ${target.name}, replacing what was there.`,
+    failed: 'The file could not be loaded.',
+  });
+}
+
+/** What a restore and an import share: where the data goes, and waiting for it. */
+interface LoadInto {
+  source: Awaited<ReturnType<typeof getDatabase>> & object;
+  mode: 'new' | 'in_place';
+  /** What a new database is called: `<name>-restored` unless told otherwise. */
+  suffix?: string;
+  queue: (tx: Executor, target: DatabaseRow) => Promise<{ id: string }>;
+  done: (target: DatabaseRow) => string;
+  failed: string;
+}
+
+async function loadInto(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+  { source, mode, suffix = 'restored', queue, done, failed }: LoadInto,
+): Promise<void> {
   let target = source;
   let held: string[] = [];
   if (mode === 'new') {
     const name =
-      typeof state.args.newName === 'string' ? state.args.newName : `${source.name}-restored`;
+      typeof state.args.newName === 'string' ? state.args.newName : `${source.name}-${suffix}`;
     const { user, dbName } = databaseNames(source.engine, name);
     target = await deps.db.transaction(async (tx) => {
       const created = await createDatabase(tx, deps.secretsKey, {
@@ -397,32 +484,18 @@ export async function restoreBackupStep(
       state.notes.push('The apps using it were stopped while the data went back.');
   }
 
-  const queued = await deps.db.transaction((tx) =>
-    queueRestore(tx, {
-      orgId: state.orgId,
-      backupId,
-      databaseId: target.id,
-      serverId: target.serverId,
-      mode,
-    }),
-  );
+  const into = target;
+  const queued = await deps.db.transaction((tx) => queue(tx, into));
   const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
   try {
     for (;;) {
       const restore = await getRestore(deps.db, queued.id);
       if (restore?.status === 'done') {
-        state.notes.push(
-          mode === 'new'
-            ? `Restored into ${target.name}. Nothing existing was touched; link an app to it when you have checked it.`
-            : `Restored into ${target.name} from the backup taken ${backup.createdAt.toISOString()}.`,
-        );
+        state.notes.push(done(into));
         return;
       }
       if (restore?.status === 'failed') {
-        throw new VDeployError(
-          'unavailable',
-          `The restore did not work. ${restore.error ?? ''}`.trim(),
-        );
+        throw new VDeployError('unavailable', `${failed} ${restore.error ?? ''}`.trim());
       }
       if (Date.now() > deadline) {
         await deps.db.transaction((tx) =>

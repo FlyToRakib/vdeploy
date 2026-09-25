@@ -65,6 +65,11 @@ export const PlanStep = z.discriminatedUnion('kind', [
     mode: z.enum(['new', 'in_place']),
   }),
   z.strictObject({
+    kind: z.literal('import_dump'),
+    uploadId: idSchema('upload'),
+    mode: z.enum(['new', 'in_place']),
+  }),
+  z.strictObject({
     kind: z.literal('delete_database'),
     databaseId: idSchema('database'),
     keepData: z.boolean(),

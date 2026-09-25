@@ -234,6 +234,14 @@ func serve(configPath string, log *slog.Logger) error {
 			Engine: engine,
 			Open:   sealed.Opener{Key: box, ServerID: id.ServerID}.Open,
 			Log:    log,
+			// An imported dump is fetched from this agent's own control plane
+			// and checked on disk before it goes near a database (§17.5).
+			HTTP:    &http.Client{Timeout: 45 * time.Minute},
+			TempDir: filepath.Join(cfg.StateDir, "imports"),
+		}
+		if err := os.MkdirAll(backups.TempDir, 0o700); err != nil {
+			log.Warn("imported dumps have nowhere to land", "error", err)
+			backups.TempDir = ""
 		}
 		client := &transport.Client{
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),

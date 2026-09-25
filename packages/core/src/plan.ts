@@ -417,6 +417,43 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       },
     };
   },
+  /** The way in from another host (§17.5): the same care as any restore. */
+  'database.import': (args, context) => {
+    const database = requireDatabase(context);
+    const toNew = args.mode === 'new';
+    return {
+      specHash: null,
+      changes: [
+        toNew
+          ? {
+              path: 'database',
+              before: null,
+              after: `${args.newName ?? `${database.name}-imported`}, holding what the file contains`,
+            }
+          : {
+              path: `database.${database.name}`,
+              before: 'what is in it now',
+              after: 'what the file you uploaded contains',
+            },
+      ],
+      steps: toNew
+        ? [{ kind: 'import_dump', uploadId: args.uploadId, mode: 'new' }]
+        : [
+            // A copy of what is about to be replaced, before it is replaced.
+            { kind: 'take_backup', databaseId: args.databaseId },
+            { kind: 'import_dump', uploadId: args.uploadId, mode: 'in_place' },
+          ],
+      tier: toNew ? 'sensitive' : 'destructive',
+      blastRadius: {
+        projects: toNew ? 0 : database.linkedProjects,
+        replicas: 1,
+        domains: [],
+        downtime: toNew ? 'none' : 'brief',
+        dataAtRisk: toNew ? [] : [`everything in ${database.name} right now`],
+        rollbackTo: null,
+      },
+    };
+  },
   'database.delete': (args, context) => {
     const database = requireDatabase(context);
     return {

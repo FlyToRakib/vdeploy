@@ -11,6 +11,7 @@ export * from './seal.js';
 export * from './governor.js';
 export * from './cron.js';
 export * from './databases.js';
+export * from './dumps.js';
 export * from './diagnose.js';
 export * from './reachability.js';
 export * from './webhook.js';

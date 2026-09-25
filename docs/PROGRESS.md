@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.2f — importing a dump from elsewhere
+**Task:** 4.2g — a restore verified on a schedule rather than assumed
 **Status:** in progress
-**Updated:** 2026-09-25 16:05 UTC
+**Updated:** 2026-09-25 17:20 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -135,9 +135,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.2e downloading the dump (§17.5): a plain file the person owns is what makes VDeploy something they can leave, so a backup comes back over the signed agent channel — the server reads it out of the backup store through a container it creates and never starts (no shell, no host path, nothing running), and sends it in pieces. Each piece leaves only against an acknowledgement from the control plane, which sends one as it hands the bytes on, so a slow download paces the server instead of filling the control plane with a database's worth of bytes; and the last piece is held back until everything received hashes to what was recorded when the backup was checked, so a download that finishes is the backup that was taken and one that does not is visibly short. Asking goes through the gate as `backup.download` — admin, password again, in the audit log — because the whole database leaves with it; a backup that was never checked, or has been deleted by retention, is refused rather than handed over
 
+- [x] 4.2f importing a dump from elsewhere (§17.5): the way in from any other host. A file is uploaded as the request body and read rather than trusted — what it is comes from its bytes, so the screen can say "a PostgreSQL 16.2 dump, 4.0 MB" before anyone commits to loading it. A dump from a newer engine than the database it is going into is refused **before** anything is created, with what to do instead, rather than failing half way through a restore; so is a file that is not a dump, and one from another engine family. The server fetches it with a one-time token, checks its size and hash on disk before it goes anywhere near a database, loads it, and removes it again — an imported dump is not a backup and nothing else would ever prune it. Into a new database by default; over an existing one only as a destructive plan, with the name typed, a copy taken first and the apps stopped while it loads. A restore now records where its data came from: a backup taken here or an upload from elsewhere, never both and never neither, enforced in the database
+
 ## Doing
 
-- [ ] 4.2f importing a dump from elsewhere (§17.5): the migration on-ramp from any other host
+- [ ] 4.2g a restore verified on a schedule rather than assumed (§17.5): the latest backup restored into a throwaway container and checked, so the dashboard can say "last verified restore: 2 days ago"
 
 ## Next
 

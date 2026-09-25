@@ -18,6 +18,7 @@ import {
   prunableBackups,
   finishRestore,
   getRestore,
+  getUpload,
   RESTORES_CHANNEL,
   OFFSITE_CHANNEL,
   backupTargetSecrets,
@@ -26,6 +27,7 @@ import {
   liveBackupTarget,
   type BackupTargetRow,
   databasePassword,
+  dumpForRestore,
   finishBackup,
   getBackup,
   getDatabase,
@@ -318,20 +320,32 @@ export class Gateway implements LogSource, ArtifactSource {
     const { db, key, now, secretsKey } = this.deps;
     const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
     if (!server?.agentBoxKey) return;
-    for (const restore of await claimRestores(db, serverId, now())) {
-      const [target, backup] = await Promise.all([
+    for (const { restore, token } of await claimRestores(db, serverId, now())) {
+      const [target, backup, upload] = await Promise.all([
         getDatabase(db, restore.databaseId),
-        getBackup(db, restore.backupId),
+        restore.backupId ? getBackup(db, restore.backupId) : null,
+        restore.uploadId ? getUpload(db, restore.uploadId) : null,
       ]);
-      if (!target || !backup) continue;
+      if (!target || (!backup && !upload)) continue;
       const profile = engineProfile(target.engine);
       const password = await databasePassword(db, secretsKey, target);
+      // A dump from another host is fetched by the server itself, with a
+      // one-time token, and checked against what was uploaded (§17.5).
+      const download =
+        upload && token
+          ? {
+              url: `${new URL(this.deps.publicUrl).origin}/api/v1/agent/dumps/${restore.id}`,
+              token,
+              sha256: upload.sha256,
+              sizeBytes: upload.size,
+            }
+          : null;
       connection.socket.send(
         seal(key, {
           ...connection.session.next('restore'),
           restore: {
             restoreId: restore.id,
-            backupId: backup.id,
+            backupId: backup?.id ?? restore.id,
             databaseId: target.id,
             engine: target.engine,
             image: target.image,
@@ -350,7 +364,8 @@ export class Gateway implements LogSource, ArtifactSource {
                 ),
               },
             ],
-            fileName: backup.fileName,
+            fileName: backup?.fileName ?? importFileName(restore.id),
+            ...(download ? { download } : {}),
             timeoutSeconds: 3600,
           },
         }),
@@ -876,6 +891,22 @@ export const agentRoutes =
       },
     );
 
+    // An imported dump, for the server running that import (§17.5). The same
+    // one-time token shape as a build's source: it works once, for an hour,
+    // only while the restore is running, and only its hash is stored.
+    app.get<{ Params: { restoreId: string } }>(
+      '/api/v1/agent/dumps/:restoreId',
+      { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+      async (req, reply) => {
+        const auth = req.headers.authorization ?? '';
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+        const data = token ? await dumpForRestore(db, req.params.restoreId, token, now()) : null;
+        if (!data)
+          return reply.status(404).send({ error: { code: 'not_found', message: 'Not found' } });
+        return reply.header('content-type', 'application/octet-stream').send(data);
+      },
+    );
+
     app.get('/api/v1/agent/connect', { websocket: true }, (socket, req) => {
       const header = req.headers['x-vdeploy-server'];
       if (typeof header !== 'string') {
@@ -886,3 +917,12 @@ export const agentRoutes =
     });
     return Promise.resolve();
   };
+
+/**
+ * What an imported dump is called in the backup store while it is being
+ * used. It is not a backup — nothing prunes it, and the agent removes it as
+ * soon as the restore is over — so its name says what it is.
+ */
+export function importFileName(restoreId: string): string {
+  return `import-${restoreId.toLowerCase()}.dump`;
+}

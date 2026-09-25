@@ -15,6 +15,8 @@ import {
   type BackupSummary,
   type DatabaseSummary,
   type OffsiteSummary,
+  type UploadedDump,
+  dumpWords,
 } from './databases';
 
 const database: DatabaseSummary = {
@@ -232,5 +234,22 @@ describe('a target nobody has reached yet', () => {
     });
     expect(pending.health).toBe('warning');
     expect(pending.words).toContain('once a server has reached it');
+  });
+});
+
+describe('a dump from somewhere else', () => {
+  const dump = (over: Partial<UploadedDump> = {}): UploadedDump => ({
+    uploadId: 'upl_1',
+    size: 4 * 1024 * 1024,
+    format: 'sql',
+    engine: 'postgres',
+    version: '16.2',
+    ...over,
+  });
+
+  it('says what the file turned out to be, not what it was called', () => {
+    expect(dumpWords(dump())).toBe('A PostgreSQL 16.2 dump, 4.0 MB');
+    expect(dumpWords(dump({ version: null }))).toBe('A PostgreSQL dump, 4.0 MB');
+    expect(dumpWords(dump({ engine: null, version: null }))).toBe('A database dump, 4.0 MB');
   });
 });
