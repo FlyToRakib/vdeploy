@@ -44,6 +44,7 @@ import { bumpGeneration, waitForConvergence, type Expectation } from './converge
 import {
   createDatabaseStep,
   restoreBackupStep,
+  setBackupPolicyStep,
   takeBackupStep,
   deleteDatabaseStep,
   linkDatabaseStep,
@@ -588,6 +589,8 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return createDatabaseStep(deps, state);
     case 'restore_backup':
       return restoreBackupStep(deps, state, step.backupId, step.mode);
+    case 'set_backup_policy':
+      return setBackupPolicyStep(deps, state, step.databaseId);
     case 'take_backup':
       return takeBackupStep(
         deps,

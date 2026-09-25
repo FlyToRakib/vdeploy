@@ -46,28 +46,32 @@ type Credential struct {
 
 // Request is one backup the control plane asked for.
 type Request struct {
-	BackupID       string       `json:"backupId"`
-	DatabaseID     string       `json:"databaseId"`
-	Engine         string       `json:"engine"`
-	Image          string       `json:"image"`
-	Host           string       `json:"host"`
-	Port           int          `json:"port"`
-	User           string       `json:"user"`
-	DBName         string       `json:"dbName"`
-	Credentials    []Credential `json:"credentials"`
-	FileName       string       `json:"fileName"`
-	TimeoutSeconds int          `json:"timeoutSeconds"`
+	BackupID    string       `json:"backupId"`
+	DatabaseID  string       `json:"databaseId"`
+	Engine      string       `json:"engine"`
+	Image       string       `json:"image"`
+	Host        string       `json:"host"`
+	Port        int          `json:"port"`
+	User        string       `json:"user"`
+	DBName      string       `json:"dbName"`
+	Credentials []Credential `json:"credentials"`
+	FileName    string       `json:"fileName"`
+	// Remove are older artifacts the control plane says may go — but only
+	// once this one is written and checked.
+	Remove         []string `json:"remove"`
+	TimeoutSeconds int      `json:"timeoutSeconds"`
 }
 
 // Result is what the agent found after taking it.
 type Result struct {
-	BackupID  string `json:"backupId"`
-	OK        bool   `json:"ok"`
-	SizeBytes int64  `json:"sizeBytes"`
-	SHA256    string `json:"sha256,omitempty"`
-	Verified  bool   `json:"verified"`
-	Error     string `json:"error,omitempty"`
-	Log       string `json:"log"`
+	BackupID  string   `json:"backupId"`
+	OK        bool     `json:"ok"`
+	SizeBytes int64    `json:"sizeBytes"`
+	SHA256    string   `json:"sha256,omitempty"`
+	Verified  bool     `json:"verified"`
+	Error     string   `json:"error,omitempty"`
+	Removed   []string `json:"removed"`
+	Log       string   `json:"log"`
 }
 
 // Engine is what taking a backup needs from Docker.
@@ -208,7 +212,42 @@ func (r *Runner) Take(ctx context.Context, req Request) Result {
 		return result
 	}
 	result.OK = true
+	// Only now, with a good backup on disk, may the old ones go.
+	result.Removed = r.prune(runCtx, req, helper)
 	return result
+}
+
+// prune deletes the artifacts the control plane named, and reports the ones
+// that are actually gone. Anything it cannot delete simply stays.
+func (r *Runner) prune(ctx context.Context, req Request, helper docker.Helper) []string {
+	names := make([]string, 0, len(req.Remove))
+	for _, name := range req.Remove {
+		if safeName.MatchString(name) && name != req.FileName {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	remove := helper
+	remove.Name += "-prune"
+	remove.Entrypoint = []string{"/bin/sh", "-c"}
+	remove.Cmd = []string{`cd "$D" && for f in "$@"; do rm -f -- "./$f"; done`, "sh"}
+	remove.Cmd = append(remove.Cmd, names...)
+	remove.Env = []string{"D=" + mountPath}
+	remove.Network = "none"
+	code, out, err := r.Engine.RunHelper(ctx, remove)
+	if err != nil || code != 0 {
+		r.logf("old backups could not be removed", "code", code, "error", err, "output", out)
+		return nil
+	}
+	return names
+}
+
+func (r *Runner) logf(message string, args ...any) {
+	if r.Log != nil {
+		r.Log.Warn(message, args...)
+	}
 }
 
 // credentials opens the sealed values; no error ever carries one.

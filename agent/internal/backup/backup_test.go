@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -225,5 +226,57 @@ func TestRedisRestoreIsRefusedInWords(t *testing.T) {
 	result := runner.Restore(context.Background(), req)
 	if result.OK || !strings.Contains(result.Error, "not supported yet") {
 		t.Fatalf("redis restore should be refused in words: %+v", result)
+	}
+}
+
+func TestOldBackupsGoOnlyAfterTheNewOneIsChecked(t *testing.T) {
+	engine := &fakeEngine{checked: checked("4096", "PGDMP\x01\x02")}
+	runner := &Runner{Engine: engine, Open: opener()}
+	req := request()
+	req.Remove = []string{"blog-old-1.dump", "blog-old-2.dump"}
+	result := runner.Take(context.Background(), req)
+	if !result.OK || len(result.Removed) != 2 {
+		t.Fatalf("the old ones were not removed: %+v", result)
+	}
+	// The order is the whole point: write, check, and only then delete.
+	var names []string
+	for _, run := range engine.runs {
+		names = append(names, run.Name)
+	}
+	if len(names) != 3 || !strings.HasSuffix(names[1], "-check") || !strings.HasSuffix(names[2], "-prune") {
+		t.Fatalf("wrong order: %v", names)
+	}
+	prune := engine.runs[2]
+	if !slices.Contains(prune.Cmd, "blog-old-1.dump") || prune.Network != "none" {
+		t.Fatalf("the prune step is wrong: %+v", prune)
+	}
+}
+
+func TestNothingIsDeletedWhenTheNewBackupIsNotGood(t *testing.T) {
+	// An empty file: the old ones are the only backups left, and they stay.
+	engine := &fakeEngine{checked: checked("0", "")}
+	runner := &Runner{Engine: engine, Open: opener()}
+	req := request()
+	req.Remove = []string{"blog-old-1.dump"}
+	result := runner.Take(context.Background(), req)
+	if result.OK || len(result.Removed) != 0 {
+		t.Fatalf("a bad backup deleted the good ones: %+v", result)
+	}
+	for _, run := range engine.runs {
+		if strings.HasSuffix(run.Name, "-prune") {
+			t.Fatal("the prune step ran after a failed backup")
+		}
+	}
+}
+
+func TestAPruneListCannotReachOutsideTheStore(t *testing.T) {
+	engine := &fakeEngine{checked: checked("4096", "PGDMP")}
+	runner := &Runner{Engine: engine, Open: opener()}
+	req := request()
+	// A path, and the backup that was just taken: neither may be deleted.
+	req.Remove = []string{"../../etc/passwd", req.FileName, "fine.dump"}
+	result := runner.Take(context.Background(), req)
+	if !slices.Equal(result.Removed, []string{"fine.dump"}) {
+		t.Fatalf("removed = %v", result.Removed)
 	}
 }

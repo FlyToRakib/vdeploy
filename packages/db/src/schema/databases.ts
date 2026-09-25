@@ -1,7 +1,8 @@
-import type { DatabaseEngine } from '@vdeploy/contracts';
+import { DEFAULT_BACKUP_POLICY, type BackupPolicy, type DatabaseEngine } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
 import {
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -13,6 +14,7 @@ import { organization } from './identity.js';
 import { projects, servers, secrets } from './kernel.js';
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
+const DEFAULT_POLICY = DEFAULT_BACKUP_POLICY;
 
 /**
  * A managed database (§17.3). It is not a project: it is never deployed
@@ -46,6 +48,10 @@ export const databases = pgTable(
     /** The admin password, under this database's own data key. */
     passwordSealed: text('password_sealed').notNull(),
     passwordVersion: integer('password_version').notNull().default(1),
+    /** When backups run and how many are kept (§17.4); daily, 7 local, 30 offsite. */
+    backupPolicy: jsonb('backup_policy').$type<BackupPolicy>().notNull().default(DEFAULT_POLICY),
+    /** The last time the schedule was looked at, so a missed run is late, not skipped. */
+    backupCheckedAt: timestamp('backup_checked_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -128,6 +134,8 @@ export const backups = pgTable(
     verified: boolean('verified').notNull().default(false),
     error: text('error'),
     log: text('log').notNull().default(''),
+    /** Set when the artifact was deleted to keep within the policy; the record stays. */
+    prunedAt: timestamp('pruned_at', { withTimezone: true }),
     createdAt: createdAt(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),

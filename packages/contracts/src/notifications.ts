@@ -12,6 +12,8 @@ export const NotificationTrigger = z.enum([
   'server_offline',
   'server_unreachable',
   'ai_change_applied',
+  'backup_missed',
+  'backup_failed',
 ]);
 export type NotificationTrigger = z.infer<typeof NotificationTrigger>;
 
@@ -28,6 +30,8 @@ export const TRIGGER_LABELS: Record<NotificationTrigger, string> = {
   server_offline: 'A server is offline for more than 5 minutes',
   server_unreachable: "Visitors can't reach a server",
   ai_change_applied: 'The AI applied a change',
+  backup_missed: 'A backup did not happen',
+  backup_failed: 'A backup did not work',
 };
 
 export const ChannelConfig = z.discriminatedUnion('kind', [

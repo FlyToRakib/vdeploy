@@ -1,6 +1,7 @@
 import {
   newId,
   VDeployError,
+  type BackupPolicy,
   type BackupView,
   type RestoreView,
   type DatabaseEngine,
@@ -16,7 +17,7 @@ import {
   sealValue,
   unwrapDataKey,
 } from '@vdeploy/core';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
 import { backups, databaseKeys, databaseLinks, databases, restores } from './schema/index.js';
 
@@ -171,6 +172,7 @@ export function databaseView(
     dbName: row.dbName,
     memoryLimit: row.memoryLimit,
     diskSize: row.diskSize,
+    backupPolicy: row.backupPolicy,
     links: links.map((link) => ({
       projectId: link.projectId as Id<'project'>,
       envKey: link.envKey,
@@ -399,4 +401,68 @@ export function restoreView(row: RestoreRow, databaseName: string): RestoreView 
     startedAt: (row.startedAt ?? row.createdAt).toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
   };
+}
+
+/**
+ * The artifacts that may go once a new one is safely written (§17.4). The
+ * newest `keepLocal` checked backups stay, whatever else happens, so
+ * retention can never take the last good one.
+ */
+export async function prunableBackups(
+  tx: Executor,
+  databaseId: string,
+  keepLocal: number,
+): Promise<BackupRow[]> {
+  const rows = await tx
+    .select()
+    .from(backups)
+    .where(and(eq(backups.databaseId, databaseId), isNull(backups.prunedAt)))
+    .orderBy(desc(backups.createdAt));
+  const keeping = new Set(
+    rows
+      .filter((row) => row.status === 'done' && row.verified)
+      .slice(0, Math.max(1, keepLocal))
+      .map((row) => row.id),
+  );
+  // A backup still being taken is never pruned, and neither is a kept one.
+  return rows.filter(
+    (row) => !keeping.has(row.id) && (row.status === 'done' || row.status === 'failed'),
+  );
+}
+
+/** Records that these artifacts are gone from the server. */
+export async function markBackupsPruned(
+  tx: Executor,
+  fileNames: string[],
+  databaseId: string,
+  now: Date,
+): Promise<void> {
+  if (fileNames.length === 0) return;
+  await tx
+    .update(backups)
+    .set({ prunedAt: now })
+    .where(and(eq(backups.databaseId, databaseId), inArray(backups.fileName, fileNames)));
+}
+
+/** Databases whose backup schedule may have come round. */
+export async function schedulableDatabases(tx: Executor): Promise<DatabaseRow[]> {
+  return tx.select().from(databases).where(isNull(databases.deletedAt));
+}
+
+/** Remembers that the schedule was looked at, so a run is late rather than lost. */
+export async function markBackupChecked(tx: Executor, databaseId: string, at: Date): Promise<void> {
+  await tx.update(databases).set({ backupCheckedAt: at }).where(eq(databases.id, databaseId));
+}
+
+/** Changes when backups run and how many are kept. */
+export async function setBackupPolicy(
+  tx: Executor,
+  databaseId: string,
+  policy: BackupPolicy,
+  now: Date,
+): Promise<void> {
+  await tx
+    .update(databases)
+    .set({ backupPolicy: policy, updatedAt: now })
+    .where(eq(databases.id, databaseId));
 }

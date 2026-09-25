@@ -58,6 +58,7 @@ export const PlanStep = z.discriminatedUnion('kind', [
   // The data layer (§17.3): a database is created, linked and deleted on its own.
   z.strictObject({ kind: z.literal('create_database') }),
   z.strictObject({ kind: z.literal('take_backup'), databaseId: idSchema('database') }),
+  z.strictObject({ kind: z.literal('set_backup_policy'), databaseId: idSchema('database') }),
   z.strictObject({
     kind: z.literal('restore_backup'),
     backupId: idSchema('backup'),

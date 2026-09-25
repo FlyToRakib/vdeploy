@@ -16,6 +16,7 @@ import {
 } from '@vdeploy/contracts';
 import { hashOf } from './canonical.js';
 import { diffSpecs, removedVolumes } from './diff.js';
+import { describeCron } from './cron.js';
 import { defaultEnvKey, engineProfile } from './databases.js';
 import { checkFits, footprint, type ServerBudget } from './governor.js';
 import { maxTier } from './risk.js';
@@ -490,6 +491,28 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       tier: 'safe',
       blastRadius: {
         projects: 0,
+        replicas: 1,
+        domains: [],
+        downtime: 'none',
+        dataAtRisk: [],
+        rollbackTo: null,
+      },
+    };
+  },
+  'database.backup_policy': (args, context) => {
+    const database = requireDatabase(context);
+    // Refused here, before it is stored, rather than never firing later.
+    const when = describeCron(args.policy.expr, args.policy.timezone);
+    return {
+      specHash: null,
+      changes: [
+        { path: 'backups.when', before: null, after: args.policy.enabled ? when : 'not at all' },
+        { path: 'backups.keep', before: null, after: `${String(args.policy.keepLocal)} here` },
+      ],
+      steps: [{ kind: 'set_backup_policy', databaseId: args.databaseId }],
+      tier: 'sensitive',
+      blastRadius: {
+        projects: database.linkedProjects,
         replicas: 1,
         domains: [],
         downtime: 'none',

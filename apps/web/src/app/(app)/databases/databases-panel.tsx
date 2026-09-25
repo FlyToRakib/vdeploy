@@ -20,6 +20,8 @@ import {
   ENGINE_WORDS,
   ENGINES,
   reachWords,
+  SCHEDULES,
+  scheduleWords,
   sizeWords,
   statusWords,
   type BackupSummary,
@@ -208,6 +210,7 @@ function DatabaseCard({
   const [typed, setTyped] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
+  const [scheduling, setScheduling] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
   const [confirmName, setConfirmName] = useState('');
   const status = statusWords(database.status);
@@ -243,6 +246,18 @@ function DatabaseCard({
       <p className="text-sm text-muted-foreground">{reachWords(database)}</p>
       <p className={cn('text-sm', data.tone === 'warning' ? 'text-status-failed' : '')}>
         <span className="font-medium">Data:</span> {data.words}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        {scheduleWords(database.backupPolicy)}{' '}
+        <button
+          type="button"
+          className="text-accent underline"
+          onClick={() => {
+            setScheduling(true);
+          }}
+        >
+          Change
+        </button>
       </p>
       {backups.length > 0 && (
         <details className="text-sm">
@@ -417,6 +432,98 @@ function DatabaseCard({
               Cancel
             </Button>
             <Button type="submit">Connect them</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={scheduling}
+        onOpenChange={setScheduling}
+        title={`When ${database.name} is backed up`}
+        description="A backup is taken and then read back, so you know it can be used."
+      >
+        <form
+          action={(form) => {
+            setScheduling(false);
+            const enabled = form.get('enabled') === 'on';
+            void run(
+              'database.backup_policy',
+              {
+                policy: {
+                  enabled,
+                  expr: formText(form, 'expr'),
+                  timezone: formText(form, 'timezone') || 'UTC',
+                  keepLocal: Number(formText(form, 'keepLocal') || '7'),
+                  keepOffsite: database.backupPolicy.keepOffsite,
+                },
+              },
+              {
+                doing: 'Saving…',
+                done: enabled ? 'Saved. The next one runs on the new schedule.' : 'Saved.',
+              },
+            );
+          }}
+          className="grid gap-4"
+        >
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              name="enabled"
+              defaultChecked={database.backupPolicy.enabled}
+              className="mt-1 size-4"
+            />
+            <span>
+              <span className="font-medium">Back it up by itself</span>
+              <span className="block text-muted-foreground">
+                Off means your data is only ever in one place.
+              </span>
+            </span>
+          </label>
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-medium">How often</span>
+            <select
+              name="expr"
+              defaultValue={database.backupPolicy.expr}
+              className="h-10 rounded-md border border-border bg-surface-raised px-3 text-sm"
+            >
+              {SCHEDULES.map((option) => (
+                <option key={option.expr} value={option.expr}>
+                  {option.label}
+                </option>
+              ))}
+              {!SCHEDULES.some((option) => option.expr === database.backupPolicy.expr) && (
+                <option value={database.backupPolicy.expr}>{database.backupPolicy.expr}</option>
+              )}
+            </select>
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Your timezone"
+              name="timezone"
+              defaultValue={database.backupPolicy.timezone}
+              hint="“3 in the morning” means yours, not the server’s."
+            />
+            <Field
+              label="Copies to keep"
+              name="keepLocal"
+              type="number"
+              min={1}
+              max={365}
+              defaultValue={database.backupPolicy.keepLocal}
+              hint="Older ones go only after a new one is checked."
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setScheduling(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">Save</Button>
           </div>
         </form>
       </Dialog>

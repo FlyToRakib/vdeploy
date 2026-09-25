@@ -14,6 +14,7 @@ export interface DatabaseSummary {
   memoryLimit: string;
   diskSize: string;
   links: { projectId: string; envKey: string }[];
+  backupPolicy: BackupPolicy;
   createdAt: string;
 }
 
@@ -127,4 +128,29 @@ export function dataLine(
     tone: 'good',
     words: `Last backup ${ago(last.finishedAt, now)}, ${sizeWords(last.sizeBytes)}, checked and readable.`,
   };
+}
+
+/** When a database is backed up and how many copies stay (§17.4). */
+export interface BackupPolicy {
+  enabled: boolean;
+  expr: string;
+  timezone: string;
+  keepLocal: number;
+  keepOffsite: number;
+}
+
+/** The schedules people actually pick, in their own words. */
+export const SCHEDULES: readonly { expr: string; label: string }[] = [
+  { expr: '0 3 * * *', label: 'Every day, at 3 in the morning' },
+  { expr: '0 3 * * 0', label: 'Every Sunday, at 3 in the morning' },
+  { expr: '0 */6 * * *', label: 'Every six hours' },
+  { expr: '0 * * * *', label: 'Every hour' },
+];
+
+/** What the schedule means, for someone who has never seen a cron line. */
+export function scheduleWords(policy: BackupPolicy): string {
+  if (!policy.enabled) return 'Not backed up automatically.';
+  const known = SCHEDULES.find((option) => option.expr === policy.expr);
+  const when = known ? known.label.toLowerCase() : `on the schedule ${policy.expr}`;
+  return `Backed up ${when} (${policy.timezone}), keeping ${String(policy.keepLocal)} copies.`;
 }

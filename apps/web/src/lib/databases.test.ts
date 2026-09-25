@@ -7,6 +7,8 @@ import {
   ENGINE_WORDS,
   ENGINES,
   reachWords,
+  SCHEDULES,
+  scheduleWords,
   sizeWords,
   statusWords,
   type BackupSummary,
@@ -28,6 +30,13 @@ const database: DatabaseSummary = {
   memoryLimit: '512Mi',
   diskSize: '10Gi',
   links: [],
+  backupPolicy: {
+    enabled: true,
+    expr: '0 3 * * *',
+    timezone: 'UTC',
+    keepLocal: 7,
+    keepOffsite: 30,
+  },
   createdAt: '2026-09-24T00:00:00.000Z',
 };
 
@@ -116,5 +125,28 @@ describe('what a person is told about their data', () => {
     expect(sizeWords(5 * 1024 ** 3)).toBe('5.0 GB');
     expect(ago('2026-09-24T03:59:30.000Z', now)).toBe('2 minutes ago');
     expect(ago('2026-09-21T04:00:00.000Z', now)).toBe('3 days ago');
+  });
+});
+
+describe('the backup schedule, in words', () => {
+  const policy = {
+    enabled: true,
+    expr: '0 3 * * *',
+    timezone: 'UTC',
+    keepLocal: 7,
+    keepOffsite: 30,
+  };
+
+  it('offers schedules people recognise, and says what one means', () => {
+    expect(SCHEDULES.map((s) => s.expr)).toContain('0 3 * * *');
+    expect(scheduleWords(policy)).toBe(
+      'Backed up every day, at 3 in the morning (UTC), keeping 7 copies.',
+    );
+    expect(scheduleWords({ ...policy, timezone: 'Asia/Dhaka' })).toContain('(Asia/Dhaka)');
+    expect(scheduleWords({ ...policy, expr: '5 4 * * 2' })).toContain('on the schedule 5 4 * * 2');
+  });
+
+  it('says plainly when nothing is scheduled', () => {
+    expect(scheduleWords({ ...policy, enabled: false })).toBe('Not backed up automatically.');
   });
 });

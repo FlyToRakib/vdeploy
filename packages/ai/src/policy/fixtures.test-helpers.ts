@@ -1,5 +1,6 @@
 import {
   DEFAULT_AI_GRANTS,
+  DEFAULT_BACKUP_POLICY,
   newId,
   SCOPE_FIELD,
   type OperationDefinition,
@@ -152,6 +153,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'database.link': { databaseId: newId('database') },
   'database.unlink': { databaseId: newId('database') },
   'database.restore': { backupId: newId('backup'), mode: 'new' },
+  'database.backup_policy': { policy: DEFAULT_BACKUP_POLICY },
   'server.set_address': { ipv4: '8.8.4.4' },
   'server.check_reachability': {},
   'notification.channel_create': {

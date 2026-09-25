@@ -14,6 +14,8 @@ import {
   claimBackups,
   claimBuilds,
   claimRestores,
+  markBackupsPruned,
+  prunableBackups,
   finishRestore,
   getRestore,
   RESTORES_CHANNEL,
@@ -190,6 +192,11 @@ export class Gateway implements LogSource {
               },
             ],
             fileName: backup.fileName,
+            // Older artifacts may go once this one is written and checked —
+            // never before, so retention can never take the last good backup.
+            remove: (await prunableBackups(db, database.id, database.backupPolicy.keepLocal)).map(
+              (old) => old.fileName,
+            ),
             timeoutSeconds: 3600,
           },
         }),
@@ -503,7 +510,10 @@ export class Gateway implements LogSource {
     } else if (frame.type === 'backup_result') {
       // Only the server that was asked may answer, and only about its own backup.
       const backup = await getBackup(db, frame.result.backupId);
-      if (backup?.serverId === serverId) await finishBackup(db, frame.result, now());
+      if (backup?.serverId === serverId) {
+        await finishBackup(db, frame.result, now());
+        await markBackupsPruned(db, frame.result.removed, backup.databaseId, now());
+      }
     } else if (frame.type === 'logs_chunk' || frame.type === 'logs_end') {
       // Only the server a request went to may answer it.
       const request = this.logRequests.get(frame.requestId);

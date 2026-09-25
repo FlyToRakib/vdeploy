@@ -11,6 +11,26 @@ export const DatabaseVersion = z
   .string()
   .regex(/^\d+(\.\d+)*$/, 'must be a version like 16 or 8.4');
 
+/** When backups happen, and how many are kept (§17.4). */
+export const BackupPolicy = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** Five-field cron, read in the timezone below. */
+  expr: z.string().regex(/^(\S+\s+){4}\S+$/, 'must be a five-field schedule'),
+  timezone: z.string().min(1).max(64).default('UTC'),
+  keepLocal: z.number().int().min(1).max(365).default(7),
+  keepOffsite: z.number().int().min(0).max(3650).default(30),
+});
+export type BackupPolicy = z.infer<typeof BackupPolicy>;
+
+/** The default for any managed database: daily, 7 local and 30 offsite. */
+export const DEFAULT_BACKUP_POLICY: BackupPolicy = {
+  enabled: true,
+  expr: '0 3 * * *',
+  timezone: 'UTC',
+  keepLocal: 7,
+  keepOffsite: 30,
+};
+
 /** What a database is, to everyone outside the data layer. */
 export const DatabaseView = z.strictObject({
   id: idSchema('database'),
@@ -29,6 +49,8 @@ export const DatabaseView = z.strictObject({
   dbName: z.string().max(64).nullable(),
   memoryLimit: Memory,
   diskSize: Memory,
+  /** When it is backed up and how many copies stay (§17.4). */
+  backupPolicy: BackupPolicy,
   /** Projects this database is linked to, and the variable each one gets. */
   links: z.array(z.strictObject({ projectId: idSchema('project'), envKey: z.string().max(64) })),
   createdAt: z.iso.datetime(),

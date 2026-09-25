@@ -1,9 +1,10 @@
-import { VDeployError, type DatabaseEngine } from '@vdeploy/contracts';
+import { BackupPolicy, VDeployError, type DatabaseEngine } from '@vdeploy/contracts';
 import {
   connectionUrl,
   databaseHost,
   databaseImage,
   databaseNames,
+  describeCron,
   defaultEnvKey,
   defaultVersion,
   engineProfile,
@@ -21,6 +22,7 @@ import {
   observedState,
   queueBackup,
   queueRestore,
+  setBackupPolicy,
   databaseLinks,
   databases,
   getDatabase,
@@ -432,4 +434,21 @@ export async function restoreBackupStep(
     // Whatever happened, the apps come back: they are never left stopped silently.
     if (held.length > 0) await holdLinkedApps(deps, source.id, true);
   }
+}
+
+/** Changes when this database is copied, and how many copies stay. */
+export async function setBackupPolicyStep(
+  deps: DatabaseStepDeps,
+  state: ApplyState,
+  databaseId: string,
+): Promise<void> {
+  const policy = BackupPolicy.parse(state.args.policy);
+  const row = await getDatabase(deps.db, databaseId);
+  if (!row) throw new VDeployError('not_found', 'The database no longer exists');
+  await deps.db.transaction((tx) => setBackupPolicy(tx, databaseId, policy, deps.now()));
+  state.notes.push(
+    policy.enabled
+      ? `${row.name} is now backed up ${describeCron(policy.expr, policy.timezone)}, keeping ${String(policy.keepLocal)} copies here.`
+      : `${row.name} is no longer backed up. Its data is in one place only.`,
+  );
 }

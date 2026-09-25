@@ -14,6 +14,7 @@ import { createTransport } from 'nodemailer';
 import { pino } from 'pino';
 import { z } from 'zod';
 import { applyPlan } from './apply.js';
+import { runDueBackups } from './backup-schedule.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
 import { safePoster, sendDueNotifications } from './notifications.js';
 import { publicRegistries } from './registry.js';
@@ -120,6 +121,27 @@ const dnsTimer = setInterval(() => {
     });
 }, 5000);
 
+// Backups that nobody has to remember (§17.4): the schedules are looked at
+// once a minute, and a run missed while the worker was busy is late, not lost.
+let backingUp = false;
+const backupTimer = setInterval(() => {
+  if (backingUp) return;
+  backingUp = true;
+  runDueBackups({
+    db,
+    now: () => new Date(),
+    logError: (err, databaseId) => {
+      log.error({ err, databaseId }, 'could not start a scheduled backup');
+    },
+  })
+    .catch((err: unknown) => {
+      log.error({ err }, 'backup schedule round failed');
+    })
+    .finally(() => {
+      backingUp = false;
+    });
+}, 60_000);
+
 // The project timeline keeps 30 days; pruned hourly.
 const pruneTimer = setInterval(() => {
   pruneEvents(db, new Date()).catch((err: unknown) => {
@@ -166,6 +188,7 @@ const offlineTimer = setInterval(() => {
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     clearInterval(dnsTimer);
+    clearInterval(backupTimer);
     clearInterval(pruneTimer);
     clearInterval(notifyTimer);
     clearInterval(offlineTimer);

@@ -30,6 +30,11 @@ export const BackupRequest = z.strictObject({
     .max(8),
   /** What the file is called inside the backup store. */
   fileName: z.string().max(200),
+  /**
+   * Older artifacts this server may delete — but only once the new one is
+   * written and checked, so retention can never take the last good backup.
+   */
+  remove: z.array(z.string().max(200)).max(50).default([]),
   timeoutSeconds: z
     .number()
     .int()
@@ -54,6 +59,8 @@ export const BackupResult = z.strictObject({
   /** True when the file starts with the format's own header. */
   verified: z.boolean(),
   error: z.string().max(4096).optional(),
+  /** The files that were actually deleted afterwards. */
+  removed: z.array(z.string().max(200)).max(50).default([]),
   /** The end of the client's output, for a person to read. */
   log: z.string().max(20_000),
 });

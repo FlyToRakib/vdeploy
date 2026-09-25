@@ -14,7 +14,7 @@ import {
 import { Memory } from '../spec/quantities.js';
 import { AiGrants } from '../grants.js';
 import { RestoreMode } from '../backups.js';
-import { DatabaseEngine, DatabaseVersion } from '../databases.js';
+import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
@@ -453,6 +453,13 @@ export const OPERATIONS = [
     'project',
     'Take a database away from an app; the data stays',
     obj({ ...P, databaseId }),
+  ),
+  operation(
+    'database.backup_policy',
+    'sensitive',
+    'database',
+    'Change when this database is backed up and how many copies are kept',
+    obj({ databaseId, policy: BackupPolicy }),
   ),
   operation(
     'database.stop',

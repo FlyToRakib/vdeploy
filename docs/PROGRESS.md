@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.2c — scheduled backups, offsite copies, and a restore verified on a schedule
+**Task:** 4.2d — offsite copies, downloading a dump, and a restore verified on a schedule
 **Status:** in progress
-**Updated:** 2026-09-24 13:40 UTC
+**Updated:** 2026-09-25 07:15 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -129,7 +129,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 - [x] 4.1/4.2 verified in the testbed: the full e2e is **33 checks**, now including a real Postgres 18 running on the server with nothing published, a linked app that resolves it by name and holds a connection string nobody copied, and a delete that waits for a person. The disaster drill still passes after it
 
 
-- [ ] 4.2c the rest of §17.4–17.5: backups on a schedule, offsite copies with restic, downloading the dump, importing one from elsewhere, and a restore verified on a schedule rather than assumed
+- [x] 4.2c backups that happen by themselves (§17.4, §17.6): a five-field schedule read in **the person's own timezone** — "back up at 3 in the morning" means their 3, and the screen says the resolved UTC time next to it. The worker looks at the schedules once a minute; a run missed while it was busy or restarting is late, never lost, and a database that is off when its backup is due raises a notification rather than being passed over in silence. Retention keeps the newest checked copies and deletes the rest **only after a new one is written and read back** — the order is the guarantee, so the last good backup can never be the one that goes, and a backup still being taken is never a candidate. A schedule VDeploy cannot read is refused when it is set, not the first time it quietly fails to fire. The cron evaluator skips days and hours that cannot match, so looking a year ahead costs hundreds of checks instead of half a million — and an impossible date (31 February) returns "never" instead of hanging
+
+## Doing
+
+- [ ] 4.2d the rest of §17.4–17.5: offsite copies with restic (a backup on the same server is not a backup), downloading the dump, importing one from elsewhere, and a restore verified on a schedule rather than assumed
 
 ## Next
 
