@@ -56,3 +56,28 @@ export const TaskView = z.strictObject({
   finishedAt: z.iso.datetime().nullable(),
 });
 export type TaskView = z.infer<typeof TaskView>;
+
+/**
+ * One terminal session (§19, §20.1). It is human-only — the AI can never
+ * reach this operation at any tier — and everything typed and printed is
+ * recorded, because a shell is the one place where what happened cannot be
+ * reconstructed from anything else.
+ */
+export const TerminalSessionView = z.strictObject({
+  id: idSchema('terminalSession'),
+  projectId: idSchema('project'),
+  projectName: z.string().max(100),
+  /** Which copy of the app the shell was opened in. */
+  replica: z.number().int().min(0),
+  /** Who opened it: a terminal is never opened by anything but a person. */
+  userId: idSchema('user'),
+  userName: z.string().max(200),
+  status: z.enum(['open', 'closed']),
+  /** Why it ended, in words. */
+  reason: z.string().nullable(),
+  /** How much was recorded, in bytes. */
+  recordedBytes: z.number().int().min(0),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+});
+export type TerminalSessionView = z.infer<typeof TerminalSessionView>;

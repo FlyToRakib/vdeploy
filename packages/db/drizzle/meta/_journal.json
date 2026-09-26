@@ -183,6 +183,13 @@
       "when": 1790386636887,
       "tag": "0025_tasks_and_crons",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790388898054,
+      "tag": "0026_web_terminal",
+      "breakpoints": true
     }
   ]
 }

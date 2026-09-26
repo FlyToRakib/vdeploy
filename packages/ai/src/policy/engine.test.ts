@@ -145,3 +145,31 @@ describe('policy engine — specifics', () => {
     ).toMatchObject({ effect: 'deny', code: 'step_up_required' });
   });
 });
+
+describe('the terminal is human-only, whatever is granted', () => {
+  /** Everything an owner could possibly be granted. */
+  const everything: typeof DEFAULT_AI_GRANTS = {
+    ...DEFAULT_AI_GRANTS,
+    autoApply: { safe: true, sensitive: true },
+  };
+
+  it('refuses an AI by identity, before grants are even consulted', () => {
+    const base = {
+      target: targetFor('project'),
+      grants: everything,
+      input: { projectId: targetFor('project').id, replica: 0 },
+      call,
+      now,
+    };
+    // Opening a shell is the thing this platform will not do for a model,
+    // whatever it has been granted and whatever role it is acting as.
+    for (const operation of ['terminal.open'] as const) {
+      const decision = evaluate({ ...base, actor: ai('owner'), operation });
+      expect(decision.effect).toBe('deny');
+      expect(decision.effect === 'deny' && decision.reason).toContain('never by the AI');
+      // A person with the same role is not refused for that reason.
+      const person = evaluate({ ...base, actor: human('owner'), operation });
+      expect(person.effect === 'deny' && person.reason).not.toContain('never by the AI');
+    }
+  });
+});

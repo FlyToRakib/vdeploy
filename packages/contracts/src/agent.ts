@@ -176,6 +176,23 @@ export const AgentFrame = z.discriminatedUnion('type', [
   z.strictObject({ ...FrameHeader, type: z.literal('verify_result'), result: VerifyResult }),
   z.strictObject({ ...FrameHeader, type: z.literal('snapshot_result'), result: SnapshotResult }),
   z.strictObject({ ...FrameHeader, type: z.literal('task_result'), result: TaskResult }),
+  /**
+   * A terminal's output, and its end (§19). Human-only at every tier, and
+   * recorded: a shell is the one place where what happened cannot be
+   * reconstructed from anything else this platform keeps.
+   */
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('terminal_output'),
+    sessionId: z.string().max(64),
+    data: z.base64().max(64_000),
+  }),
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('terminal_end'),
+    sessionId: z.string().max(64),
+    reason: z.string().max(2048),
+  }),
   z.strictObject({
     ...FrameHeader,
     type: z.literal('offsite_check_result'),

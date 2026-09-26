@@ -58,6 +58,7 @@ const TABS = [
   { href: '/deployments', label: 'Deployments' },
   { href: '/logs', label: 'Logs' },
   { href: '/config', label: 'Config' },
+  { href: '/terminal', label: 'Terminal' },
 ] as const;
 
 /** A project: health and address first, its actions, and tabs that are real URLs (§20.1). */

@@ -29,6 +29,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/task"
+	"github.com/FlyToRakib/vdeploy/agent/internal/terminal"
 )
 
 // maxArtifactWindow and initialArtifactWindow bound how much of a download
@@ -63,6 +64,8 @@ type Client struct {
 	Backups BackupTaker
 	// Tasks runs one-off commands and scheduled jobs; nil refuses them.
 	Tasks TaskRunner
+	// Terminals opens a shell in a container; nil refuses terminal requests.
+	Terminals TerminalOpener
 	// Logs streams a project's container output; nil refuses log requests.
 	Logs func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error
 
@@ -84,6 +87,9 @@ type Client struct {
 	tasks           map[string]*task.Result // by task id: nil while running
 	taskResults     chan task.Result
 
+	terminalMu sync.Mutex
+	terminals  map[string]*terminal.Session // by session id, while a shell is open
+
 	artifactMu sync.Mutex
 	artifacts  map[string]*artifactSend // by request id, while a download is running
 }
@@ -96,6 +102,12 @@ type BackupTaker interface {
 	Send(ctx context.Context, req backup.ArtifactRequest, each func([]byte) error) (int64, string, error)
 	Verify(ctx context.Context, req backup.VerifyRequest) backup.VerifyResult
 	Snapshot(ctx context.Context, req backup.SnapshotRequest) backup.SnapshotResult
+}
+
+// TerminalOpener opens an interactive shell in one of a project's containers.
+type TerminalOpener interface {
+	Open(ctx context.Context, req terminal.Request) (*terminal.Session, error)
+	Limit() int
 }
 
 // TaskRunner runs one command for a project to completion.
@@ -274,6 +286,9 @@ func (c *Client) session(ctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// Every shell ends with the connection: a terminal nobody can reach is
+	// a way in that nobody is watching.
+	defer c.closeTerminals()
 	go c.forwardReports(ctx, k)
 	go c.forwardBuildResults(ctx, k)
 	go c.forwardBackupResults(ctx, k)
@@ -394,6 +409,52 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 		} else {
 			c.stopArtifact(frame.RequestID)
 		}
+		return nil
+	}
+	switch head.Type {
+	case protocol.TypeTerminalOpen:
+		var frame terminalOpenFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		go c.openTerminal(ctx, k, frame.Terminal)
+		return nil
+	case protocol.TypeTerminalInput:
+		var frame terminalInputFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		typed, err := base64.StdEncoding.DecodeString(frame.Data)
+		if err != nil {
+			return fmt.Errorf("terminal input is not encoded properly")
+		}
+		c.typed(frame.SessionID, typed)
+		return nil
+	case protocol.TypeTerminalResize:
+		var frame terminalResizeFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.resizeTerminal(ctx, frame.SessionID, frame.Cols, frame.Rows)
+		return nil
+	case protocol.TypeTerminalClose:
+		var frame terminalCloseFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		go c.closeTerminal(context.WithoutCancel(ctx), k, frame.SessionID, "the session was closed")
 		return nil
 	}
 	if head.Type == protocol.TypeTask {
@@ -1150,5 +1211,163 @@ func (c *Client) forwardTaskResults(ctx context.Context, k *conn) {
 				return
 			}
 		}
+	}
+}
+
+type terminalOpenFrame struct {
+	protocol.Header
+	Terminal terminal.Request `json:"terminal"`
+}
+
+type terminalInputFrame struct {
+	protocol.Header
+	SessionID string `json:"sessionId"`
+	Data      string `json:"data"`
+}
+
+type terminalResizeFrame struct {
+	protocol.Header
+	SessionID string `json:"sessionId"`
+	Cols      int    `json:"cols"`
+	Rows      int    `json:"rows"`
+}
+
+type terminalCloseFrame struct {
+	protocol.Header
+	SessionID string `json:"sessionId"`
+}
+
+type terminalOutputFrame struct {
+	protocol.Header
+	SessionID string `json:"sessionId"`
+	Data      string `json:"data"`
+}
+
+type terminalEndFrame struct {
+	protocol.Header
+	SessionID string `json:"sessionId"`
+	Reason    string `json:"reason"`
+}
+
+// openTerminal starts one shell and pumps its output back until it ends.
+func (c *Client) openTerminal(ctx context.Context, k *conn, req terminal.Request) {
+	c.terminalMu.Lock()
+	if c.terminals == nil {
+		c.terminals = map[string]*terminal.Session{}
+	}
+	if _, busy := c.terminals[req.SessionID]; busy {
+		c.terminalMu.Unlock()
+		return
+	}
+	if c.Terminals == nil {
+		c.terminalMu.Unlock()
+		c.endTerminal(ctx, k, req.SessionID, "this server does not open terminals")
+		return
+	}
+	if len(c.terminals) >= c.Terminals.Limit() {
+		c.terminalMu.Unlock()
+		c.endTerminal(ctx, k, req.SessionID, "too many terminals are open on this server already")
+		return
+	}
+	c.terminalMu.Unlock()
+
+	session, err := c.Terminals.Open(ctx, req)
+	if err != nil {
+		c.endTerminal(ctx, k, req.SessionID, err.Error())
+		return
+	}
+	c.terminalMu.Lock()
+	c.terminals[req.SessionID] = session
+	c.terminalMu.Unlock()
+
+	go func() {
+		defer c.closeTerminal(context.WithoutCancel(ctx), k, req.SessionID, "")
+		buffer := make([]byte, 8192)
+		for {
+			n, readErr := session.Read(buffer)
+			if n > 0 {
+				out := terminalOutputFrame{
+					SessionID: req.SessionID,
+					Data:      base64.StdEncoding.EncodeToString(buffer[:n]),
+				}
+				if err := k.send(ctx, protocol.TypeTerminalOutput, func(h protocol.Header) any {
+					out.Header = h
+					return out
+				}); err != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+}
+
+// closeTerminal ends one session and says why, once.
+func (c *Client) closeTerminal(ctx context.Context, k *conn, sessionID, reason string) {
+	c.terminalMu.Lock()
+	session := c.terminals[sessionID]
+	delete(c.terminals, sessionID)
+	c.terminalMu.Unlock()
+	if session == nil {
+		return
+	}
+	if reason == "" {
+		ended, code := session.Ended(ctx)
+		if ended {
+			reason = terminal.Reason(code)
+		} else {
+			reason = "the session was closed"
+		}
+	}
+	session.Close()
+	c.endTerminal(ctx, k, sessionID, reason)
+}
+
+func (c *Client) endTerminal(ctx context.Context, k *conn, sessionID, reason string) {
+	frame := terminalEndFrame{SessionID: sessionID, Reason: reason}
+	if err := k.send(ctx, protocol.TypeTerminalEnd, func(h protocol.Header) any {
+		frame.Header = h
+		return frame
+	}); err != nil {
+		c.Log.Warn("a terminal could not be closed cleanly", "session", sessionID, "error", err)
+	}
+}
+
+// typed sends what the person typed to the shell.
+func (c *Client) typed(sessionID string, data []byte) {
+	c.terminalMu.Lock()
+	session := c.terminals[sessionID]
+	c.terminalMu.Unlock()
+	if session == nil {
+		return
+	}
+	if _, err := session.Write(data); err != nil {
+		c.Log.Warn("a terminal would not take input", "session", sessionID, "error", err)
+	}
+}
+
+func (c *Client) resizeTerminal(ctx context.Context, sessionID string, cols, rows int) {
+	c.terminalMu.Lock()
+	session := c.terminals[sessionID]
+	c.terminalMu.Unlock()
+	if session == nil {
+		return
+	}
+	if err := session.Resize(ctx, cols, rows); err != nil {
+		c.Log.Warn("a terminal would not resize", "session", sessionID, "error", err)
+	}
+}
+
+// closeTerminals ends every shell when the connection goes: a terminal
+// nobody can reach is a way in that nobody is watching.
+func (c *Client) closeTerminals() {
+	c.terminalMu.Lock()
+	open := c.terminals
+	c.terminals = map[string]*terminal.Session{}
+	c.terminalMu.Unlock()
+	for _, session := range open {
+		session.Close()
 	}
 }

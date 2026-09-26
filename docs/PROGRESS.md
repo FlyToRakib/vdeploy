@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.3c — the rest of M4 (terminal, browser, templates, metrics, health)
+**Task:** 4.3d — file browser, templates, metrics, status page, server health
 **Status:** in progress
-**Updated:** 2026-09-26 11:05 UTC
+**Updated:** 2026-09-26 13:50 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -143,9 +143,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.3b scheduled jobs and one-off commands (§17.6): both are the same thing — a container from the app's current release, with its settings, its secrets, its network and its folders, running one command and then going away. It runs **once**, not once per replica: three copies of an app must not mean three copies of every nightly email, and that comes from there being exactly one job container per run. A job is part of the spec, so adding or changing one is a planned change like any other — approved, versioned with the release, rolled back with it. The worker reads the schedules once a minute in the timezone they were written in; a firing missed while it was busy is late rather than lost, and the same firing can only be queued once because the minute it is *for* is part of its identity in the database. A run against a release that moved underneath it is refused rather than run against the wrong version. `task.run` waits for the command and brings its output back with the plan; it is destructive, because nobody can tell from outside whether a command sends a report or deletes last year's rows
 
+- [x] 4.3c the web terminal (§19, §20.1, ADR 0014): the one place this platform runs exec, and the shape of the request is the control — it names a project and a replica number, and has no field for a container, a command, a user or a privilege. The shell is a constant in the agent's own code and the container is resolved from the desired state that agent already holds, with the project label checked as well as the name, so a compromised control plane gains a shell in a container it already controls the contents of and nothing more. Human-only is enforced at the identity layer, before grants are consulted: the test widens the grants as far as they go and asserts the refusal says "never by the AI", while a person with the same role is not refused for that reason. Every session is recorded — who opened it, into which copy, and every byte that crossed it — because a shell is the only change on this platform that leaves no plan, no spec diff and no release behind. Sessions end when the page closes, when the connection drops and when the shell exits; there is a limit per server, because a terminal left open is a way in that nobody is watching. The screen says plainly that changes made in there are gone at the next deploy
+
 ## Doing
 
-- [ ] 4.3c the rest of M4: web terminal (audited, human-only), file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
+- [ ] 4.3d the rest of M4: file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
 
 ## Next
 

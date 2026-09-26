@@ -24,6 +24,7 @@ export const ID_PREFIXES = {
   restore: 'rst',
   restoreCheck: 'vfy',
   task: 'tsk',
+  terminalSession: 'trm',
   auditEntry: 'aud',
   session: 'ses',
   apiKey: 'key',

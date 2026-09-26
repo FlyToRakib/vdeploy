@@ -132,6 +132,13 @@ export const OPERATIONS = [
   ),
   query('task.list', 'project', 'deployHistory', 'List the runs of this app’s commands', obj(P)),
   query(
+    'terminal.sessions',
+    'org',
+    'deployHistory',
+    'List the terminal sessions people have opened, and what was recorded',
+    obj({}),
+  ),
+  query(
     'backup.checks',
     'org',
     'config',

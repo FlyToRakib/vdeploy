@@ -148,6 +148,35 @@ export interface ArtifactSource {
   ): Promise<{ sizeBytes: number }>;
 }
 
+interface TerminalRequest {
+  serverId: string;
+  onOutput: (data: Buffer) => void;
+  onEnd: (reason: string) => void;
+}
+
+/** One open shell, from the side of whoever is typing into it. */
+export interface TerminalSession {
+  /** Sends what the person typed. */
+  send: (data: Buffer) => void;
+  resize: (cols: number, rows: number) => void;
+  close: () => void;
+}
+
+/** Where a terminal comes from: the agent holding the project's containers. */
+export interface TerminalSource {
+  /**
+   * Opens a shell in one replica. The request names a project and a replica
+   * number and nothing else — no container, no command, no user — so this
+   * path cannot widen into running something arbitrary on the server.
+   */
+  terminal(
+    serverId: string,
+    request: { sessionId: string; projectId: string; replica: number; cols: number; rows: number },
+    onOutput: (data: Buffer) => void,
+    onEnd: (reason: string) => void,
+  ): TerminalSession;
+}
+
 /** Where live logs come from: the agent holding the project's containers. */
 export interface LogSource {
   /**
@@ -168,10 +197,11 @@ export interface LogSource {
  * records acks and observed state. Agent input is validated like any other
  * untrusted input: a compromised server cannot hurt the control plane.
  */
-export class Gateway implements LogSource, ArtifactSource {
+export class Gateway implements LogSource, ArtifactSource, TerminalSource {
   private readonly connections = new Map<string, Connection>();
   private readonly logRequests = new Map<string, LogRequest>();
   private readonly artifactRequests = new Map<string, ArtifactRequest>();
+  private readonly terminalRequests = new Map<string, TerminalRequest>();
   private stopListening: (() => Promise<void>) | null = null;
   private stopBuildListening: (() => Promise<void>) | null = null;
   private stopBackupListening: (() => Promise<void>) | null = null;
@@ -767,6 +797,51 @@ export class Gateway implements LogSource, ArtifactSource {
     });
   }
 
+  /**
+   * Opens a shell in one of a project's replicas (§19). Nothing about the
+   * command, the user or the container is decided here: the agent resolves
+   * the replica from its own desired state and runs a shell that is a
+   * constant in its own code.
+   */
+  terminal(
+    serverId: string,
+    request: { sessionId: string; projectId: string; replica: number; cols: number; rows: number },
+    onOutput: (data: Buffer) => void,
+    onEnd: (reason: string) => void,
+  ): TerminalSession {
+    const { sessionId } = request;
+    let ended = false;
+    const finish = (reason: string) => {
+      if (ended) return;
+      ended = true;
+      this.terminalRequests.delete(sessionId);
+      onEnd(reason);
+    };
+    const to = (type: string, body: Record<string, unknown>) => {
+      const open = this.connections.get(serverId);
+      if (!open) {
+        finish('The connection to the server was lost');
+        return;
+      }
+      open.socket.send(seal(this.deps.key, { ...open.session.next(type), ...body }));
+    };
+
+    this.terminalRequests.set(sessionId, { serverId, onOutput, onEnd: finish });
+    to('terminal_open', { terminal: { ...request } });
+    return {
+      send: (data) => {
+        to('terminal_input', { sessionId, data: data.toString('base64') });
+      },
+      resize: (cols, rows) => {
+        to('terminal_resize', { sessionId, cols, rows });
+      },
+      close: () => {
+        to('terminal_close', { sessionId });
+        finish('the session was closed');
+      },
+    };
+  }
+
   stream(
     serverId: string,
     projectId: string,
@@ -891,6 +966,9 @@ export class Gateway implements LogSource, ArtifactSource {
       for (const request of this.logRequests.values()) {
         if (request.serverId === serverId) request.done('The connection to the server was lost');
       }
+      for (const request of this.terminalRequests.values()) {
+        if (request.serverId === serverId) request.onEnd('The connection to the server was lost');
+      }
       for (const request of this.artifactRequests.values()) {
         if (request.serverId === serverId) {
           request.onEnd({ sizeBytes: 0, error: 'The connection to the server was lost' });
@@ -991,6 +1069,15 @@ export class Gateway implements LogSource, ArtifactSource {
     } else if (frame.type === 'restore_result') {
       const restore = await getRestore(db, frame.result.restoreId);
       if (restore?.serverId === serverId) await finishRestore(db, frame.result, now());
+    } else if (frame.type === 'terminal_output' || frame.type === 'terminal_end') {
+      // Only the server a session was opened on may answer it.
+      const request = this.terminalRequests.get(frame.sessionId);
+      if (request?.serverId !== serverId) return;
+      if (frame.type === 'terminal_end') {
+        request.onEnd(frame.reason);
+        return;
+      }
+      request.onOutput(Buffer.from(frame.data, 'base64'));
     } else if (frame.type === 'task_result') {
       // Only the server a run went to may answer it.
       const task = await getTask(db, frame.result.taskId);

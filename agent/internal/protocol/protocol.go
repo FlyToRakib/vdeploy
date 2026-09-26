@@ -50,10 +50,17 @@ const (
 
 	TypeTask       = "task"
 	TypeTaskResult = "task_result"
-	TypeLogs       = "logs"
-	TypeLogsStop   = "logs_stop"
-	TypeLogsChunk  = "logs_chunk"
-	TypeLogsEnd    = "logs_end"
+
+	TypeTerminalOpen   = "terminal_open"
+	TypeTerminalInput  = "terminal_input"
+	TypeTerminalResize = "terminal_resize"
+	TypeTerminalClose  = "terminal_close"
+	TypeTerminalOutput = "terminal_output"
+	TypeTerminalEnd    = "terminal_end"
+	TypeLogs           = "logs"
+	TypeLogsStop       = "logs_stop"
+	TypeLogsChunk      = "logs_chunk"
+	TypeLogsEnd        = "logs_end"
 )
 
 // MaxClockSkew bounds how far a frame's timestamp may be from ours.

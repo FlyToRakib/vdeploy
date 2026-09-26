@@ -23,6 +23,7 @@ import { operationRoutes } from './routes/operations.js';
 import { backupDownloadRoutes } from './routes/backup-download.js';
 import { dumpRoutes } from './routes/dumps.js';
 import { logRoutes } from './routes/logs.js';
+import { terminalRoutes } from './routes/terminal.js';
 import { tcpProbe, type PortProbe } from './agents/reachability.js';
 import { githubFromConfig } from './github-config.js';
 import type { GithubDeps } from './kernel/context.js';
@@ -148,6 +149,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     now: deps.now ?? (() => new Date()),
     logs: gateway,
     artifacts: gateway,
+    terminals: gateway,
     connected: (serverId: string) => gateway.isConnected(serverId),
     probe,
     ...(github ? { github } : {}),
@@ -156,6 +158,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(operationRoutes(kernel));
   await app.register(logRoutes(kernel));
   await app.register(backupDownloadRoutes(kernel));
+  await app.register(terminalRoutes(kernel));
   await app.register(uploadRoutes(kernel));
   await app.register(dumpRoutes(kernel));
   await app.register(githubRoutes(kernel));

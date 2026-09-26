@@ -7,6 +7,8 @@ import {
   verificationView,
   verificationsFor,
   tasksOf,
+  terminalSessionsFor,
+  terminalSessionView,
   taskView,
   databaseView,
   databasesOf,
@@ -68,6 +70,10 @@ export const DATABASE_QUERIES: Partial<Record<OperationName, Handler>> = {
       throw new VDeployError('invalid_input', 'task.list needs projectId');
     }
     return (await tasksOf(deps.db, args.projectId)).map(taskView);
+  },
+  'terminal.sessions': async ({ deps, actor }) => {
+    const rows = await terminalSessionsFor(deps.db, actor.orgId);
+    return rows.map((row) => terminalSessionView(row.session, row.projectName, row.userName));
   },
   'backup.restores': async ({ deps, actor }) => {
     const rows = await restoresFor(deps.db, actor.orgId);

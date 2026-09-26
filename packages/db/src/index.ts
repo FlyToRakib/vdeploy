@@ -12,6 +12,7 @@ export * from './builds.js';
 export * from './events.js';
 export * from './databases.js';
 export * from './tasks.js';
+export * from './terminal.js';
 export * from './backup-targets.js';
 export * from './diagnose.js';
 export * from './notifications.js';

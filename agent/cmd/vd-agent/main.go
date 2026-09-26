@@ -29,6 +29,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
 	"github.com/FlyToRakib/vdeploy/agent/internal/sealed"
 	"github.com/FlyToRakib/vdeploy/agent/internal/task"
+	"github.com/FlyToRakib/vdeploy/agent/internal/terminal"
 	"github.com/FlyToRakib/vdeploy/agent/internal/transport"
 )
 
@@ -254,6 +255,11 @@ func serve(configPath string, log *slog.Logger) error {
 			BoxKey:  sealed.PublicKey(box),
 			Builder: builder,
 			Backups: backups,
+			Terminals: &terminal.Runner{
+				Engine:   engine,
+				Projects: reconciler.Project,
+				Log:      log,
+			},
 			Tasks: &task.Runner{
 				Engine:   engine,
 				Projects: reconciler.Project,

@@ -27,8 +27,9 @@ var ErrNotFound = errors.New("not found")
 
 // Client talks to one Docker Engine over its unix socket.
 type Client struct {
-	http *http.Client
-	base string
+	http   *http.Client
+	socket string
+	base   string
 }
 
 // New returns a client for the socket at path (usually /var/run/docker.sock).
@@ -41,7 +42,11 @@ func New(socketPath string) *Client {
 		MaxIdleConns:    4,
 		IdleConnTimeout: 30 * time.Second,
 	}
-	return &Client{http: &http.Client{Transport: transport}, base: "http://docker/" + APIVersion}
+	return &Client{
+		http:   &http.Client{Transport: transport},
+		socket: socketPath,
+		base:   "http://docker/" + APIVersion,
+	}
 }
 
 // APIError is a non-success answer from the Engine.
