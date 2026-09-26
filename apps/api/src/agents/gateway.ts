@@ -58,6 +58,7 @@ import {
   observedState,
   readSecret,
   recordEvents,
+  recordUsage,
   notifyBackupResult,
   notifyRestoreCheck,
   notifyFromReport,
@@ -1063,6 +1064,8 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource {
           set: { generation: frame.report.generation, report: frame.report, receivedAt: now() },
         });
       await recordEvents(db, serverId, frame.report.events ?? [], now());
+      // What the server and its apps are actually using (§27).
+      await recordUsage(db, serverId, frame.report, now());
       await notifyFromReport(db, serverId, frame.report, now());
     } else if (frame.type === 'build_result') {
       await finishBuild(db, serverId, frame.result, now());

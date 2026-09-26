@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { UsageGraph, type Reading } from '@/components/usage-graph';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { query } from '@/lib/operations';
@@ -42,10 +43,17 @@ export function ProjectOverview() {
   const [events, setEvents] = useState<ProjectEvent[] | null>(null);
   const [releases, setReleases] = useState<Release[]>([]);
   const [lastFailure, setLastFailure] = useState<string | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const troubled = summary?.state === 'down' || summary?.state === 'failing';
 
   useEffect(() => {
     const live = { current: true };
+    void query<Usage>('project.metrics', { projectId }).then(
+      (read) => {
+        if (live.current) setUsage(read);
+      },
+      () => undefined,
+    );
     void query<ProjectEvent[]>('project.events', { projectId }).then(
       (list) => {
         if (live.current) setEvents(list.slice(0, 30));
@@ -167,6 +175,58 @@ export function ProjectOverview() {
           </ol>
         )}
       </section>
+
+      {usage && usage.series.length > 1 && (
+        <section className="grid gap-3">
+          <h2 className="font-medium">What it is using</h2>
+          <p className="text-sm text-muted-foreground">
+            The last day. The dotted line is what it is allowed — an app that keeps touching it is
+            an app that needs more room.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-1">
+              <p className="text-sm">
+                Memory{' '}
+                <span className="text-muted-foreground">
+                  {usage.now ? memoryWords(usage.now.memoryBytes, usage.now.memoryLimit) : ''}
+                </span>
+              </p>
+              <UsageGraph
+                readings={usage.series}
+                pick={(r) => r.memoryBytes}
+                ceiling={usage.now?.memoryLimit ?? 0}
+                label="memory over the last day"
+              />
+            </div>
+            <div className="grid gap-1">
+              <p className="text-sm">
+                Processor{' '}
+                <span className="text-muted-foreground">
+                  {usage.now ? `${usage.now.cpuPercent.toFixed(0)}% of one core` : ''}
+                </span>
+              </p>
+              <UsageGraph
+                readings={usage.series}
+                pick={(r) => r.cpuPercent}
+                ceiling={100}
+                label="processor over the last day"
+              />
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
+}
+
+/** What `project.metrics` answers with. */
+interface Usage {
+  now: Reading | null;
+  series: Reading[];
+}
+
+/** "300 MB of 512 MB" — the number people compare against. */
+function memoryWords(used: number, limit: number): string {
+  const mb = (bytes: number) => `${String(Math.round(bytes / 1024 / 1024))} MB`;
+  return limit > 0 ? `${mb(used)} of ${mb(limit)}` : mb(used);
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
+	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
 	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
@@ -200,6 +201,13 @@ func serve(configPath string, log *slog.Logger) error {
 	images := &build.Images{Path: filepath.Join(cfg.StateDir, "built-images.json")}
 	reconciler.Built = images.Built
 	reconciler.Releases = &reconcile.ReleaseLog{Path: filepath.Join(cfg.StateDir, "releases.json")}
+	// What the machine and its apps are actually using (§27), read from the
+	// kernel and the Engine rather than promised by a spec.
+	dockerRoot, err := engine.RootDir(ctx)
+	if err != nil {
+		log.Warn("the disk Docker writes to could not be found", "error", err)
+	}
+	reconciler.Metrics = &metrics.Reader{Engine: engine, Root: dockerRoot}
 	loop := &reconcile.Loop{
 		Reconciler: reconciler,
 		StateDir:   cfg.StateDir,

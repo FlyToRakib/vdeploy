@@ -16,6 +16,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/guard"
+	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
 	"github.com/FlyToRakib/vdeploy/agent/internal/spec"
 )
 
@@ -73,6 +74,8 @@ type Report struct {
 	Events     []Event         `json:"events"`
 	// Settling means a replica is still starting or an old one draining: pass again soon.
 	Settling bool `json:"settling"`
+	// Usage is what the server and its apps are actually using (§27).
+	Usage *metrics.Usage `json:"usage,omitempty"`
 }
 
 // SecretSource opens a secret value sealed to this server for one project.
@@ -100,6 +103,10 @@ type Reconciler struct {
 	Storage Storage
 	// StorageScan paces that look (default unsavedEvery).
 	StorageScan time.Duration
+	// Metrics reads what the server and its apps are using; nil reads none.
+	Metrics *metrics.Reader
+	// MetricsEvery paces those readings (default metrics.Every).
+	MetricsEvery time.Duration
 	// Inspector gathers evidence on replicas that are not serving; nil gathers none.
 	Inspector Inspector
 	Now       func() time.Time
@@ -109,6 +116,7 @@ type Reconciler struct {
 	releaseStarts map[string]time.Time
 	unsaved       map[string][]UnsavedFolder
 	unsavedAt     time.Time
+	measured      time.Time
 	// moving: new permanent folders (by volume) whose files still have to be copied in.
 	moving   map[string]bool
 	evidence map[string]evidenceCache
@@ -186,8 +194,32 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	for i := range p.report.Projects {
 		p.report.Projects[i].Unsaved = r.unsaved[p.report.Projects[i].ProjectID]
 	}
+	p.measure(ctx)
 	p.retire(ctx)
 	return p.report, nil
+}
+
+// measure takes a reading of what the server and its apps are using, at its
+// own pace: often enough to see a spike, rarely enough to cost nothing much.
+func (p *pass) measure(ctx context.Context) {
+	r := p.r
+	if r.Metrics == nil {
+		return
+	}
+	every := r.MetricsEvery
+	if every <= 0 {
+		every = metrics.Every
+	}
+	if !r.measured.IsZero() && r.now().Sub(r.measured) < every {
+		return
+	}
+	r.measured = r.now()
+	containers := make([]docker.Container, 0, len(p.existing))
+	for _, c := range p.existing {
+		containers = append(containers, c)
+	}
+	usage := r.Metrics.Read(ctx, containers, r.now())
+	p.report.Usage = &usage
 }
 
 func (p *pass) project(ctx context.Context, project spec.DesiredProject) ProjectState {

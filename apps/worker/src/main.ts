@@ -6,6 +6,7 @@ import {
   connect,
   notifyOfflineServers,
   pruneEvents,
+  pruneMetrics,
   queueConnection,
   type ApplyJob,
 } from '@vdeploy/db';
@@ -185,10 +186,14 @@ const verifyTimer = setInterval(() => {
     });
 }, 10 * 60_000);
 
-// The project timeline keeps 30 days; pruned hourly.
+// The project timeline keeps 30 days and the usage readings two (§27);
+// both pruned hourly, because nobody reads a year of numbers.
 const pruneTimer = setInterval(() => {
   pruneEvents(db, new Date()).catch((err: unknown) => {
     log.error({ err }, 'could not prune old events');
+  });
+  pruneMetrics(db, new Date()).catch((err: unknown) => {
+    log.error({ err }, 'could not prune old readings');
   });
 }, 60 * 60_000);
 

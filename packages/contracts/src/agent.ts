@@ -136,6 +136,36 @@ export const ObservedReport = z.strictObject({
   databases: z.array(ObservedDatabase).max(64).optional(),
   /** A replica is still starting or an old release draining. */
   settling: z.boolean().optional(),
+  /**
+   * What the server and its apps are actually using (§27) — as opposed to
+   * what they were promised, which the resource governor already knows.
+   */
+  usage: z
+    .strictObject({
+      server: z.strictObject({
+        cpuPercent: z.number().min(0).max(100),
+        memoryUsedBytes: z.number().int().min(0),
+        memoryTotalBytes: z.number().int().min(0),
+        diskUsedBytes: z.number().int().min(0),
+        diskTotalBytes: z.number().int().min(0),
+      }),
+      projects: z
+        .array(
+          z.strictObject({
+            projectId: z.string().max(64),
+            /** Of one core: 250 means two and a half cores. */
+            cpuPercent: z.number().min(0),
+            memoryBytes: z.number().int().min(0),
+            memoryLimit: z.number().int().min(0),
+            rxBytes: z.number().int().min(0),
+            txBytes: z.number().int().min(0),
+            replicas: z.number().int().min(0).max(64),
+          }),
+        )
+        .max(200)
+        .default([]),
+    })
+    .optional(),
 });
 export type ObservedReport = z.infer<typeof ObservedReport>;
 

@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.3d — file browser, templates, metrics, status page, server health
+**Task:** 4.3e — file browser, templates, compose import, status page, server health
 **Status:** in progress
-**Updated:** 2026-09-26 13:50 UTC
+**Updated:** 2026-09-26 15:30 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -145,9 +145,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.3c the web terminal (§19, §20.1, ADR 0014): the one place this platform runs exec, and the shape of the request is the control — it names a project and a replica number, and has no field for a container, a command, a user or a privilege. The shell is a constant in the agent's own code and the container is resolved from the desired state that agent already holds, with the project label checked as well as the name, so a compromised control plane gains a shell in a container it already controls the contents of and nothing more. Human-only is enforced at the identity layer, before grants are consulted: the test widens the grants as far as they go and asserts the refusal says "never by the AI", while a person with the same role is not refused for that reason. Every session is recorded — who opened it, into which copy, and every byte that crossed it — because a shell is the only change on this platform that leaves no plan, no spec diff and no release behind. Sessions end when the page closes, when the connection drops and when the shell exits; there is a limit per server, because a terminal left open is a way in that nobody is watching. The screen says plainly that changes made in there are gone at the next deploy
 
+- [x] 4.3d metrics and graphs (§27, §20.1): what a server and its apps are actually using, as opposed to what they were promised — which the resource governor already knew. The agent takes a reading every thirty seconds: each app's processor and memory summed across its copies, against what those copies are allowed together, and the machine's own processor, memory and disk read from the kernel. Page cache is subtracted from an app's memory, because a graph that counts it frightens people for no reason; the first reading after a start reports no processor figure rather than one averaged over the machine's whole uptime; and one container that will not answer is not a failed reading. Readings are kept two days and pruned hourly, and a series is thinned to something a graph can draw by keeping the **peak** in each slot — averaging away a spike hides the thing somebody opened the graph to find. The project screen draws the last day with a dotted line at the limit, so "busy" is visible without reading an axis
+
 ## Doing
 
-- [ ] 4.3d the rest of M4: file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
+- [ ] 4.3e the rest of M4: file/volume browser, template catalog, compose import, status page, server health and reclaim, firewall management
 
 ## Next
 

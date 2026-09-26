@@ -15,6 +15,9 @@ import {
   projects,
   releases,
   serverBudget,
+  metricsOf,
+  latestMetric,
+  downsample,
   servers,
   urlSettingsFor,
 } from '@vdeploy/db';
@@ -232,7 +235,36 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
     // Oldest first, across replicas; the model sees them only as tainted data (§7).
     return lines.sort((a, b) => a.time.localeCompare(b.time));
   },
-  'project.metrics': notYet,
+  /**
+   * What an app is actually using, now and over the last day (§27). The
+   * series is thinned to something a graph can draw, keeping the peak in
+   * each slot — averaging away a spike hides the thing somebody opened the
+   * graph to find.
+   */
+  'project.metrics': async ({ deps, args }) => {
+    const projectId = id(args, 'projectId');
+    const since = new Date(deps.now().getTime() - 24 * 60 * 60_000);
+    const [samples, now] = await Promise.all([
+      metricsOf(deps.db, projectId, since),
+      latestMetric(deps.db, projectId),
+    ]);
+    return {
+      now: now
+        ? {
+            at: now.at.toISOString(),
+            cpuPercent: now.cpuPercent,
+            memoryBytes: now.memoryBytes,
+            memoryLimit: now.memoryLimit,
+          }
+        : null,
+      series: downsample(samples, 120).map((sample) => ({
+        at: sample.at.toISOString(),
+        cpuPercent: sample.cpuPercent,
+        memoryBytes: sample.memoryBytes,
+        memoryLimit: sample.memoryLimit,
+      })),
+    };
+  },
   'project.events': async ({ deps, args }) => eventsFor(deps.db, id(args, 'projectId')),
   'deployment.logs': async ({ deps, args }) => {
     const [row] = await deps.db

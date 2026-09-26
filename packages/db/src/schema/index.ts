@@ -5,6 +5,7 @@ export * from './builds.js';
 export * from './databases.js';
 export * from './tasks.js';
 export * from './terminal.js';
+export * from './metrics.js';
 export * from './notifications.js';
 export * from './github.js';
 export * from './ai.js';
