@@ -15,19 +15,24 @@ import (
 
 // fakeEngine answers helper runs from a script, and records what it was asked.
 type fakeEngine struct {
-	runs     []docker.Helper
-	dump     func(docker.Helper) (int, string, error)
-	checked  string // "<size> <sha> <magic hex>"
-	stored   map[string]string
-	removed  []string
-	made     []string
-	gone     []string
-	created  []compose.Container
-	started  []string
-	managed  []docker.Container
-	imageErr error
-	startErr error
-	volumes  map[string]bool
+	runs         []docker.Helper
+	dump         func(docker.Helper) (int, string, error)
+	checked      string // "<size> <sha> <magic hex>"
+	stored       map[string]string
+	removed      []string
+	made         []string
+	gone         []string
+	created      []compose.Container
+	started      []string
+	managed      []docker.Container
+	folders      string
+	foldersErr   error
+	snapped      []map[string]string
+	restoredInto []map[string]string
+	putBack      string
+	imageErr     error
+	startErr     error
+	volumes      map[string]bool
 }
 
 func (f *fakeEngine) RunHelper(_ context.Context, h docker.Helper) (int, string, error) {
@@ -83,6 +88,35 @@ func (f *fakeEngine) RemoveVolumeFile(_ context.Context, _, _, _, _, file string
 	delete(f.stored, file)
 	f.removed = append(f.removed, file)
 	return nil
+}
+
+// Whole folders, for snapshots: what was read out and what went back in.
+func (f *fakeEngine) ReadVolumesInto(
+	_ context.Context,
+	_, _ string,
+	mounts map[string]string,
+	_ string,
+	out io.Writer,
+) (int64, error) {
+	if f.foldersErr != nil {
+		return 0, f.foldersErr
+	}
+	f.snapped = append(f.snapped, mounts)
+	written, err := out.Write([]byte(f.folders))
+	return int64(written), err
+}
+
+func (f *fakeEngine) WriteVolumesFrom(
+	_ context.Context,
+	_, _ string,
+	mounts map[string]string,
+	_ string,
+	body io.Reader,
+) error {
+	f.restoredInto = append(f.restoredInto, mounts)
+	back, err := io.ReadAll(body)
+	f.putBack = string(back)
+	return err
 }
 
 // The throwaway engine of a restore check: what was made, and what went.

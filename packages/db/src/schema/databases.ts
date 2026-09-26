@@ -109,8 +109,9 @@ export const databaseLinks = pgTable(
 );
 
 /**
- * A backup of a managed database (§17.4). The row is the record; the file
- * itself lives on the server, in a store of its own.
+ * A backup (§17.4), of either kind: a logical dump of one database, or a
+ * snapshot of a project's permanent folders. The row is the record; the
+ * artifact itself lives on the server, in a store of its own.
  */
 export const backups = pgTable(
   'backups',
@@ -119,13 +120,16 @@ export const backups = pgTable(
     orgId: text('org_id')
       .notNull()
       .references(() => organization.id, { onDelete: 'restrict' }),
-    databaseId: text('database_id')
-      .notNull()
-      .references(() => databases.id, { onDelete: 'cascade' }),
+    /** The database this is a dump of; null for a snapshot of folders. */
+    databaseId: text('database_id').references(() => databases.id, { onDelete: 'cascade' }),
+    /** The project whose permanent folders this holds; null for a dump. */
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
     serverId: text('server_id')
       .notNull()
       .references(() => servers.id, { onDelete: 'restrict' }),
-    kind: text('kind').$type<'dump'>().notNull().default('dump'),
+    kind: text('kind').$type<'dump' | 'volumes'>().notNull().default('dump'),
+    /** Which permanent folders a snapshot holds; empty for a dump. */
+    volumes: jsonb('volumes').$type<string[]>().notNull().default([]),
     /** Why it was taken, for the person reading the list. */
     reason: text('reason')
       .$type<'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive'>()
@@ -151,7 +155,13 @@ export const backups = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  (t) => [index('backups_database_created').on(t.databaseId, t.createdAt)],
+  (t) => [
+    index('backups_database_created').on(t.databaseId, t.createdAt),
+    index('backups_project_created').on(t.projectId, t.createdAt),
+    // A backup is of a database or of a project's folders, never both and
+    // never neither: an artifact belonging to nothing protects nothing.
+    check('backups_one_subject', sql`(${t.databaseId} is null) <> (${t.projectId} is null)`),
+  ],
 );
 
 /**
@@ -261,9 +271,9 @@ export const restores = pgTable(
     /** The backup being put back; null when the data came from another host. */
     backupId: text('backup_id').references(() => backups.id, { onDelete: 'cascade' }),
     /** The database the data goes into: a new one, or the one it came from. */
-    databaseId: text('database_id')
-      .notNull()
-      .references(() => databases.id, { onDelete: 'cascade' }),
+    databaseId: text('database_id').references(() => databases.id, { onDelete: 'cascade' }),
+    /** The project whose folders a snapshot is going back into (§17.4). */
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
     /** A dump from another host instead of a backup taken here (§17.5). */
     uploadId: text('upload_id').references(() => uploads.id, { onDelete: 'set null' }),
     serverId: text('server_id')
@@ -285,5 +295,7 @@ export const restores = pgTable(
     // Data comes from a backup taken here or a dump from elsewhere, never
     // both and never neither: a restore with no source restores nothing.
     check('restores_one_source', sql`(${t.backupId} is null) <> (${t.uploadId} is null)`),
+    // And into one thing: a database, or a project's permanent folders.
+    check('restores_one_target', sql`(${t.databaseId} is null) <> (${t.projectId} is null)`),
   ],
 );

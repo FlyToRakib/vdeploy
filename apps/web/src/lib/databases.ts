@@ -77,10 +77,14 @@ export function defaultEnvKey(engine: DatabaseEngine): string {
 /** A backup, as `backup.list` returns it. */
 export interface BackupSummary {
   id: string;
-  databaseId: string;
+  /** A dump belongs to a database; a snapshot of folders to a project. */
+  databaseId: string | null;
+  projectId: string | null;
   databaseName: string;
   status: 'queued' | 'running' | 'done' | 'failed';
-  kind: 'dump';
+  kind: 'dump' | 'volumes';
+  /** The permanent folders a snapshot holds; empty for a dump. */
+  volumes: string[];
   reason: 'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive';
   sizeBytes: number | null;
   verified: boolean;

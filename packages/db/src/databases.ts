@@ -27,6 +27,8 @@ import {
   databaseLinks,
   databases,
   restores,
+  projects,
+  releases,
   uploads,
   verifications,
 } from './schema/index.js';
@@ -254,7 +256,14 @@ export async function claimBackups(
   return tx
     .update(backups)
     .set({ status: 'running', startedAt: now })
-    .where(and(eq(backups.serverId, serverId), eq(backups.status, 'queued')))
+    .where(
+      and(
+        eq(backups.serverId, serverId),
+        eq(backups.status, 'queued'),
+        // Snapshots of folders travel their own way; this claims dumps only.
+        eq(backups.kind, 'dump'),
+      ),
+    )
     .returning();
 }
 
@@ -312,24 +321,49 @@ export async function backupsOf(
     .limit(limit);
 }
 
-/** Every organization's backups, newest first — the Data line on a screen. */
-export async function backupsFor(tx: Executor, orgId: string, limit = 100) {
+/** The snapshots of one project's permanent folders, newest first. */
+export async function snapshotsOf(
+  tx: Executor,
+  projectId: string,
+  limit = 50,
+): Promise<BackupRow[]> {
   return tx
-    .select({ backup: backups, databaseName: databases.name })
+    .select()
     .from(backups)
-    .innerJoin(databases, eq(databases.id, backups.databaseId))
+    .where(eq(backups.projectId, projectId))
+    .orderBy(desc(backups.createdAt))
+    .limit(limit);
+}
+
+/**
+ * Every organization's backups of both kinds, newest first — the Data line
+ * on a screen. A snapshot belongs to a project rather than a database, so
+ * neither name is joined in a way that would drop the other kind.
+ */
+export async function backupsFor(tx: Executor, orgId: string, limit = 100) {
+  const rows = await tx
+    .select({ backup: backups, databaseName: databases.name, projectName: projects.name })
+    .from(backups)
+    .leftJoin(databases, eq(databases.id, backups.databaseId))
+    .leftJoin(projects, eq(projects.id, backups.projectId))
     .where(eq(backups.orgId, orgId))
     .orderBy(desc(backups.createdAt))
     .limit(limit);
+  return rows.map((row) => ({
+    backup: row.backup,
+    databaseName: row.databaseName ?? row.projectName ?? 'something that is gone',
+  }));
 }
 
 export function backupView(row: BackupRow, databaseName: string): BackupView {
   return {
     id: row.id as Id<'backup'>,
-    databaseId: row.databaseId as Id<'database'>,
+    databaseId: row.databaseId as Id<'database'> | null,
+    projectId: row.projectId as Id<'project'> | null,
     databaseName,
     status: row.status,
     kind: row.kind,
+    volumes: row.volumes,
     reason: row.reason,
     sizeBytes: row.sizeBytes,
     verified: row.verified,
@@ -353,7 +387,9 @@ export async function queueRestore(
     /** A backup taken here, or an upload from another host — one of the two. */
     backupId?: string;
     uploadId?: string;
-    databaseId: string;
+    /** Into a database, or into a project's permanent folders — one of the two. */
+    databaseId?: string;
+    projectId?: string;
     serverId: string;
     mode: 'new' | 'in_place';
   },
@@ -509,14 +545,19 @@ export async function prunableBackups(
 export async function markBackupsPruned(
   tx: Executor,
   fileNames: string[],
-  databaseId: string,
+  /** The database whose dumps these were, or the project whose snapshots. */
+  subject: { databaseId: string } | { projectId: string },
   now: Date,
 ): Promise<void> {
   if (fileNames.length === 0) return;
+  const owns =
+    'databaseId' in subject
+      ? eq(backups.databaseId, subject.databaseId)
+      : eq(backups.projectId, subject.projectId);
   await tx
     .update(backups)
     .set({ prunedAt: now })
-    .where(and(eq(backups.databaseId, databaseId), inArray(backups.fileName, fileNames)));
+    .where(and(owns, inArray(backups.fileName, fileNames)));
 }
 
 /** Databases whose backup schedule may have come round. */
@@ -665,4 +706,119 @@ export async function markVerifyChecked(
   now: Date,
 ): Promise<void> {
   await tx.update(databases).set({ verifyCheckedAt: now }).where(eq(databases.id, databaseId));
+}
+
+/** Channel on which the worker tells the gateway a server has a snapshot to take. */
+export const SNAPSHOTS_CHANNEL = 'vdeploy_snapshots';
+
+/**
+ * Queues a snapshot of a project's permanent folders (§17.4), or a request
+ * to put one back over them. Both travel the same way, because both are one
+ * archive moving between the store and the folders it protects.
+ */
+export async function queueSnapshot(
+  tx: Executor,
+  input: {
+    orgId: string;
+    projectId: string;
+    serverId: string;
+    fileName: string;
+    volumes: string[];
+    reason?: BackupRow['reason'];
+  },
+): Promise<BackupRow> {
+  const [row] = await tx
+    .insert(backups)
+    .values({
+      id: newId('backup'),
+      orgId: input.orgId,
+      projectId: input.projectId,
+      serverId: input.serverId,
+      kind: 'volumes',
+      volumes: input.volumes,
+      fileName: input.fileName,
+      reason: input.reason ?? 'manual',
+      status: 'queued',
+    })
+    .returning();
+  if (!row) throw new VDeployError('internal', 'The snapshot was not queued');
+  await tx.execute(sql`select pg_notify(${SNAPSHOTS_CHANNEL}, ${input.serverId})`);
+  return row;
+}
+
+/** Claims the snapshots waiting for one server, so an agent is asked once. */
+export async function claimSnapshots(
+  tx: Executor,
+  serverId: string,
+  now: Date,
+): Promise<BackupRow[]> {
+  return tx
+    .update(backups)
+    .set({ status: 'running', startedAt: now })
+    .where(
+      and(
+        eq(backups.serverId, serverId),
+        eq(backups.status, 'queued'),
+        eq(backups.kind, 'volumes'),
+      ),
+    )
+    .returning();
+}
+
+/**
+ * The snapshots that may go once a new one is safely written. As with
+ * dumps, the newest checked ones stay whatever the policy says, and one
+ * still being taken is never a candidate.
+ */
+export async function prunableSnapshots(
+  tx: Executor,
+  projectId: string,
+  keep: number,
+): Promise<BackupRow[]> {
+  const rows = await tx
+    .select()
+    .from(backups)
+    .where(and(eq(backups.projectId, projectId), isNull(backups.prunedAt)))
+    .orderBy(desc(backups.createdAt));
+  const good = rows.filter((row) => row.status === 'done' && row.verified);
+  const safe = new Set(good.slice(0, Math.max(1, keep)).map((row) => row.id));
+  return rows.filter((row) => !safe.has(row.id) && row.status !== 'running');
+}
+
+/**
+ * The image a project is running now. A snapshot of its permanent folders
+ * is copied through a container of that image, created and never started —
+ * so the image is one the server already has, whatever it is.
+ */
+export async function projectImage(tx: Executor, projectId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ image: releases.image })
+    .from(projects)
+    .innerJoin(releases, eq(releases.id, projects.currentReleaseId))
+    .where(eq(projects.id, projectId));
+  return row?.image ?? null;
+}
+
+/**
+ * What a backup belongs to, whichever kind it is: the server holding it,
+ * an image already on that server to read it back through, and the name a
+ * person would recognise.
+ */
+export async function backupSubject(
+  tx: Executor,
+  row: BackupRow,
+): Promise<{ serverId: string; image: string; name: string } | null> {
+  if (row.databaseId) {
+    const database = await getDatabase(tx, row.databaseId);
+    if (!database) return null;
+    return { serverId: database.serverId, image: database.image, name: database.name };
+  }
+  if (!row.projectId) return null;
+  const [project] = await tx
+    .select({ name: projects.name, serverId: projects.serverId })
+    .from(projects)
+    .where(eq(projects.id, row.projectId));
+  const image = await projectImage(tx, row.projectId);
+  if (!project?.serverId || !image) return null;
+  return { serverId: project.serverId, image, name: project.name };
 }

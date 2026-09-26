@@ -52,7 +52,11 @@ export const PlanStep = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('scale'), replicas: z.number().int().min(0).max(64) }),
   z.strictObject({ kind: z.literal('stop') }),
   z.strictObject({ kind: z.literal('start') }),
-  z.strictObject({ kind: z.literal('snapshot_volumes') }),
+  z.strictObject({
+    kind: z.literal('snapshot_volumes'),
+    /** The permanent folders to copy before this plan touches them. */
+    volumes: z.array(z.string().max(100)).max(32),
+  }),
   z.strictObject({ kind: z.literal('delete_project'), keepData: z.boolean() }),
   z.strictObject({ kind: z.literal('rotate_secret'), secretId: idSchema('secret') }),
   // The data layer (§17.3): a database is created, linked and deleted on its own.
@@ -69,6 +73,7 @@ export const PlanStep = z.discriminatedUnion('kind', [
     uploadId: idSchema('upload'),
     mode: z.enum(['new', 'in_place']),
   }),
+  z.strictObject({ kind: z.literal('restore_volumes'), snapshotId: idSchema('backup') }),
   z.strictObject({
     kind: z.literal('delete_database'),
     databaseId: idSchema('database'),

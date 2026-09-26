@@ -589,6 +589,22 @@ export const OPERATIONS = [
     'Delete a project; its data is kept unless you choose otherwise',
     obj({ ...P, keepData: z.boolean().default(true) }),
   ),
+  // Putting files back is destructive in the same way restoring a database
+  // is: what is there now goes, so the app stops while it happens.
+  operation(
+    'volume.restore',
+    'destructive',
+    'project',
+    'Put the files from a snapshot back, replacing what is in those folders now',
+    obj({ ...P, snapshotId: idSchema('backup') }),
+  ),
+  operation(
+    'volume.snapshot',
+    'safe',
+    'project',
+    'Keep a copy of everything in this app’s permanent folders now',
+    obj(P),
+  ),
   operation(
     'volume.delete',
     'destructive',

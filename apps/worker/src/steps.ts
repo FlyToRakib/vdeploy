@@ -45,6 +45,8 @@ import {
   createDatabaseStep,
   importDumpStep,
   restoreBackupStep,
+  restoreVolumesStep,
+  snapshotVolumesStep,
   setBackupPolicyStep,
   takeBackupStep,
   deleteDatabaseStep,
@@ -564,8 +566,7 @@ async function deleteProject(deps: StepDeps, state: ApplyState, keepData: boolea
 export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep): Promise<void> {
   switch (step.kind) {
     case 'snapshot_volumes':
-      state.notes.push('The agent never deletes permanent folders, so they are kept as they are.');
-      return;
+      return snapshotVolumesStep(deps, state, step.volumes);
     case 'update_spec':
       return updateSpec(deps, state);
     case 'create_release':
@@ -588,6 +589,8 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return rotate(deps, state, step.secretId);
     case 'create_database':
       return createDatabaseStep(deps, state);
+    case 'restore_volumes':
+      return restoreVolumesStep(deps, state, step.snapshotId);
     case 'restore_backup':
       return restoreBackupStep(deps, state, step.backupId, step.mode);
     case 'import_dump':

@@ -57,7 +57,7 @@ describe('buildPlan', () => {
       { project },
     );
     expect(plan.tier).toBe('destructive');
-    expect(plan.steps[0]).toEqual({ kind: 'snapshot_volumes' });
+    expect(plan.steps[0]).toEqual({ kind: 'snapshot_volumes', volumes: ['uploads'] });
     expect(plan.blastRadius.dataAtRisk).toEqual(['uploads']);
   });
 
@@ -87,7 +87,7 @@ describe('buildPlan', () => {
     expect(kept.tier).toBe('destructive');
     expect(kept.blastRadius.dataAtRisk).toEqual([]);
     expect(kept.steps).toEqual([
-      { kind: 'snapshot_volumes' },
+      { kind: 'snapshot_volumes', volumes: ['data'] },
       { kind: 'delete_project', keepData: true },
     ]);
     const dropped = buildPlan(

@@ -121,16 +121,69 @@ export const BackupResult = z.strictObject({
 });
 export type BackupResult = z.infer<typeof BackupResult>;
 
+/**
+ * A snapshot of a project's permanent folders (§17.4). The other kind of
+ * backup: where a dump covers one database, portable and human-openable,
+ * this covers everything in a folder — uploads, SQLite files, whatever an
+ * app has written — and restores to the same shape of volume.
+ *
+ * It is taken before anything destructive touches those folders, which is
+ * the point: data problems are usually caused by an operation that seemed
+ * unrelated.
+ */
+export const SnapshotRequest = z.strictObject({
+  snapshotId: idSchema('backup'),
+  projectId: idSchema('project'),
+  /** The permanent folders to take, by name; each arrives under its own. */
+  volumes: z.array(z.string().max(100)).min(1).max(32),
+  /** What the artifact is called inside the backup store. */
+  fileName: z.string().max(200),
+  /** Taking one, or putting one back over the folders it came from. */
+  mode: z.enum(['take', 'put_back']),
+  /** Older snapshots this server may delete, once this one is written. */
+  remove: z.array(z.string().max(200)).max(50).default([]),
+  /** Where a copy goes afterwards; absent means it stays here alone. */
+  offsite: OffsiteTarget.optional(),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(30)
+    .max(6 * 3600),
+});
+export type SnapshotRequest = z.infer<typeof SnapshotRequest>;
+
+export const SnapshotResult = z.strictObject({
+  snapshotId: idSchema('backup'),
+  ok: z.boolean(),
+  sizeBytes: z.number().int().min(0),
+  sha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  /** True when the artifact really is an archive of those folders. */
+  verified: z.boolean(),
+  error: z.string().max(4096).optional(),
+  removed: z.array(z.string().max(200)).max(50).default([]),
+  offsite: OffsiteResult.optional(),
+  log: z.string().max(20_000),
+});
+export type SnapshotResult = z.infer<typeof SnapshotResult>;
+
 export const BackupStatus = z.enum(['queued', 'running', 'done', 'failed']);
 export type BackupStatus = z.infer<typeof BackupStatus>;
 
 /** A backup as people and the AI see it. */
 export const BackupView = z.strictObject({
   id: idSchema('backup'),
-  databaseId: idSchema('database'),
+  /** A dump belongs to a database; a snapshot of folders belongs to a project. */
+  databaseId: idSchema('database').nullable(),
+  projectId: idSchema('project').nullable(),
+  /** Whichever it belongs to, by name. */
   databaseName: z.string().max(100),
   status: BackupStatus,
-  kind: z.enum(['dump']),
+  kind: z.enum(['dump', 'volumes']),
+  /** The permanent folders a snapshot holds; empty for a dump. */
+  volumes: z.array(z.string().max(100)).max(32),
   /** Why it was taken: a person asked, a schedule came round, or a deploy was about to run. */
   reason: z.enum(['manual', 'scheduled', 'pre_deploy', 'pre_destructive']),
   sizeBytes: z.number().int().min(0).nullable(),

@@ -87,9 +87,11 @@ describe('databases, in words', () => {
 const backup = (over: Partial<BackupSummary> = {}): BackupSummary => ({
   id: 'bak_1',
   databaseId: 'db_1',
+  projectId: null,
   databaseName: 'blog-db',
   status: 'done',
   kind: 'dump',
+  volumes: [],
   reason: 'manual',
   sizeBytes: 4 * 1024 * 1024,
   verified: true,

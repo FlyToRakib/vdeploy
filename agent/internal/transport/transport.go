@@ -67,15 +67,17 @@ type Client struct {
 	builds  map[string]*build.Result // by build id: nil while running
 	results chan build.Result
 
-	backupMu       sync.Mutex
-	backups        map[string]*backup.Result        // by backup id: nil while running
-	restores       map[string]*backup.RestoreResult // by restore id: nil while running
-	backupResults  chan backup.Result
-	restoreResults chan backup.RestoreResult
-	checks         map[string]*backup.CheckResult // by check id: nil while running
-	checkResults   chan backup.CheckResult
-	verifies       map[string]*backup.VerifyResult // by check id: nil while running
-	verifyResults  chan backup.VerifyResult
+	backupMu        sync.Mutex
+	backups         map[string]*backup.Result        // by backup id: nil while running
+	restores        map[string]*backup.RestoreResult // by restore id: nil while running
+	backupResults   chan backup.Result
+	restoreResults  chan backup.RestoreResult
+	checks          map[string]*backup.CheckResult // by check id: nil while running
+	checkResults    chan backup.CheckResult
+	verifies        map[string]*backup.VerifyResult // by check id: nil while running
+	verifyResults   chan backup.VerifyResult
+	snapshots       map[string]*backup.SnapshotResult // by snapshot id: nil while running
+	snapshotResults chan backup.SnapshotResult
 
 	artifactMu sync.Mutex
 	artifacts  map[string]*artifactSend // by request id, while a download is running
@@ -88,6 +90,7 @@ type BackupTaker interface {
 	CheckOffsite(ctx context.Context, req backup.CheckRequest) backup.CheckResult
 	Send(ctx context.Context, req backup.ArtifactRequest, each func([]byte) error) (int64, string, error)
 	Verify(ctx context.Context, req backup.VerifyRequest) backup.VerifyResult
+	Snapshot(ctx context.Context, req backup.SnapshotRequest) backup.SnapshotResult
 }
 
 // Builder runs one build to completion.
@@ -116,6 +119,8 @@ func (c *Client) Run(ctx context.Context) {
 		c.checks = map[string]*backup.CheckResult{}
 		c.verifyResults = make(chan backup.VerifyResult, 8)
 		c.verifies = map[string]*backup.VerifyResult{}
+		c.snapshotResults = make(chan backup.SnapshotResult, 8)
+		c.snapshots = map[string]*backup.SnapshotResult{}
 	}
 	c.backupMu.Unlock()
 	c.artifactMu.Lock()
@@ -263,6 +268,7 @@ func (c *Client) session(ctx context.Context) error {
 	go c.forwardRestoreResults(ctx, k)
 	go c.forwardCheckResults(ctx, k)
 	go c.forwardVerifyResults(ctx, k)
+	go c.forwardSnapshotResults(ctx, k)
 	for {
 		if err := c.receive(ctx, k); err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
@@ -375,6 +381,17 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 		} else {
 			c.stopArtifact(frame.RequestID)
 		}
+		return nil
+	}
+	if head.Type == protocol.TypeSnapshot {
+		var frame snapshotFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startSnapshot(ctx, frame.Snapshot)
 		return nil
 	}
 	if head.Type == protocol.TypeVerify {
@@ -860,7 +877,10 @@ func (c *Client) startArtifact(ctx context.Context, k *conn, req backup.Artifact
 				RequestID: req.RequestID,
 				Data:      base64.StdEncoding.EncodeToString(chunk),
 			}
-			return k.send(sendCtx, protocol.TypeArtifactChunk, func(h protocol.Header) any {
+			// The write itself uses the connection's context, never this
+			// download's: a cancelled write would take the whole connection
+			// down with it, and a stopped download must cost nothing else.
+			return k.send(ctx, protocol.TypeArtifactChunk, func(h protocol.Header) any {
 				frame.Header = h
 				return frame
 			})
@@ -974,6 +994,72 @@ func (c *Client) forwardVerifyResults(ctx context.Context, k *conn) {
 			})
 			if err != nil {
 				c.queueVerifyResult(result) // the next connection sends it
+				return
+			}
+		}
+	}
+}
+
+type snapshotFrame struct {
+	protocol.Header
+	Snapshot backup.SnapshotRequest `json:"snapshot"`
+}
+
+type snapshotResultFrame struct {
+	protocol.Header
+	Result backup.SnapshotResult `json:"result"`
+}
+
+// startSnapshot takes one snapshot of a project's permanent folders, or puts
+// one back. Asked twice, it answers with the result it already has rather
+// than writing the same files over themselves again.
+func (c *Client) startSnapshot(ctx context.Context, req backup.SnapshotRequest) {
+	c.backupMu.Lock()
+	defer c.backupMu.Unlock()
+	if done, seen := c.snapshots[req.SnapshotID]; seen {
+		if done != nil {
+			c.queueSnapshotResult(*done)
+		}
+		return
+	}
+	if c.Backups == nil {
+		result := backup.SnapshotResult{
+			SnapshotID: req.SnapshotID,
+			Error:      "this server does not keep backups",
+		}
+		c.snapshots[req.SnapshotID] = &result
+		c.queueSnapshotResult(result)
+		return
+	}
+	c.snapshots[req.SnapshotID] = nil
+	go func() {
+		result := c.Backups.Snapshot(context.WithoutCancel(ctx), req)
+		c.backupMu.Lock()
+		c.snapshots[req.SnapshotID] = &result
+		c.backupMu.Unlock()
+		c.queueSnapshotResult(result)
+	}()
+}
+
+func (c *Client) queueSnapshotResult(result backup.SnapshotResult) {
+	select {
+	case c.snapshotResults <- result:
+	default:
+		c.Log.Warn("snapshot result dropped: queue full", "snapshot", result.SnapshotID)
+	}
+}
+
+func (c *Client) forwardSnapshotResults(ctx context.Context, k *conn) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case result := <-c.snapshotResults:
+			err := k.send(ctx, protocol.TypeSnapshotResult, func(h protocol.Header) any {
+				return snapshotResultFrame{Header: h, Result: result}
+			})
+			if err != nil {
+				c.queueSnapshotResult(result) // the next connection sends it
 				return
 			}
 		}

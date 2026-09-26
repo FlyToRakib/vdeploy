@@ -18,6 +18,7 @@ import {
 } from '@/lib/config';
 import { formText } from '@/lib/forms';
 import { query } from '@/lib/operations';
+import { ago, sizeWords, type BackupSummary } from '@/lib/databases';
 import { useProject } from '../project-shell';
 
 export function useSpec(): EditableSpec {
@@ -312,9 +313,15 @@ export function StorageSection() {
   const { projectId, act } = useProject();
   const spec = useSpec();
   const [status, setStatus] = useState<StorageStatus | null>(null);
+  const [snapshots, setSnapshots] = useState<BackupSummary[]>([]);
 
   useEffect(() => {
     void query<StorageStatus>('storage.status', { projectId }).then(setStatus, () => undefined);
+    void query<BackupSummary[]>('backup.list')
+      .then((all) => {
+        setSnapshots(all.filter((backup) => backup.projectId === projectId));
+      })
+      .catch(() => undefined);
   }, [projectId, spec]);
 
   const atRisk = [
@@ -385,6 +392,51 @@ export function StorageSection() {
         <p className="text-sm text-muted-foreground">
           No permanent folders, and nothing the app writes looks worth keeping.
         </p>
+      )}
+      {status && status.folders.length > 0 && (
+        <div className="grid gap-2 border-t border-border pt-4">
+          <p className="text-sm text-muted-foreground">
+            A copy of these folders is kept before anything that could lose them. You can also keep
+            one now, and put any of them back.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="justify-self-start"
+            onClick={() => void act('volume.snapshot', { projectId }, 'Keeping a copy')}
+          >
+            Keep a copy now
+          </Button>
+          <ul className="grid gap-1 text-sm">
+            {snapshots.slice(0, 5).map((snapshot) => (
+              <li key={snapshot.id} className="flex flex-wrap items-center gap-2">
+                <span>{ago(snapshot.finishedAt ?? snapshot.startedAt)}</span>
+                <span className="text-muted-foreground">
+                  {snapshot.status === 'done' && snapshot.verified
+                    ? `${sizeWords(snapshot.sizeBytes)}, ${snapshot.volumes.join(', ')}`
+                    : snapshot.status === 'failed'
+                      ? (snapshot.error ?? 'it did not work')
+                      : 'being kept…'}
+                </span>
+                {snapshot.status === 'done' && snapshot.verified && (
+                  <button
+                    type="button"
+                    className="text-accent underline"
+                    onClick={() =>
+                      void act(
+                        'volume.restore',
+                        { projectId, snapshotId: snapshot.id },
+                        'Putting the files back',
+                      )
+                    }
+                  >
+                    Put these files back
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </Section>
   );

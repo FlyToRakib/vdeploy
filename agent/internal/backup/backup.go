@@ -100,6 +100,21 @@ type Engine interface {
 		body io.Reader,
 	) error
 	RemoveVolumeFile(ctx context.Context, name, image, volume, mountPath, file string) error
+	// Whole folders, for a snapshot of what an app has written (§17.4).
+	ReadVolumesInto(
+		ctx context.Context,
+		name, image string,
+		mounts map[string]string,
+		root string,
+		out io.Writer,
+	) (int64, error)
+	WriteVolumesFrom(
+		ctx context.Context,
+		name, image string,
+		mounts map[string]string,
+		root string,
+		body io.Reader,
+	) error
 	// What a restore check needs to stand a throwaway engine up and take it
 	// down again (§17.5). Nothing here touches the database being checked.
 	EnsureImage(ctx context.Context, ref string) error

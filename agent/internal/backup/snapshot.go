@@ -1,0 +1,237 @@
+package backup
+
+import (
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"regexp"
+	"time"
+
+	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+)
+
+/*
+Snapshots of a project's permanent folders (§17.4).
+
+The other kind of backup: a dump covers one database, portable and
+human-openable; this covers everything in a folder — uploads, SQLite files,
+whatever an app has written — and restores to the same shape of volume.
+
+It moves through Docker's own copy endpoints, on a container that is created
+and never started, so taking or replacing a folder's contents needs no shell,
+no tar binary and no path on the host. Each folder arrives under its own name
+inside one gzipped archive, which is what makes a snapshot of three folders
+one artifact rather than three.
+*/
+
+// snapPath is where the folders are mounted while they are copied.
+const snapPath = "/snap"
+
+// volumeName is what the control plane may name: a volume, never a path.
+var volumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+
+// SnapshotRequest is one snapshot to take, or one to put back.
+type SnapshotRequest struct {
+	SnapshotID string `json:"snapshotId"`
+	ProjectID  string `json:"projectId"`
+	// Volumes are the permanent folders, by name; each is its own directory
+	// inside the archive.
+	Volumes []string `json:"volumes"`
+	// Image is a container image already on this server — the project's own.
+	// Nothing in it runs: it is a shell around the folders while they copy.
+	Image          string   `json:"image"`
+	FileName       string   `json:"fileName"`
+	Mode           string   `json:"mode"`
+	Remove         []string `json:"remove"`
+	Offsite        *Offsite `json:"offsite,omitempty"`
+	TimeoutSeconds int      `json:"timeoutSeconds"`
+}
+
+// SnapshotResult is what is actually on disk afterwards.
+type SnapshotResult struct {
+	SnapshotID string          `json:"snapshotId"`
+	OK         bool            `json:"ok"`
+	SizeBytes  int64           `json:"sizeBytes"`
+	SHA256     string          `json:"sha256,omitempty"`
+	Verified   bool            `json:"verified"`
+	Error      string          `json:"error,omitempty"`
+	Removed    []string        `json:"removed"`
+	Offsite    *OffsiteOutcome `json:"offsite,omitempty"`
+	Log        string          `json:"log"`
+}
+
+// Snapshot takes one snapshot, or puts one back.
+func (r *Runner) Snapshot(ctx context.Context, req SnapshotRequest) SnapshotResult {
+	fail := func(reason string) SnapshotResult {
+		return SnapshotResult{SnapshotID: req.SnapshotID, Error: reason}
+	}
+	if !safeName.MatchString(req.FileName) {
+		return fail("the snapshot file name is not allowed")
+	}
+	if len(req.Volumes) == 0 {
+		return fail("there are no permanent folders to snapshot")
+	}
+	mounts := map[string]string{}
+	for _, volume := range req.Volumes {
+		if !volumeName.MatchString(volume) {
+			return fail("a folder name is not allowed")
+		}
+		mounts[volume] = snapPath + "/" + volume
+	}
+	timeout := time.Duration(req.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = time.Hour
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if req.Mode == "put_back" {
+		if err := r.putBack(runCtx, req, mounts); err != nil {
+			return fail(err.Error())
+		}
+		return SnapshotResult{
+			SnapshotID: req.SnapshotID,
+			OK:         true,
+			Verified:   true,
+			Log:        fmt.Sprintf("%d folders put back", len(mounts)),
+		}
+	}
+	return r.take(runCtx, ctx, req, mounts)
+}
+
+/*
+take copies the folders out, compresses them on the way to disk, measures
+what landed, and only then writes it into the store. A snapshot of nothing
+is a failure — caught here rather than on the day somebody needs it.
+*/
+func (r *Runner) take(
+	ctx, outer context.Context,
+	req SnapshotRequest,
+	mounts map[string]string,
+) SnapshotResult {
+	fail := func(reason string) SnapshotResult {
+		return SnapshotResult{SnapshotID: req.SnapshotID, Error: reason}
+	}
+	file, err := os.CreateTemp(r.TempDir, "vd-snapshot-*.tar.gz")
+	if err != nil {
+		return fail("the snapshot had nowhere to be written")
+	}
+	defer func() { _ = os.Remove(file.Name()); _ = file.Close() }()
+
+	sum := sha256.New()
+	counter := &countingWriter{}
+	zipped := gzip.NewWriter(io.MultiWriter(file, sum, counter))
+	read, err := r.Engine.ReadVolumesInto(
+		ctx,
+		"vd-snapshot-"+shortID(req.SnapshotID),
+		req.Image,
+		mounts,
+		snapPath,
+		zipped,
+	)
+	if err != nil {
+		return fail("the folders could not be read: " + err.Error())
+	}
+	if err := zipped.Close(); err != nil {
+		return fail("the snapshot could not be finished")
+	}
+	if read == 0 || counter.n == 0 {
+		return fail("there was nothing in those folders to snapshot")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fail("the snapshot could not be read back")
+	}
+
+	if err := r.Engine.WriteVolumeFile(
+		ctx,
+		"vd-snapshot-store-"+shortID(req.SnapshotID),
+		req.Image,
+		Volume,
+		mountPath,
+		req.FileName,
+		counter.n,
+		file,
+	); err != nil {
+		return fail("the snapshot could not be put in the store: " + err.Error())
+	}
+
+	result := SnapshotResult{
+		SnapshotID: req.SnapshotID,
+		OK:         true,
+		SizeBytes:  counter.n,
+		SHA256:     hex.EncodeToString(sum.Sum(nil)),
+		// Written here and measured here: what is in the store is what came
+		// out of those folders, and it is not empty.
+		Verified: true,
+		Log:      fmt.Sprintf("%d folders, %d bytes read, %d bytes kept", len(mounts), read, counter.n),
+	}
+	// A copy leaves before anything here is deleted, as for a dump (§17.4).
+	if req.Offsite != nil {
+		outcome := r.PushOffsite(
+			outer,
+			Request{BackupID: req.SnapshotID, FileName: req.FileName},
+			*req.Offsite,
+		)
+		result.Offsite = &outcome
+	}
+	result.Removed = r.prune(
+		ctx,
+		Request{DatabaseID: req.ProjectID, FileName: req.FileName, Remove: req.Remove},
+		docker.Helper{
+			Name:        "vd-snapshot-" + shortID(req.SnapshotID),
+			Image:       req.Image,
+			Volumes:     map[string]string{Volume: mountPath},
+			MemoryBytes: MemoryBytes,
+			NanoCPUs:    NanoCPUs,
+			SecurityOpt: []string{"no-new-privileges:true"},
+		},
+	)
+	return result
+}
+
+// putBack writes a snapshot's folders back over the ones it came from. The
+// control plane stops the app first: replacing files underneath a running
+// app is how both end up broken.
+func (r *Runner) putBack(ctx context.Context, req SnapshotRequest, mounts map[string]string) error {
+	read, writer := io.Pipe()
+	go func() {
+		_, err := r.Engine.ReadVolumeFile(
+			ctx,
+			"vd-snapshot-read-"+shortID(req.SnapshotID),
+			req.Image,
+			Volume,
+			mountPath,
+			req.FileName,
+			func(chunk []byte) error {
+				if _, writeErr := writer.Write(chunk); writeErr != nil {
+					return fmt.Errorf("send the snapshot back: %w", writeErr)
+				}
+				return nil
+			},
+		)
+		_ = writer.CloseWithError(err)
+	}()
+	if err := r.Engine.WriteVolumesFrom(
+		ctx,
+		"vd-snapshot-put-"+shortID(req.SnapshotID),
+		req.Image,
+		mounts,
+		snapPath,
+		read,
+	); err != nil {
+		return fmt.Errorf("the folders could not be written back: %w", err)
+	}
+	return nil
+}
+
+// countingWriter measures what was actually written.
+type countingWriter struct{ n int64 }
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.n += int64(len(p))
+	return len(p), nil
+}

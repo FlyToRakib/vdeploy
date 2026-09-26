@@ -257,6 +257,10 @@ func (o *oneBackup) Verify(context.Context, backup.VerifyRequest) backup.VerifyR
 	return backup.VerifyResult{}
 }
 
+func (o *oneBackup) Snapshot(context.Context, backup.SnapshotRequest) backup.SnapshotResult {
+	return backup.SnapshotResult{}
+}
+
 func (o *oneBackup) Send(
 	_ context.Context,
 	_ backup.ArtifactRequest,

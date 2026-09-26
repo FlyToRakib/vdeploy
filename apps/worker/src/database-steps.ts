@@ -27,6 +27,7 @@ import {
   observedState,
   queueBackup,
   queueRestore,
+  queueSnapshot,
   setBackupPolicy,
   databaseLinks,
   databases,
@@ -371,7 +372,7 @@ export async function restoreBackupStep(
       'That backup was never checked, so it cannot be restored. Take a new one first.',
     );
   }
-  const source = await getDatabase(deps.db, backup.databaseId);
+  const source = backup.databaseId ? await getDatabase(deps.db, backup.databaseId) : null;
   if (!source) throw new VDeployError('not_found', 'The database that backup came from is gone');
   await loadInto(deps, state, {
     source,
@@ -530,4 +531,132 @@ export async function setBackupPolicyStep(
       ? `${row.name} is now backed up ${describeCron(policy.expr, policy.timezone)}, keeping ${String(policy.keepLocal)} copies here.`
       : `${row.name} is no longer backed up. Its data is in one place only.`,
   );
+}
+
+/** What a snapshot of a project's folders is called in the store. */
+export function snapshotFileName(project: string, taken: Date): string {
+  const stamp = taken.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return `${project}-folders-${stamp}.tar.gz`;
+}
+
+/**
+ * A copy of the permanent folders before something destructive touches them
+ * (§17.4). It waits for the answer: a plan that would lose files does not
+ * proceed on the hope that the copy worked.
+ */
+export async function snapshotVolumesStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+  volumes: string[],
+): Promise<void> {
+  const projectId = state.projectId;
+  if (!projectId || volumes.length === 0) return;
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+  if (!project?.serverId) return;
+  if (!project.currentReleaseId) {
+    // Nothing has ever run, so there is nothing in those folders to keep.
+    state.notes.push('There was nothing in the permanent folders yet.');
+    return;
+  }
+  const queued = await deps.db.transaction((tx) =>
+    queueSnapshot(tx, {
+      orgId: state.orgId,
+      projectId,
+      serverId: project.serverId ?? '',
+      fileName: snapshotFileName(project.name, deps.now()),
+      volumes,
+      reason: 'pre_destructive',
+    }),
+  );
+  const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
+  for (;;) {
+    const snapshot = await getBackup(deps.db, queued.id);
+    if (snapshot?.status === 'done') {
+      state.notes.push(
+        `Kept a copy of ${volumes.join(', ')} first: ${String(Math.round((snapshot.sizeBytes ?? 0) / 1024))} KB.`,
+      );
+      return;
+    }
+    if (snapshot?.status === 'failed') {
+      throw new VDeployError(
+        'unavailable',
+        `The files in ${volumes.join(', ')} could not be copied first, so nothing was changed. ${snapshot.error ?? ''}`.trim(),
+      );
+    }
+    if (Date.now() > deadline) {
+      await deps.db.transaction((tx) =>
+        finishBackup(
+          tx,
+          {
+            backupId: queued.id,
+            ok: false,
+            sizeBytes: 0,
+            verified: false,
+            error: 'it did not finish in time',
+            log: '',
+          },
+          deps.now(),
+        ),
+      );
+      throw new VDeployError('unavailable', 'The copy of the files did not finish in time');
+    }
+    await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+  }
+}
+
+/**
+ * Puts a snapshot's files back over the folders they came from (§17.4). The
+ * app is already stopped by the time this runs, because the plan says so.
+ */
+export async function restoreVolumesStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+  snapshotId: string,
+): Promise<void> {
+  const projectId = state.projectId;
+  if (!projectId) throw new VDeployError('internal', 'the plan has no project');
+  const snapshot = await getBackup(deps.db, snapshotId);
+  if (snapshot?.projectId !== projectId) {
+    throw new VDeployError('not_found', 'That snapshot belongs to a different app');
+  }
+  if (snapshot.status !== 'done' || !snapshot.verified || snapshot.prunedAt) {
+    throw new VDeployError(
+      'conflict',
+      'That snapshot was never finished, or has since been deleted, so there is nothing to put back',
+    );
+  }
+  const queued = await deps.db.transaction((tx) =>
+    queueRestore(tx, {
+      orgId: state.orgId,
+      backupId: snapshotId,
+      projectId,
+      serverId: snapshot.serverId,
+      mode: 'in_place',
+    }),
+  );
+  const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
+  for (;;) {
+    const restore = await getRestore(deps.db, queued.id);
+    if (restore?.status === 'done') {
+      state.notes.push(`Put ${snapshot.volumes.join(', ')} back as they were.`);
+      return;
+    }
+    if (restore?.status === 'failed') {
+      throw new VDeployError(
+        'unavailable',
+        `The files could not be put back. ${restore.error ?? ''}`.trim(),
+      );
+    }
+    if (Date.now() > deadline) {
+      await deps.db.transaction((tx) =>
+        finishRestore(
+          tx,
+          { restoreId: queued.id, ok: false, error: 'it did not finish in time', log: '' },
+          deps.now(),
+        ),
+      );
+      throw new VDeployError('unavailable', 'Putting the files back did not finish in time');
+    }
+    await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+  }
 }

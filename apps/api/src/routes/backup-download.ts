@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { VDeployError } from '@vdeploy/contracts';
-import { getBackup, getDatabase } from '@vdeploy/db';
+import { backupSubject, getBackup } from '@vdeploy/db';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { resolveActor } from '../http/actor.js';
@@ -32,8 +32,8 @@ export const backupDownloadRoutes =
         if (backup?.orgId !== actor.orgId) {
           throw new VDeployError('not_found', 'Backup not found');
         }
-        const database = await getDatabase(deps.db, backup.databaseId);
-        if (!database) throw new VDeployError('not_found', 'Backup not found');
+        const subject = await backupSubject(deps.db, backup);
+        if (!subject) throw new VDeployError('not_found', 'Backup not found');
         if (!deps.artifacts) {
           throw new VDeployError('unavailable', 'No server is connected to send it');
         }
@@ -65,11 +65,11 @@ export const backupDownloadRoutes =
 
         try {
           await deps.artifacts.artifact(
-            database.serverId,
+            subject.serverId,
             {
               requestId: randomBytes(16).toString('base64url'),
               fileName: backup.fileName,
-              image: database.image,
+              image: subject.image,
               expectSha256: backup.sha256,
             },
             write,

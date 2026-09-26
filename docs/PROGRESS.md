@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.3 — the rest of M4 (§17.6 guards done; volumes, tasks, terminal, metrics next)
+**Task:** 4.3b — cron jobs and one-off tasks, then the rest of M4
 **Status:** in progress
-**Updated:** 2026-09-25 18:30 UTC
+**Updated:** 2026-09-26 08:40 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -139,9 +139,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.2g a restore verified on a schedule rather than assumed (§17.5, ADR 0013): every seven days by default, the newest checked backup is restored into an engine that exists only for the check — its own container, its own storage, its own network, its own password, none of which outlive it — and the tables are counted. A restore that finishes with nothing in it is a failure, not a success: that is the comfortable lie the check exists to catch. Nothing about it touches the database being checked, which is the point of checking a backup this way. Everything it made goes again whatever the answer was, and an agent killed mid-check sweeps up at startup, removing only what carries the check's own label and name. A check that fails is told to whoever asked to be told, and the database screen says either when a backup was last put back or, plainly, that nobody has ever tried
 
+- [x] 4.3a snapshot before destroy (§17.4): the second kind of backup — where a dump covers one database, this covers everything in a folder. Any plan that reaches Tier 3 and touches an app with permanent folders now copies them **first**, centrally rather than planner by planner, and a plan whose copy fails does not proceed: the delete that could not keep the files does not happen. The copy moves through Docker's own copy endpoints on a container created and never started, so it needs no shell, no tar binary and no host path; each folder arrives under its own name inside one gzipped archive, gzip compresses it on the way to disk, and a snapshot of nothing is recorded as a failure. It lands in the same store as the dumps, so everything already built applies to it: verification, retention (the newest five stay), download, and a copy to the offsite target before anything local is pruned. `volume.snapshot` keeps one on request; `volume.restore` puts one back with the app stopped first and a fresh copy taken before it — writing over files underneath a running app is how both end up broken. Also fixed: cancelling a download took the agent's whole connection down with it, because a websocket write cancelled mid-write closes the connection — chunks now write on the connection's context, not the download's
+
 ## Doing
 
-- [ ] 4.3 the rest of M4: snapshot-before-destroy for volumes, cron jobs and one-off tasks, web terminal (audited, human-only), file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
+- [ ] 4.3b the rest of M4: cron jobs and one-off tasks, web terminal (audited, human-only), file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
 
 ## Next
 

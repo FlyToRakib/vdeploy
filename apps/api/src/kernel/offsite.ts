@@ -5,7 +5,7 @@ import {
   databasesOf,
   dismissOffsiteWarning,
   getBackup,
-  getDatabase,
+  backupSubject,
   liveBackupTarget,
   offsiteDismissedAt,
   queueOffsiteCheck,
@@ -145,9 +145,9 @@ export const OFFSITE_ADMIN: Partial<Record<OperationName, Handler>> = {
         'That backup has been deleted to stay within the policy; take a new one',
       );
     }
-    const database = await getDatabase(deps.db, backup.databaseId);
-    if (!database) throw new VDeployError('not_found', 'Backup not found');
-    if (!deps.connected?.(database.serverId)) {
+    const subject = await backupSubject(deps.db, backup);
+    if (!subject) throw new VDeployError('not_found', 'Backup not found');
+    if (!deps.connected?.(subject.serverId)) {
       throw new VDeployError(
         'unavailable',
         'The server holding this backup is offline, so it cannot be downloaded now',

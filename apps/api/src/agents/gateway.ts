@@ -22,6 +22,10 @@ import {
   claimBackups,
   claimBuilds,
   claimRestores,
+  claimSnapshots,
+  prunableSnapshots,
+  projectImage,
+  SNAPSHOTS_CHANNEL,
   claimVerifications,
   VERIFY_CHANNEL,
   finishVerification,
@@ -70,6 +74,13 @@ import { checkReachability, type PortProbe } from './reachability.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
+
+/**
+ * How many snapshots of a project's permanent folders stay on the server.
+ * Unlike a database's backups these are not on a schedule: they are taken
+ * before something destructive, so a handful covers every recent undo.
+ */
+const KEEP_SNAPSHOTS = 5;
 
 /**
  * The server's public IPv4: one its agent sees on an interface, else the
@@ -160,6 +171,7 @@ export class Gateway implements LogSource, ArtifactSource {
   private stopRestoreListening: (() => Promise<void>) | null = null;
   private stopOffsiteListening: (() => Promise<void>) | null = null;
   private stopVerifyListening: (() => Promise<void>) | null = null;
+  private stopSnapshotListening: (() => Promise<void>) | null = null;
 
   /** When each server's ports were last checked from here (ms). */
   private readonly reachChecked = new Map<string, number>();
@@ -199,6 +211,15 @@ export class Gateway implements LogSource, ArtifactSource {
         this.deps.log.error({ err, serverId }, 'could not send a restore check');
       });
     });
+    this.stopSnapshotListening = await listen(
+      this.deps.databaseUrl,
+      SNAPSHOTS_CHANNEL,
+      (serverId) => {
+        void this.dispatchSnapshots(serverId).catch((err: unknown) => {
+          this.deps.log.error({ err, serverId }, 'could not send a snapshot');
+        });
+      },
+    );
   }
 
   /**
@@ -275,7 +296,7 @@ export class Gateway implements LogSource, ArtifactSource {
     if (!server?.agentBoxKey) return;
     const target = await liveBackupTarget(db, server.orgId);
     for (const backup of await claimBackups(db, serverId, now())) {
-      const database = await getDatabase(db, backup.databaseId);
+      const database = backup.databaseId ? await getDatabase(db, backup.databaseId) : null;
       if (!database) continue;
       const profile = engineProfile(database.engine);
       const password = await databasePassword(db, secretsKey, database);
@@ -322,6 +343,88 @@ export class Gateway implements LogSource, ArtifactSource {
             // Older artifacts may go once this one is written and checked —
             // never before, so retention can never take the last good backup.
             remove: (await prunableBackups(db, database.id, database.backupPolicy.keepLocal)).map(
+              (old) => old.fileName,
+            ),
+            ...(offsite ? { offsite } : {}),
+            timeoutSeconds: 3600,
+          },
+        }),
+      );
+    }
+  }
+
+  /** Asks a server to put a snapshot back over the folders it came from. */
+  private async putSnapshotBack(
+    connection: Connection,
+    serverId: string,
+    restore: { id: string; projectId: string | null; backupId: string | null },
+  ): Promise<void> {
+    const { db, key, now } = this.deps;
+    const snapshot = restore.backupId ? await getBackup(db, restore.backupId) : null;
+    const image = restore.projectId ? await projectImage(db, restore.projectId) : null;
+    if (!snapshot || !restore.projectId || !image) {
+      await db.transaction((tx) =>
+        finishRestore(
+          tx,
+          {
+            restoreId: restore.id,
+            ok: false,
+            error: 'that snapshot, or the app it belongs to, is no longer here',
+            log: '',
+          },
+          now(),
+        ),
+      );
+      return;
+    }
+    connection.socket.send(
+      seal(key, {
+        ...connection.session.next('snapshot'),
+        snapshot: {
+          snapshotId: restore.id,
+          projectId: restore.projectId,
+          volumes: snapshot.volumes,
+          image,
+          fileName: snapshot.fileName,
+          mode: 'put_back',
+          remove: [],
+          timeoutSeconds: 3600,
+        },
+      }),
+    );
+  }
+
+  /**
+   * Sends a server's queued snapshots of a project's permanent folders
+   * (§17.4) — and the requests to put one back. The project's own image is
+   * the shell the folders are copied through; nothing in it runs.
+   */
+  async dispatchSnapshots(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const { db, key, now } = this.deps;
+    const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+    if (!server) return;
+    const target = await liveBackupTarget(db, server.orgId);
+    for (const snapshot of await claimSnapshots(db, serverId, now())) {
+      if (!snapshot.projectId) continue;
+      const image = await projectImage(db, snapshot.projectId);
+      if (!image) continue;
+      const offsite =
+        target && server.agentBoxKey
+          ? await this.offsiteFor(serverId, server.agentBoxKey, target, snapshot.projectId, 0)
+          : undefined;
+      connection.socket.send(
+        seal(key, {
+          ...connection.session.next('snapshot'),
+          snapshot: {
+            snapshotId: snapshot.id,
+            projectId: snapshot.projectId,
+            volumes: snapshot.volumes,
+            image,
+            fileName: snapshot.fileName,
+            mode: 'take',
+            remove: (await prunableSnapshots(db, snapshot.projectId, KEEP_SNAPSHOTS)).map(
               (old) => old.fileName,
             ),
             ...(offsite ? { offsite } : {}),
@@ -397,8 +500,14 @@ export class Gateway implements LogSource, ArtifactSource {
     const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
     if (!server?.agentBoxKey) return;
     for (const { restore, token } of await claimRestores(db, serverId, now())) {
+      // A snapshot going back over a project's folders travels as a
+      // snapshot, not a restore: it is the same archive, the other way.
+      if (restore.projectId) {
+        await this.putSnapshotBack(connection, serverId, restore);
+        continue;
+      }
       const [target, backup, upload] = await Promise.all([
-        getDatabase(db, restore.databaseId),
+        restore.databaseId ? getDatabase(db, restore.databaseId) : null,
         restore.backupId ? getBackup(db, restore.backupId) : null,
         restore.uploadId ? getUpload(db, restore.uploadId) : null,
       ]);
@@ -667,6 +776,7 @@ export class Gateway implements LogSource, ArtifactSource {
     await this.stopRestoreListening?.();
     await this.stopOffsiteListening?.();
     await this.stopVerifyListening?.();
+    await this.stopSnapshotListening?.();
   }
 
   isConnected(serverId: string): boolean {
@@ -841,6 +951,38 @@ export class Gateway implements LogSource, ArtifactSource {
     } else if (frame.type === 'restore_result') {
       const restore = await getRestore(db, frame.result.restoreId);
       if (restore?.serverId === serverId) await finishRestore(db, frame.result, now());
+    } else if (frame.type === 'snapshot_result') {
+      // The same answer covers both directions: a snapshot taken, or one
+      // put back. Which it was depends on what the id belongs to.
+      const { snapshotId, ok, sizeBytes, sha256, verified, error, removed, offsite, log } =
+        frame.result;
+      const snapshot = await getBackup(db, snapshotId);
+      if (snapshot?.serverId === serverId) {
+        await finishBackup(
+          db,
+          {
+            backupId: snapshotId,
+            ok,
+            sizeBytes,
+            verified,
+            log,
+            ...(sha256 ? { sha256 } : {}),
+            ...(error ? { error } : {}),
+            ...(offsite ? { offsite } : {}),
+          },
+          now(),
+        );
+        if (snapshot.projectId) {
+          await markBackupsPruned(db, removed, { projectId: snapshot.projectId }, now());
+        }
+        return;
+      }
+      const restore = await getRestore(db, snapshotId);
+      if (restore?.serverId === serverId) {
+        await db.transaction((tx) =>
+          finishRestore(tx, { restoreId: snapshotId, ok, ...(error ? { error } : {}), log }, now()),
+        );
+      }
     } else if (frame.type === 'verify_result') {
       // Only the server the check went to may answer it.
       const check = await getVerification(db, frame.result.verifyId);
@@ -869,8 +1011,13 @@ export class Gateway implements LogSource, ArtifactSource {
       const backup = await getBackup(db, frame.result.backupId);
       if (backup?.serverId === serverId) {
         await finishBackup(db, frame.result, now());
-        await markBackupsPruned(db, frame.result.removed, backup.databaseId, now());
-        const database = await getDatabase(db, backup.databaseId);
+        await markBackupsPruned(
+          db,
+          frame.result.removed,
+          { databaseId: backup.databaseId ?? '' },
+          now(),
+        );
+        const database = backup.databaseId ? await getDatabase(db, backup.databaseId) : null;
         // A backup that failed, or one that never left the server, is said out
         // loud now rather than discovered at restore time (§17.4).
         if (database) await notifyBackupResult(db, orgId, database, frame.result, now());

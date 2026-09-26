@@ -143,7 +143,7 @@ function specChange(
   const before = project?.spec ?? null;
   const lost = removedVolumes(before, next);
   const steps: PlanStep[] = [];
-  if (lost.length) steps.push({ kind: 'snapshot_volumes' });
+  if (lost.length) steps.push({ kind: 'snapshot_volumes', volumes: lost });
   const specHash = hashOf(next);
   steps.push(
     { kind: 'update_spec', specHash },
@@ -182,6 +182,23 @@ function withPreDeployBackup(steps: PlanStep[], context: PlanContext): PlanStep[
   }));
   const at = steps.findIndex((step) => step.kind === 'deploy');
   return [...steps.slice(0, at), ...before, ...steps.slice(at)];
+}
+
+/**
+ * A copy of the permanent folders before anything destructive (§17.4). Data
+ * problems are usually caused by an operation that seemed unrelated, so this
+ * is not left to each planner to remember: any plan that reaches Tier 3 and
+ * touches a project with folders takes them first.
+ */
+function withPreDestructiveSnapshot(
+  steps: PlanStep[],
+  tier: RiskTier,
+  context: PlanContext,
+): PlanStep[] {
+  const volumes = context.project?.spec.runtime.volumes.map((v) => v.name) ?? [];
+  if (tier !== 'destructive' || volumes.length === 0) return steps;
+  if (steps.some((step) => step.kind === 'snapshot_volumes')) return steps;
+  return [{ kind: 'snapshot_volumes', volumes }, ...steps];
 }
 
 function simple(
@@ -343,7 +360,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       specHash: null,
       changes: [],
       steps: [
-        ...(volumes.length ? [{ kind: 'snapshot_volumes' } as const] : []),
+        ...(volumes.length ? [{ kind: 'snapshot_volumes', volumes } as const] : []),
         { kind: 'delete_project', keepData: args.keepData },
       ],
       tier: 'destructive',
@@ -592,6 +609,54 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       },
     };
   },
+  /** Keeping a copy of what an app has written, on request (§17.4). */
+  'volume.snapshot': (_args, context) => {
+    const project = requireProject(context);
+    const volumes = project.spec.runtime.volumes.map((v) => v.name);
+    if (volumes.length === 0) {
+      throw new VDeployError(
+        'conflict',
+        'This app has no permanent folders, so there is nothing to keep a copy of',
+      );
+    }
+    return {
+      specHash: null,
+      changes: [{ path: 'files', before: null, after: `a copy of ${volumes.join(', ')}` }],
+      steps: [{ kind: 'snapshot_volumes', volumes }],
+      tier: 'safe',
+      blastRadius: radius(project.spec, { downtime: 'none', dataAtRisk: [] }),
+    };
+  },
+  /**
+   * Putting files back where they were (§17.4). The app stops first: writing
+   * over files underneath a running app is how both end up broken.
+   */
+  'volume.restore': (args, context) => {
+    const project = requireProject(context);
+    const volumes = project.spec.runtime.volumes.map((v) => v.name);
+    return {
+      specHash: null,
+      changes: [
+        {
+          path: `files.${volumes.join(', ')}`,
+          before: 'what is in them now',
+          after: 'what the snapshot holds',
+        },
+      ],
+      steps: [
+        // A copy of what is about to be replaced, before it is replaced.
+        { kind: 'snapshot_volumes', volumes },
+        { kind: 'stop' },
+        { kind: 'restore_volumes', snapshotId: args.snapshotId },
+        { kind: 'start' },
+      ],
+      tier: 'destructive',
+      blastRadius: radius(project.spec, {
+        downtime: 'brief',
+        dataAtRisk: [`the files in ${volumes.join(', ')} right now`],
+      }),
+    };
+  },
   'release.rollback': (args, context) => {
     const project = requireProject(context);
     const target = context.targetRelease;
@@ -638,8 +703,14 @@ export function buildPlan(name: OperationName, input: unknown, context: PlanCont
   const args = parsed.data as OperationArgs<OperationName>;
   const drafted = planner(args, context);
   // Every path that deploys copies the data first: one place, not each planner.
-  const draft = { ...drafted, steps: withPreDeployBackup(drafted.steps, context) };
-  const tier = maxTier(operation.tier, draft.tier);
+  const withBackup = { ...drafted, steps: withPreDeployBackup(drafted.steps, context) };
+  const tier = maxTier(operation.tier, withBackup.tier);
+  // And every destructive path takes the folders with it, for the same
+  // reason: the operation that loses data is usually not the one you feared.
+  const draft = {
+    ...withBackup,
+    steps: withPreDestructiveSnapshot(withBackup.steps, tier, context),
+  };
   const identity = {
     operation: name,
     projectId: context.project?.id ?? null,

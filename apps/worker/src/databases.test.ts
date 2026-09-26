@@ -6,6 +6,7 @@ import {
   backups,
   claimBackups,
   claimRestores,
+  claimSnapshots,
   finishRestore,
   restores,
   databaseLinks,
@@ -95,6 +96,11 @@ let backupOutcome = {
   verified: true,
   error: undefined as string | undefined,
 };
+let snapshotOutcome = {
+  ok: true,
+  sizeBytes: 8192,
+  error: undefined as string | undefined,
+};
 async function agentTick() {
   for (const claimed of await claimRestores(t.db, serverId, new Date())) {
     await finishRestore(
@@ -119,6 +125,23 @@ async function agentTick() {
         verified: backupOutcome.verified,
         ...(backupOutcome.error ? { error: backupOutcome.error } : {}),
         log: 'pg_dump: saving database definition',
+      },
+      new Date(),
+    );
+  }
+  // Snapshots of a project's folders travel their own way, so the stand-in
+  // agent answers them separately — as a real one does.
+  for (const claimed of await claimSnapshots(t.db, serverId, new Date())) {
+    await finishBackup(
+      t.db,
+      {
+        backupId: claimed.id,
+        ok: snapshotOutcome.ok,
+        sizeBytes: snapshotOutcome.sizeBytes,
+        sha256: 'b'.repeat(64),
+        verified: snapshotOutcome.ok,
+        ...(snapshotOutcome.error ? { error: snapshotOutcome.error } : {}),
+        log: '2 folders, 40960 bytes read, 8192 bytes kept',
       },
       new Date(),
     );
@@ -529,5 +552,101 @@ describe('managed databases', () => {
       .limit(1);
     const notes = (entry?.details as { notes?: string[] } | undefined)?.notes ?? [];
     expect(notes.join(' ')).toContain('still on the server');
+  });
+});
+
+describe('a copy of the files before anything destructive', () => {
+  /** An app with a permanent folder, deployed and running. */
+  async function appWithFolders(name: string) {
+    const spec = ApplicationSpec.parse({
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name },
+      source: { type: 'image', image: 'nginx:1.27' },
+      build: { strategy: 'image' },
+      runtime: { volumes: [{ name: 'uploads', mountPath: '/app/uploads' }] },
+    });
+    const projectId = newId('project');
+    const releaseId = newId('release');
+    await t.db.insert(projects).values({
+      id: projectId,
+      orgId,
+      serverId,
+      name,
+      spec,
+      specHash: hashOf(spec),
+    });
+    await t.db.insert(releases).values({
+      id: releaseId,
+      projectId,
+      version: 1,
+      spec,
+      specHash: hashOf(spec),
+      image: `nginx@sha256:${'c'.repeat(64)}`,
+      secretVersions: {},
+    });
+    await t.db
+      .update(projects)
+      .set({ currentReleaseId: releaseId })
+      .where(eq(projects.id, projectId));
+    return projectId;
+  }
+
+  it('keeps the files first, and the copy is on record', async () => {
+    const projectId = await appWithFolders('blog-files');
+    const deleted = await run('project.delete', { projectId, keepData: false });
+    expect(deleted.outcome).toBe('applied');
+
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, deleted.planId));
+    // The copy comes first: an ordering, not an intention.
+    expect(plan?.plan.steps[0]).toEqual({ kind: 'snapshot_volumes', volumes: ['uploads'] });
+    const [snapshot] = await t.db.select().from(backups).where(eq(backups.projectId, projectId));
+    expect(snapshot).toMatchObject({
+      kind: 'volumes',
+      reason: 'pre_destructive',
+      status: 'done',
+      volumes: ['uploads'],
+      databaseId: null,
+    });
+    expect(snapshot?.fileName).toMatch(/^blog-files-folders-.*\.tar\.gz$/);
+  });
+
+  it('does not delete anything when the files could not be copied', async () => {
+    const projectId = await appWithFolders('blog-stubborn');
+    snapshotOutcome = { ok: false, sizeBytes: 0, error: 'the volume is gone' };
+    const deleted = await run('project.delete', { projectId, keepData: false });
+    snapshotOutcome = { ok: true, sizeBytes: 8192, error: undefined };
+
+    expect(deleted.outcome).toBe('failed');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, deleted.planId));
+    expect(plan?.error?.message).toContain('could not be copied first');
+    // The app is still here: nothing after the copy ran.
+    const [project] = await t.db.select().from(projects).where(eq(projects.id, projectId));
+    expect(project?.deletedAt).toBeNull();
+  });
+
+  it('puts the files back where they were, with the app stopped while it happens', async () => {
+    const projectId = await appWithFolders('blog-undo');
+    await run('volume.snapshot', { projectId });
+    const [snapshot] = await t.db
+      .select()
+      .from(backups)
+      .where(and(eq(backups.projectId, projectId), eq(backups.status, 'done')));
+
+    const put = await run('volume.restore', { projectId, snapshotId: snapshot?.id ?? '' });
+    expect(put.outcome).toBe('applied');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, put.planId));
+    expect(plan?.tier).toBe('destructive');
+    expect(plan?.plan.steps.map((step) => step.kind)).toEqual([
+      'snapshot_volumes',
+      'stop',
+      'restore_volumes',
+      'start',
+    ]);
+    const [record] = await t.db.select().from(restores).where(eq(restores.projectId, projectId));
+    expect(record).toMatchObject({ status: 'done', backupId: snapshot?.id, databaseId: null });
+    // And it is running again afterwards.
+    const [project] = await t.db.select().from(projects).where(eq(projects.id, projectId));
+    expect(project?.running).toBe(true);
   });
 });
