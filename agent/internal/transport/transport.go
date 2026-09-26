@@ -28,6 +28,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
+	"github.com/FlyToRakib/vdeploy/agent/internal/task"
 )
 
 // maxArtifactWindow and initialArtifactWindow bound how much of a download
@@ -60,6 +61,8 @@ type Client struct {
 	Builder Builder
 	// Backups takes database backups the control plane asks for; nil refuses them.
 	Backups BackupTaker
+	// Tasks runs one-off commands and scheduled jobs; nil refuses them.
+	Tasks TaskRunner
 	// Logs streams a project's container output; nil refuses log requests.
 	Logs func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error
 
@@ -78,6 +81,8 @@ type Client struct {
 	verifyResults   chan backup.VerifyResult
 	snapshots       map[string]*backup.SnapshotResult // by snapshot id: nil while running
 	snapshotResults chan backup.SnapshotResult
+	tasks           map[string]*task.Result // by task id: nil while running
+	taskResults     chan task.Result
 
 	artifactMu sync.Mutex
 	artifacts  map[string]*artifactSend // by request id, while a download is running
@@ -91,6 +96,11 @@ type BackupTaker interface {
 	Send(ctx context.Context, req backup.ArtifactRequest, each func([]byte) error) (int64, string, error)
 	Verify(ctx context.Context, req backup.VerifyRequest) backup.VerifyResult
 	Snapshot(ctx context.Context, req backup.SnapshotRequest) backup.SnapshotResult
+}
+
+// TaskRunner runs one command for a project to completion.
+type TaskRunner interface {
+	Run(ctx context.Context, req task.Request) task.Result
 }
 
 // Builder runs one build to completion.
@@ -121,6 +131,8 @@ func (c *Client) Run(ctx context.Context) {
 		c.verifies = map[string]*backup.VerifyResult{}
 		c.snapshotResults = make(chan backup.SnapshotResult, 8)
 		c.snapshots = map[string]*backup.SnapshotResult{}
+		c.taskResults = make(chan task.Result, 16)
+		c.tasks = map[string]*task.Result{}
 	}
 	c.backupMu.Unlock()
 	c.artifactMu.Lock()
@@ -269,6 +281,7 @@ func (c *Client) session(ctx context.Context) error {
 	go c.forwardCheckResults(ctx, k)
 	go c.forwardVerifyResults(ctx, k)
 	go c.forwardSnapshotResults(ctx, k)
+	go c.forwardTaskResults(ctx, k)
 	for {
 		if err := c.receive(ctx, k); err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
@@ -381,6 +394,17 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 		} else {
 			c.stopArtifact(frame.RequestID)
 		}
+		return nil
+	}
+	if head.Type == protocol.TypeTask {
+		var frame taskFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.startTask(ctx, frame.Task)
 		return nil
 	}
 	if head.Type == protocol.TypeSnapshot {
@@ -1060,6 +1084,69 @@ func (c *Client) forwardSnapshotResults(ctx context.Context, k *conn) {
 			})
 			if err != nil {
 				c.queueSnapshotResult(result) // the next connection sends it
+				return
+			}
+		}
+	}
+}
+
+type taskFrame struct {
+	protocol.Header
+	Task task.Request `json:"task"`
+}
+
+type taskResultFrame struct {
+	protocol.Header
+	Result task.Result `json:"result"`
+}
+
+// startTask runs one command for a project. Asked twice, it answers with the
+// result it already has: a scheduled job must not run twice because a
+// connection dropped between the run and the answer.
+func (c *Client) startTask(ctx context.Context, req task.Request) {
+	c.backupMu.Lock()
+	defer c.backupMu.Unlock()
+	if done, seen := c.tasks[req.TaskID]; seen {
+		if done != nil {
+			c.queueTaskResult(*done)
+		}
+		return
+	}
+	if c.Tasks == nil {
+		result := task.Result{TaskID: req.TaskID, ExitCode: -1, Error: "this server does not run tasks"}
+		c.tasks[req.TaskID] = &result
+		c.queueTaskResult(result)
+		return
+	}
+	c.tasks[req.TaskID] = nil
+	go func() {
+		result := c.Tasks.Run(context.WithoutCancel(ctx), req)
+		c.backupMu.Lock()
+		c.tasks[req.TaskID] = &result
+		c.backupMu.Unlock()
+		c.queueTaskResult(result)
+	}()
+}
+
+func (c *Client) queueTaskResult(result task.Result) {
+	select {
+	case c.taskResults <- result:
+	default:
+		c.Log.Warn("task result dropped: queue full", "task", result.TaskID)
+	}
+}
+
+func (c *Client) forwardTaskResults(ctx context.Context, k *conn) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case result := <-c.taskResults:
+			err := k.send(ctx, protocol.TypeTaskResult, func(h protocol.Header) any {
+				return taskResultFrame{Header: h, Result: result}
+			})
+			if err != nil {
+				c.queueTaskResult(result) // the next connection sends it
 				return
 			}
 		}

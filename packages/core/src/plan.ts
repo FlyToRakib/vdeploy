@@ -256,6 +256,42 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     const project = requireProject(context);
     return specChange(project, specAfter('env.unset', args, project.spec), 'sensitive', context);
   },
+  // A scheduled job is part of the spec (§17.6), so changing one is a planned
+  // change: approved, versioned with the release, and rolled back with it.
+  'cron.create': (args, context) => {
+    const project = requireProject(context);
+    return specChange(project, specAfter('cron.create', args, project.spec), 'sensitive', context);
+  },
+  'cron.update': (args, context) => {
+    const project = requireProject(context);
+    return specChange(project, specAfter('cron.update', args, project.spec), 'sensitive', context);
+  },
+  'cron.delete': (args, context) => {
+    const project = requireProject(context);
+    return specChange(project, specAfter('cron.delete', args, project.spec), 'sensitive', context);
+  },
+  /**
+   * Running one command against what is live (§17.6). Destructive because
+   * nobody can tell from the outside what a command does: "delete the old
+   * rows" looks exactly like "send the report" from here.
+   */
+  'task.run': (args, context) => {
+    const project = requireProject(context);
+    if (!project.currentReleaseId) {
+      throw new VDeployError('conflict', 'Deploy this app once before running anything in it');
+    }
+    const command = args.command.join(' ');
+    return {
+      specHash: null,
+      changes: [{ path: 'run', before: null, after: command }],
+      steps: [{ kind: 'run_task', command: args.command }],
+      tier: 'destructive',
+      blastRadius: radius(project.spec, {
+        downtime: 'none',
+        dataAtRisk: [`whatever “${command}” changes in ${project.spec.metadata.name}`],
+      }),
+    };
+  },
   'secret.rotate': (args, context) => {
     const project = requireProject(context);
     if (!project.currentReleaseId) {

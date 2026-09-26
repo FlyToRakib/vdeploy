@@ -91,6 +91,27 @@ function unsetEnv(spec: ApplicationSpec, args: OperationArgs<'env.unset'>): Appl
 }
 
 /**
+ * Adds or replaces one scheduled job (§17.6). A job is part of the spec, so
+ * changing it is a planned change like any other: approved, versioned with
+ * the release, and rolled back with it.
+ */
+function setCron(
+  spec: ApplicationSpec,
+  entry: OperationArgs<'cron.create'>['cron'],
+): ApplicationSpec {
+  const crons = [...spec.schedule.crons.filter((c) => c.name !== entry.name), entry];
+  return valid({ ...spec, schedule: { ...spec.schedule, crons } });
+}
+
+function removeCron(spec: ApplicationSpec, name: string): ApplicationSpec {
+  if (!spec.schedule.crons.some((c) => c.name === name)) {
+    throw new VDeployError('not_found', `There is no scheduled job called `);
+  }
+  const crons = spec.schedule.crons.filter((c) => c.name !== name);
+  return valid({ ...spec, schedule: { ...spec.schedule, crons } });
+}
+
+/**
  * The spec an operation leads to. Planning and applying both call this, so
  * the worker writes exactly the spec whose hash the plan was approved with.
  */
@@ -101,6 +122,9 @@ export function specAfter(
     | 'env.set'
     | 'env.unset'
     | 'project.deploy_upload'
+    | 'cron.create'
+    | 'cron.update'
+    | 'cron.delete'
     | 'storage.make_persistent',
   args: Record<string, unknown>,
   current: ApplicationSpec | null,
@@ -120,6 +144,10 @@ export function specAfter(
         : current.build;
     return valid({ ...current, source: { type: 'archive', uploadId: args.uploadId }, build });
   }
+  if (name === 'cron.create' || name === 'cron.update') {
+    return setCron(current, (args as OperationArgs<'cron.create'>).cron);
+  }
+  if (name === 'cron.delete') return removeCron(current, String(args.name));
   return name === 'env.set'
     ? setEnv(current, args as OperationArgs<'env.set'>)
     : unsetEnv(current, args as OperationArgs<'env.unset'>);

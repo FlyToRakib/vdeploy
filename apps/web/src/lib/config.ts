@@ -13,6 +13,10 @@ export interface EditableSpec {
     resources: { memory: { limit: string; request?: string }; [key: string]: unknown };
     [key: string]: unknown;
   };
+  /** Scheduled jobs (§17.6): each runs once when its time comes. */
+  schedule?: {
+    crons: { name: string; command: string[]; expr: string; timezone: string }[];
+  };
   [key: string]: unknown;
 }
 

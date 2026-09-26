@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
@@ -113,6 +114,9 @@ type Reconciler struct {
 	evidence map[string]evidenceCache
 	// databaseRevision is the revision each database container was created at.
 	databaseRevision map[string]int
+	// lastDesired is what this server was last told to run, read by tasks.
+	desiredMu   sync.Mutex
+	lastDesired map[string]spec.DesiredProject
 }
 
 func (r *Reconciler) now() time.Time {
@@ -171,6 +175,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 		p.desired[project.ProjectID] = project
 		p.report.Projects = append(p.report.Projects, p.project(ctx, project))
 	}
+	// A one-off task runs the same container a replica does, so it reads the
+	// state this pass just converged rather than a second description of it.
+	r.remember(state.Projects)
 	p.databases(ctx, state)
 	// Traffic moves to new replicas only once all of them are ready, and old
 	// ones are retired only after that, once they have drained.
@@ -430,4 +437,23 @@ func (p *pass) drained(project spec.DesiredProject) bool {
 		drain = 30 * time.Second
 	}
 	return p.r.now().Sub(since) >= drain
+}
+
+// remember keeps the projects this server was last told to run, so a task
+// can be given exactly what a replica gets (§17.6).
+func (r *Reconciler) remember(projects []spec.DesiredProject) {
+	r.desiredMu.Lock()
+	defer r.desiredMu.Unlock()
+	r.lastDesired = make(map[string]spec.DesiredProject, len(projects))
+	for _, project := range projects {
+		r.lastDesired[project.ProjectID] = project
+	}
+}
+
+// Project is what this server was last told to run for one project.
+func (r *Reconciler) Project(projectID string) (spec.DesiredProject, bool) {
+	r.desiredMu.Lock()
+	defer r.desiredMu.Unlock()
+	project, ok := r.lastDesired[projectID]
+	return project, ok
 }

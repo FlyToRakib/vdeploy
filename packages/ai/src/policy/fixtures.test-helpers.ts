@@ -139,6 +139,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'git.connect': { provider: 'github', installationId: '12345' },
   'volume.delete': { volume: 'uploads' },
   'volume.restore': { snapshotId: newId('backup') },
+  'cron.delete': { name: 'nightly-report' },
   'secret.rotate': { secretId: newId('secret') },
   'secret.read_value': { secretId: newId('secret') },
   'task.run': { command: ['node', 'migrate.js'] },

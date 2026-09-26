@@ -15,6 +15,7 @@ import { pino } from 'pino';
 import { z } from 'zod';
 import { applyPlan } from './apply.js';
 import { runDueBackups, runDueVerifications } from './backup-schedule.js';
+import { runDueCrons } from './cron-schedule.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
 import { safePoster, sendDueNotifications } from './notifications.js';
 import { publicRegistries } from './registry.js';
@@ -142,6 +143,27 @@ const backupTimer = setInterval(() => {
     });
 }, 60_000);
 
+// Scheduled jobs (§17.6). Looked at once a minute, like the backups: a
+// firing missed while the worker was busy is late, never lost.
+let firing = false;
+const cronTimer = setInterval(() => {
+  if (firing) return;
+  firing = true;
+  runDueCrons({
+    db,
+    now: () => new Date(),
+    logError: (err, projectId) => {
+      log.error({ err, projectId }, 'could not start a scheduled job');
+    },
+  })
+    .catch((err: unknown) => {
+      log.error({ err }, 'schedule round failed');
+    })
+    .finally(() => {
+      firing = false;
+    });
+}, 60_000);
+
 // Proving those backups by putting them back (§17.5). Checked every ten
 // minutes: a weekly check does not need a closer watch than that.
 let verifying = false;
@@ -211,6 +233,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     clearInterval(dnsTimer);
     clearInterval(backupTimer);
     clearInterval(verifyTimer);
+    clearInterval(cronTimer);
     clearInterval(pruneTimer);
     clearInterval(notifyTimer);
     clearInterval(offlineTimer);

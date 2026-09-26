@@ -19,6 +19,7 @@ import {
 import { formText } from '@/lib/forms';
 import { query } from '@/lib/operations';
 import { ago, sizeWords, type BackupSummary } from '@/lib/databases';
+import type { TaskView } from '@vdeploy/contracts';
 import { useProject } from '../project-shell';
 
 export function useSpec(): EditableSpec {
@@ -437,6 +438,164 @@ export function StorageSection() {
             ))}
           </ul>
         </div>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * Scheduled jobs and one-off commands (§17.6). A job runs **once** when its
+ * time comes, not once per copy of the app — which is the difference
+ * between one nightly report and three.
+ */
+export function ScheduleSection() {
+  const { projectId, act } = useProject();
+  const spec = useSpec();
+  const [runs, setRuns] = useState<TaskView[]>([]);
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => {
+    void query<TaskView[]>('task.list', { projectId }).then(setRuns, () => undefined);
+  }, [projectId, spec]);
+
+  const crons = spec.schedule?.crons ?? [];
+  return (
+    <Section
+      title="Scheduled jobs"
+      hint="A job runs once when its time comes, however many copies of the app are running."
+    >
+      {crons.length === 0 && !adding && (
+        <p className="text-sm text-muted-foreground">Nothing is scheduled.</p>
+      )}
+      <ul className="grid gap-2 text-sm">
+        {crons.map((cron) => (
+          <li key={cron.name} className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{cron.name}</span>
+            <span className="font-mono text-xs">{cron.command.join(' ')}</span>
+            <span className="text-muted-foreground">
+              {cron.expr} ({cron.timezone})
+            </span>
+            <button
+              type="button"
+              className="text-accent underline"
+              onClick={() =>
+                void act('cron.delete', { projectId, name: cron.name }, `Removing ${cron.name}`)
+              }
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+      {adding ? (
+        <form
+          className="grid gap-3"
+          action={(form) => {
+            setAdding(false);
+            void act(
+              'cron.create',
+              {
+                projectId,
+                cron: {
+                  name: formText(form, 'name'),
+                  command: formText(form, 'command').split(/\s+/).filter(Boolean),
+                  expr: formText(form, 'expr'),
+                  timezone: formText(form, 'timezone') || 'UTC',
+                },
+              },
+              'Adding the job',
+            );
+          }}
+        >
+          <Field label="Name" name="name" required placeholder="nightly-report" />
+          <Field
+            label="Command"
+            name="command"
+            required
+            placeholder="node jobs/report.js"
+            hint="Run in a copy of this app, with its settings and its folders."
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="When"
+              name="expr"
+              required
+              placeholder="0 3 * * *"
+              hint="Minute, hour, day, month, weekday."
+            />
+            <Field
+              label="Timezone"
+              name="timezone"
+              defaultValue="UTC"
+              hint="“3 in the morning” means yours, not the server’s."
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm">
+              Add it
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setAdding(false);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="justify-self-start"
+          onClick={() => {
+            setAdding(true);
+          }}
+        >
+          Schedule a job
+        </Button>
+      )}
+
+      <form
+        className="grid gap-2 border-t border-border pt-4"
+        action={(form) => {
+          const command = formText(form, 'once').split(/\s+/).filter(Boolean);
+          if (command.length === 0) return;
+          void act('task.run', { projectId, command }, `Running ${command.join(' ')}`);
+        }}
+      >
+        <Field
+          label="Run something once"
+          name="once"
+          placeholder="node jobs/backfill.js"
+          hint="Runs in a copy of this app. Nobody can tell from outside what a command does, so this one asks first."
+        />
+        <Button type="submit" size="sm" variant="secondary" className="justify-self-start">
+          Run it
+        </Button>
+      </form>
+
+      {runs.length > 0 && (
+        <ul className="grid gap-1 text-sm">
+          {runs.slice(0, 8).map((run) => (
+            <li key={run.id} className="flex flex-wrap items-center gap-2">
+              <Status
+                health={
+                  run.status === 'done' ? 'healthy' : run.status === 'failed' ? 'failed' : 'neutral'
+                }
+              >
+                {run.status === 'done' ? 'Ran' : run.status === 'failed' ? 'Failed' : 'Running'}
+              </Status>
+              <span className="font-mono text-xs">{run.command.join(' ')}</span>
+              {run.name && <span className="text-muted-foreground">{run.name}</span>}
+              <span className="text-muted-foreground">{ago(run.startedAt)}</span>
+              {run.error && <span className="text-status-failed">{run.error}</span>}
+            </li>
+          ))}
+        </ul>
       )}
     </Section>
   );

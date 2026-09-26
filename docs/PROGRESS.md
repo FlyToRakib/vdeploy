@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.3b — cron jobs and one-off tasks, then the rest of M4
+**Task:** 4.3c — the rest of M4 (terminal, browser, templates, metrics, health)
 **Status:** in progress
-**Updated:** 2026-09-26 08:40 UTC
+**Updated:** 2026-09-26 11:05 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -141,9 +141,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.3a snapshot before destroy (§17.4): the second kind of backup — where a dump covers one database, this covers everything in a folder. Any plan that reaches Tier 3 and touches an app with permanent folders now copies them **first**, centrally rather than planner by planner, and a plan whose copy fails does not proceed: the delete that could not keep the files does not happen. The copy moves through Docker's own copy endpoints on a container created and never started, so it needs no shell, no tar binary and no host path; each folder arrives under its own name inside one gzipped archive, gzip compresses it on the way to disk, and a snapshot of nothing is recorded as a failure. It lands in the same store as the dumps, so everything already built applies to it: verification, retention (the newest five stay), download, and a copy to the offsite target before anything local is pruned. `volume.snapshot` keeps one on request; `volume.restore` puts one back with the app stopped first and a fresh copy taken before it — writing over files underneath a running app is how both end up broken. Also fixed: cancelling a download took the agent's whole connection down with it, because a websocket write cancelled mid-write closes the connection — chunks now write on the connection's context, not the download's
 
+- [x] 4.3b scheduled jobs and one-off commands (§17.6): both are the same thing — a container from the app's current release, with its settings, its secrets, its network and its folders, running one command and then going away. It runs **once**, not once per replica: three copies of an app must not mean three copies of every nightly email, and that comes from there being exactly one job container per run. A job is part of the spec, so adding or changing one is a planned change like any other — approved, versioned with the release, rolled back with it. The worker reads the schedules once a minute in the timezone they were written in; a firing missed while it was busy is late rather than lost, and the same firing can only be queued once because the minute it is *for* is part of its identity in the database. A run against a release that moved underneath it is refused rather than run against the wrong version. `task.run` waits for the command and brings its output back with the plan; it is destructive, because nobody can tell from outside whether a command sends a report or deletes last year's rows
+
 ## Doing
 
-- [ ] 4.3b the rest of M4: cron jobs and one-off tasks, web terminal (audited, human-only), file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
+- [ ] 4.3c the rest of M4: web terminal (audited, human-only), file/volume browser, template catalog, compose import, metrics and graphs, status page, server health and reclaim, firewall management
 
 ## Next
 

@@ -28,6 +28,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
 	"github.com/FlyToRakib/vdeploy/agent/internal/sealed"
+	"github.com/FlyToRakib/vdeploy/agent/internal/task"
 	"github.com/FlyToRakib/vdeploy/agent/internal/transport"
 )
 
@@ -253,6 +254,13 @@ func serve(configPath string, log *slog.Logger) error {
 			BoxKey:  sealed.PublicKey(box),
 			Builder: builder,
 			Backups: backups,
+			Tasks: &task.Runner{
+				Engine:   engine,
+				Projects: reconciler.Project,
+				Secrets:  sealed.Opener{Key: box, ServerID: id.ServerID},
+				Built:    images.Built,
+				Log:      log,
+			},
 			Logs: func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error {
 				return logs.Stream(ctx, engine, projectID, tail, follow, emit) //nolint:wrapcheck // plain for the viewer
 			},

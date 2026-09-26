@@ -254,3 +254,22 @@ func DatabaseEnv(d spec.DesiredDatabase, open func(key string, version int, seal
 	}
 	return env, nil
 }
+
+// TaskJob is a one-off command for a project (§17.6): the same container its
+// replicas run — same image, environment, network and folders — with a
+// different command, no port, and no restart. One run gets one container, so
+// a scheduled job never runs once per replica.
+func TaskJob(p spec.DesiredProject, replica Container, name string, command []string) Container {
+	job := replica
+	job.Name = name
+	job.Cmd = command
+	job.RestartPolicy = "no"
+	job.Port = 0
+	job.Labels = map[string]string{
+		ManagedLabel: "true",
+		ProjectLabel: p.ProjectID,
+		ReleaseLabel: p.ReleaseID,
+		RoleLabel:    "task",
+	}
+	return job
+}

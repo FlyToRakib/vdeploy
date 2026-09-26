@@ -176,6 +176,13 @@
       "when": 1790385054781,
       "tag": "0024_volume_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790386636887,
+      "tag": "0025_tasks_and_crons",
+      "breakpoints": true
     }
   ]
 }

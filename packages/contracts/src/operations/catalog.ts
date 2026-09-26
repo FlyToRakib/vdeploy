@@ -130,6 +130,7 @@ export const OPERATIONS = [
     'Show one database, the apps linked to it, and how to reach it',
     obj({ databaseId }),
   ),
+  query('task.list', 'project', 'deployHistory', 'List the runs of this app’s commands', obj(P)),
   query(
     'backup.checks',
     'org',
@@ -524,6 +525,13 @@ export const OPERATIONS = [
     'project',
     'Change a scheduled job',
     obj({ ...P, cron: CronEntry }),
+  ),
+  operation(
+    'cron.delete',
+    'sensitive',
+    'project',
+    'Remove a scheduled job, so it stops running',
+    obj({ ...P, name: ResourceName }),
   ),
   operation(
     'release.rollback',

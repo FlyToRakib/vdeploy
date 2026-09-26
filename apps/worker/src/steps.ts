@@ -46,6 +46,7 @@ import {
   importDumpStep,
   restoreBackupStep,
   restoreVolumesStep,
+  runTaskStep,
   snapshotVolumesStep,
   setBackupPolicyStep,
   takeBackupStep,
@@ -589,6 +590,8 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return rotate(deps, state, step.secretId);
     case 'create_database':
       return createDatabaseStep(deps, state);
+    case 'run_task':
+      return runTaskStep(deps, state, step.command);
     case 'restore_volumes':
       return restoreVolumesStep(deps, state, step.snapshotId);
     case 'restore_backup':

@@ -6,7 +6,13 @@ import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/cn';
 import { specToYaml, yamlToSpec } from '@/lib/config';
 import { useProject } from '../project-shell';
-import { DomainsSection, SettingsSection, SizeSection, StorageSection } from './sections';
+import {
+  DomainsSection,
+  ScheduleSection,
+  SettingsSection,
+  SizeSection,
+  StorageSection,
+} from './sections';
 
 const MODE_KEY = 'vdeploy.config-mode';
 const listeners = new Set<() => void>();
@@ -125,6 +131,7 @@ export function ProjectConfig() {
       <DomainsSection />
       <SizeSection />
       <StorageSection />
+      <ScheduleSection />
       {mode === 'advanced' && <RawSpec />}
     </div>
   );

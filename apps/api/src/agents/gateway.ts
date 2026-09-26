@@ -23,6 +23,10 @@ import {
   claimBuilds,
   claimRestores,
   claimSnapshots,
+  claimTasks,
+  finishTask,
+  getTask,
+  TASKS_CHANNEL,
   prunableSnapshots,
   projectImage,
   SNAPSHOTS_CHANNEL,
@@ -81,6 +85,9 @@ const HELLO_TIMEOUT_MS = 10_000;
  * before something destructive, so a handful covers every recent undo.
  */
 const KEEP_SNAPSHOTS = 5;
+
+/** How long one run may take before the server stops it (§17.6). */
+const TASK_TIMEOUT_SECONDS = 6 * 3600;
 
 /**
  * The server's public IPv4: one its agent sees on an interface, else the
@@ -172,6 +179,7 @@ export class Gateway implements LogSource, ArtifactSource {
   private stopOffsiteListening: (() => Promise<void>) | null = null;
   private stopVerifyListening: (() => Promise<void>) | null = null;
   private stopSnapshotListening: (() => Promise<void>) | null = null;
+  private stopTaskListening: (() => Promise<void>) | null = null;
 
   /** When each server's ports were last checked from here (ms). */
   private readonly reachChecked = new Map<string, number>();
@@ -209,6 +217,11 @@ export class Gateway implements LogSource, ArtifactSource {
     this.stopVerifyListening = await listen(this.deps.databaseUrl, VERIFY_CHANNEL, (serverId) => {
       void this.dispatchVerifications(serverId).catch((err: unknown) => {
         this.deps.log.error({ err, serverId }, 'could not send a restore check');
+      });
+    });
+    this.stopTaskListening = await listen(this.deps.databaseUrl, TASKS_CHANNEL, (serverId) => {
+      void this.dispatchTasks(serverId).catch((err: unknown) => {
+        this.deps.log.error({ err, serverId }, 'could not send a task');
       });
     });
     this.stopSnapshotListening = await listen(
@@ -347,6 +360,32 @@ export class Gateway implements LogSource, ArtifactSource {
             ),
             ...(offsite ? { offsite } : {}),
             timeoutSeconds: 3600,
+          },
+        }),
+      );
+    }
+  }
+
+  /**
+   * Sends a server's queued runs (§17.6): one-off commands, and the firings
+   * of scheduled jobs. The agent runs each in a container from the release
+   * the run was asked for — once, whatever the replica count.
+   */
+  async dispatchTasks(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const { db, key, now } = this.deps;
+    for (const task of await claimTasks(db, serverId, now())) {
+      connection.socket.send(
+        seal(key, {
+          ...connection.session.next('task'),
+          task: {
+            taskId: task.id,
+            projectId: task.projectId,
+            releaseId: task.releaseId,
+            command: task.command,
+            ...(task.name ? { name: task.name } : {}),
+            timeoutSeconds: TASK_TIMEOUT_SECONDS,
           },
         }),
       );
@@ -777,6 +816,7 @@ export class Gateway implements LogSource, ArtifactSource {
     await this.stopOffsiteListening?.();
     await this.stopVerifyListening?.();
     await this.stopSnapshotListening?.();
+    await this.stopTaskListening?.();
   }
 
   isConnected(serverId: string): boolean {
@@ -951,6 +991,10 @@ export class Gateway implements LogSource, ArtifactSource {
     } else if (frame.type === 'restore_result') {
       const restore = await getRestore(db, frame.result.restoreId);
       if (restore?.serverId === serverId) await finishRestore(db, frame.result, now());
+    } else if (frame.type === 'task_result') {
+      // Only the server a run went to may answer it.
+      const task = await getTask(db, frame.result.taskId);
+      if (task?.serverId === serverId) await finishTask(db, frame.result, now());
     } else if (frame.type === 'snapshot_result') {
       // The same answer covers both directions: a snapshot taken, or one
       // put back. Which it was depends on what the id belongs to.

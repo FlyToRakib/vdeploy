@@ -28,6 +28,9 @@ import {
   queueBackup,
   queueRestore,
   queueSnapshot,
+  queueTask,
+  getTask,
+  finishTask,
   setBackupPolicy,
   databaseLinks,
   databases,
@@ -659,4 +662,69 @@ export async function restoreVolumesStep(
     }
     await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
   }
+}
+
+/**
+ * Runs one command against what is live (§17.6) and waits for it, because
+ * "run the migration" is not done until it is done. The output comes back
+ * with the plan, so nobody has to go looking for it.
+ */
+export async function runTaskStep(
+  deps: DatabaseStepDeps & { pollMs: number; taskTimeoutMs?: number },
+  state: ApplyState,
+  command: string[],
+): Promise<void> {
+  const projectId = state.projectId;
+  if (!projectId) throw new VDeployError('internal', 'the plan has no project');
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+  if (!project?.serverId || !project.currentReleaseId) {
+    throw new VDeployError('conflict', 'This app is not running anywhere yet');
+  }
+  const queued = await deps.db.transaction((tx) =>
+    queueTask(tx, {
+      orgId: state.orgId,
+      projectId,
+      serverId: project.serverId ?? '',
+      releaseId: project.currentReleaseId ?? '',
+      command,
+    }),
+  );
+  if (!queued) throw new VDeployError('internal', 'The run was not queued');
+  const deadline = Date.now() + (deps.taskTimeoutMs ?? 6 * 60 * 60_000);
+  for (;;) {
+    const task = await getTask(deps.db, queued.id);
+    if (task?.status === 'done') {
+      state.notes.push(`Ran ${command.join(' ')}.${task.log ? ` ${lastLine(task.log)}` : ''}`);
+      return;
+    }
+    if (task?.status === 'failed') {
+      throw new VDeployError(
+        'unavailable',
+        `${task.error ?? 'The command did not work.'} ${lastLine(task.log)}`.trim(),
+      );
+    }
+    if (Date.now() > deadline) {
+      await deps.db.transaction((tx) =>
+        finishTask(
+          tx,
+          {
+            taskId: queued.id as `tsk_${string}`,
+            ok: false,
+            exitCode: -1,
+            error: 'it did not finish in time',
+            log: '',
+          },
+          deps.now(),
+        ),
+      );
+      throw new VDeployError('unavailable', 'The command did not finish in time');
+    }
+    await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+  }
+}
+
+/** The end of a command's output: what a person actually reads. */
+function lastLine(log: string): string {
+  const lines = log.trimEnd().split('\n');
+  return (lines[lines.length - 1] ?? '').slice(0, 300);
 }

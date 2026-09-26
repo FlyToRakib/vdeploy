@@ -47,10 +47,13 @@ const (
 
 	TypeSnapshot       = "snapshot"
 	TypeSnapshotResult = "snapshot_result"
-	TypeLogs           = "logs"
-	TypeLogsStop       = "logs_stop"
-	TypeLogsChunk      = "logs_chunk"
-	TypeLogsEnd        = "logs_end"
+
+	TypeTask       = "task"
+	TypeTaskResult = "task_result"
+	TypeLogs       = "logs"
+	TypeLogsStop   = "logs_stop"
+	TypeLogsChunk  = "logs_chunk"
+	TypeLogsEnd    = "logs_end"
 )
 
 // MaxClockSkew bounds how far a frame's timestamp may be from ours.

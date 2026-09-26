@@ -23,6 +23,7 @@ export const ID_PREFIXES = {
   backupTarget: 'bkt',
   restore: 'rst',
   restoreCheck: 'vfy',
+  task: 'tsk',
   auditEntry: 'aud',
   session: 'ses',
   apiKey: 'key',

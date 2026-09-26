@@ -6,6 +6,8 @@ import {
   restoresFor,
   verificationView,
   verificationsFor,
+  tasksOf,
+  taskView,
   databaseView,
   databasesOf,
   getDatabase,
@@ -60,6 +62,12 @@ export const DATABASE_QUERIES: Partial<Record<OperationName, Handler>> = {
     return rows
       .filter((row) => !wanted || row.backup.databaseId === wanted)
       .map((row) => backupView(row.backup, row.databaseName));
+  },
+  'task.list': async ({ deps, args }) => {
+    if (typeof args.projectId !== 'string') {
+      throw new VDeployError('invalid_input', 'task.list needs projectId');
+    }
+    return (await tasksOf(deps.db, args.projectId)).map(taskView);
   },
   'backup.restores': async ({ deps, actor }) => {
     const rows = await restoresFor(deps.db, actor.orgId);

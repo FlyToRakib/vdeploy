@@ -75,6 +75,10 @@ export const PlanStep = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('restore_volumes'), snapshotId: idSchema('backup') }),
   z.strictObject({
+    kind: z.literal('run_task'),
+    command: z.array(z.string().max(4096)).min(1).max(64),
+  }),
+  z.strictObject({
     kind: z.literal('delete_database'),
     databaseId: idSchema('database'),
     keepData: z.boolean(),
