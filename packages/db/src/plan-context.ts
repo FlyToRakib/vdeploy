@@ -125,7 +125,7 @@ async function requestedDatabase(
 }
 
 /** The databases an app is linked to, by id and name. */
-async function linkedDatabases(
+export async function linkedDatabases(
   db: Database,
   projectId: string,
 ): Promise<{ id: Id<'database'>; name: string }[]> {

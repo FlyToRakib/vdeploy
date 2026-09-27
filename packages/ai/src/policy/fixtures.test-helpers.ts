@@ -137,6 +137,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'backup.restore': { backupId: newId('backup') },
   'git.connect': { provider: 'github' },
   'volume.delete': { volume: 'uploads' },
+  'project.move': { serverId: newId('server') },
   'status.configure': { slug: 'acme', title: 'Acme status', enabled: true, apps: [] },
   'compose.read': { file: 'services:\n  web:\n    image: nginx:1.27\n' },
   'files.list': { folder: 'uploads', path: '' },

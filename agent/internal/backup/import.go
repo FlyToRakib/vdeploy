@@ -22,7 +22,24 @@ before it is written anywhere the restore can see it, so a truncated
 download is never loaded into somebody's database as if it were their data.
 */
 func (r *Runner) fetchDump(ctx context.Context, req RestoreRequest) error {
-	source := req.Download
+	return r.fetchInto(ctx, req.Download, req.Image, req.FileName, "vd-import-"+shortID(req.RestoreID))
+}
+
+/*
+fetchInto brings a file onto this server and puts it in the backup store.
+
+It lands on disk first and is checked there — size and hash — before it is
+written anywhere a restore can see it, so a truncated download is never
+loaded into somebody's database, or over somebody's folders, as if it were
+their data. That is also why this is one function: a dump imported from a
+laptop and a snapshot arriving from another server have exactly the same
+way to be wrong.
+*/
+func (r *Runner) fetchInto(
+	ctx context.Context,
+	source *DumpSource,
+	image, fileName, helper string,
+) error {
 	if source == nil {
 		return nil
 	}
@@ -46,7 +63,7 @@ func (r *Runner) fetchDump(ctx context.Context, req RestoreRequest) error {
 		return fmt.Errorf("the dump could not be fetched: the control plane answered %d", res.StatusCode)
 	}
 
-	file, err := os.CreateTemp(r.TempDir, "vd-import-*.dump")
+	file, err := os.CreateTemp(r.TempDir, "vd-fetch-*.tmp")
 	if err != nil {
 		return fmt.Errorf("the dump could not be saved: %w", err)
 	}
@@ -65,11 +82,11 @@ func (r *Runner) fetchDump(ctx context.Context, req RestoreRequest) error {
 	}
 	if err := r.Engine.WriteVolumeFile(
 		ctx,
-		"vd-import-"+shortID(req.RestoreID),
-		req.Image,
+		helper,
+		image,
 		Volume,
 		mountPath,
-		req.FileName,
+		fileName,
 		size,
 		file,
 	); err != nil {

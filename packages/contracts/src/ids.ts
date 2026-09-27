@@ -24,6 +24,8 @@ export const ID_PREFIXES = {
   restore: 'rst',
   restoreCheck: 'vfy',
   task: 'tsk',
+  /** One artifact on its way from one server to another (§17.6). */
+  transfer: 'trf',
   terminalSession: 'trm',
   auditEntry: 'aud',
   session: 'ses',

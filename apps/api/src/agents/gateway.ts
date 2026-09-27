@@ -29,6 +29,7 @@ import {
   getTask,
   TASKS_CHANNEL,
   prunableSnapshots,
+  allowTransfer,
   projectImage,
   SNAPSHOTS_CHANNEL,
   claimVerifications,
@@ -495,6 +496,27 @@ export class Gateway
       );
       return;
     }
+    // The copy may be on a different server — an app that has just moved
+    // (§17.6). Then it is fetched: a one-time token for this server alone,
+    // and the control plane pipes the bytes from the server that holds
+    // them rather than keeping a copy of its own.
+    let download;
+    if (snapshot.serverId && snapshot.serverId !== serverId && snapshot.sha256) {
+      const allowed = await db.transaction((tx) =>
+        allowTransfer(tx, {
+          orgId: snapshot.orgId,
+          backupId: snapshot.id,
+          toServerId: serverId,
+          now: now(),
+        }),
+      );
+      download = {
+        url: `${this.deps.publicUrl.replace(/\/$/, '')}/api/v1/transfers/${allowed.id}`,
+        token: allowed.token,
+        sizeBytes: snapshot.sizeBytes ?? 0,
+        sha256: snapshot.sha256,
+      };
+    }
     connection.socket.send(
       seal(key, {
         ...connection.session.next('snapshot'),
@@ -506,6 +528,7 @@ export class Gateway
           fileName: snapshot.fileName,
           mode: 'put_back',
           remove: [],
+          ...(download ? { download } : {}),
           timeoutSeconds: 3600,
         },
       }),

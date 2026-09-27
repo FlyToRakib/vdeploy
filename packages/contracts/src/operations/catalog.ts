@@ -657,6 +657,20 @@ export const OPERATIONS = [
   ),
   // Putting files back is destructive in the same way restoring a database
   // is: what is there now goes, so the app stops while it happens.
+  /*
+   * Emptying a server (§20 Servers). It answers with what it would move
+   * and where each one would go — it starts nothing itself, because a move
+   * is destructive and each one is confirmed on its own. Emptying a
+   * machine by accident is not a mistake anybody should be able to make in
+   * one click.
+   */
+  query(
+    'server.drain',
+    'server',
+    'config',
+    'Show what moving everything off this server would mean, and where each app would go',
+    obj(S),
+  ),
   operation(
     'volume.restore',
     'destructive',
@@ -670,6 +684,22 @@ export const OPERATIONS = [
     'project',
     'Keep a copy of everything in this app’s permanent folders now',
     obj(P),
+  ),
+  /*
+   * Moving an app to another server (§17.6).
+   *
+   * Destructive because it stops the app and writes its folders somewhere
+   * else — and because §17.6 says a move is explicit, orchestrated and
+   * confirmed, never a silent reschedule. The copy it takes first is what
+   * makes it recoverable; the folders it leaves behind are what makes it
+   * reversible.
+   */
+  operation(
+    'project.move',
+    'destructive',
+    'project',
+    'Move this app, and its files, to another server',
+    obj({ ...P, serverId }),
   ),
   // A folder is named, not an app: by the time data can be deleted nothing
   // is mounting it, and the app that owned it may not exist any more.

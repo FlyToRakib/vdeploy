@@ -56,10 +56,14 @@ type SnapshotRequest struct {
 	// DeleteAfter removes the folders once the copy is written and read
 	// back (§17.2). One request rather than two, because the order is the
 	// guarantee: a copy that could not be taken deletes nothing.
-	DeleteAfter    bool     `json:"deleteAfter"`
-	Remove         []string `json:"remove"`
-	Offsite        *Offsite `json:"offsite,omitempty"`
-	TimeoutSeconds int      `json:"timeoutSeconds"`
+	DeleteAfter bool     `json:"deleteAfter"`
+	Remove      []string `json:"remove"`
+	Offsite     *Offsite `json:"offsite,omitempty"`
+	// Download is set when the snapshot is not on this server yet — an app
+	// arriving from another one (§17.6). It is fetched and checked before
+	// anything is written over anybody's folders.
+	Download       *DumpSource `json:"download,omitempty"`
+	TimeoutSeconds int         `json:"timeoutSeconds"`
 }
 
 // SnapshotResult is what is actually on disk afterwards.
@@ -118,6 +122,18 @@ func (r *Runner) Snapshot(ctx context.Context, req SnapshotRequest) SnapshotResu
 	defer cancel()
 
 	if req.Mode == "put_back" {
+		// An app moving between servers brings its folders with it: the
+		// archive is fetched onto this server first, and checked, before
+		// it goes anywhere near a folder.
+		if err := r.fetchInto(
+			runCtx,
+			req.Download,
+			req.Image,
+			req.FileName,
+			"vd-arrive-"+shortID(req.SnapshotID),
+		); err != nil {
+			return fail(err.Error())
+		}
 		if err := r.putBack(runCtx, req, mounts); err != nil {
 			return fail(err.Error())
 		}

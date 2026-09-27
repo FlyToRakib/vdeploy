@@ -34,6 +34,7 @@ import {
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { AI_QUERIES } from './ai-settings.js';
 import { DATABASE_QUERIES } from './database-queries.js';
+import { drainPlan } from './reclaim.js';
 import { OFFSITE_QUERIES } from './offsite.js';
 import { GITHUB_QUERIES } from './github.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
@@ -189,6 +190,12 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       publicUrl: page ? `${deps.publicUrl.replace(/\/$/, '')}/status/${page.slug}` : null,
     };
   },
+  /**
+   * What emptying a server would mean (§20 Servers). It moves nothing:
+   * each app is a destructive change of its own, confirmed on its own.
+   */
+  'server.drain': async ({ deps, actor, args }) =>
+    drainPlan(deps, actor.orgId, id(args, 'serverId')),
   'server.status': async ({ deps, args }) => {
     const [row] = await deps.db
       .select({

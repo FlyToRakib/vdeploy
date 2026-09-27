@@ -851,6 +851,59 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       blastRadius: radius(project.spec, { downtime: 'none', dataAtRisk: [] }),
     };
   },
+  /*
+   * Moving an app to another server (§17.6).
+   *
+   * Volumes pin a project to its server: the files are on that machine's
+   * disk and no routing trick changes that. So a move is an orchestrated
+   * migration and never a silent reschedule — copy, stop, re-point, put
+   * back, start — and every step of it already exists for its own reasons.
+   *
+   * Two things it deliberately does not do. It does not delete the folders
+   * on the old server: they stay as orphans, visible and deletable by a
+   * person once they are satisfied, so the data exists twice until somebody
+   * says otherwise. And it refuses to move an app that reads a managed
+   * database, because the database is on the old server and internal to
+   * it — moving the app alone would leave it unable to reach its own data,
+   * which is a worse outcome than not moving.
+   */
+  'project.move': (args, context) => {
+    const project = requireProject(context);
+    const volumes = project.spec.runtime.volumes.map((v) => v.name);
+    const databases = context.linkedDatabases ?? [];
+    if (databases.length > 0) {
+      throw new VDeployError(
+        'conflict',
+        `This app reads ${databases.map((d) => d.name).join(', ')}, which lives on the server it is on. ` +
+          'Moving the app alone would leave it unable to reach its own data.',
+      );
+    }
+    if (project.spec.placement.server === args.serverId) {
+      throw new VDeployError('conflict', 'It is already on that server');
+    }
+    checkFits(context.server, footprint(project.spec, project.running));
+    return {
+      specHash: null,
+      changes: [
+        { path: 'placement.server', before: project.spec.placement.server ?? null, after: args.serverId },
+      ],
+      steps: [
+        // A copy first, on the server that still has the files.
+        ...(volumes.length ? [{ kind: 'snapshot_volumes', volumes } as const] : []),
+        { kind: 'stop' } as const,
+        { kind: 'move_to_server', serverId: args.serverId } as const,
+        // And back, on the server that now has the app.
+        ...(volumes.length ? [{ kind: 'arrive_volumes' } as const] : []),
+        { kind: 'start' } as const,
+      ],
+      tier: 'destructive',
+      blastRadius: radius(project.spec, {
+        downtime: 'until_started',
+        dataAtRisk: [],
+        rollbackTo: project.currentReleaseId,
+      }),
+    };
+  },
   /** Keeping a copy of what an app has written, on request (§17.4). */
   'volume.snapshot': (_args, context) => {
     const project = requireProject(context);

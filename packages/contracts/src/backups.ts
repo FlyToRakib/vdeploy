@@ -131,6 +131,19 @@ export type BackupResult = z.infer<typeof BackupResult>;
  * the point: data problems are usually caused by an operation that seemed
  * unrelated.
  */
+/**
+ * A file a server fetches from its own control plane, once, and checks
+ * before it reads it (ADR 0008's shape): an imported dump, or an app's
+ * folders arriving from another server (§17.6).
+ */
+export const DumpSource = z.strictObject({
+  url: z.url({ protocol: /^https?$/ }).max(2048),
+  token: z.string().min(16).max(256),
+  sizeBytes: z.number().int().min(0),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type DumpSource = z.infer<typeof DumpSource>;
+
 export const SnapshotRequest = z.strictObject({
   snapshotId: idSchema('backup'),
   projectId: idSchema('project'),
@@ -150,6 +163,12 @@ export const SnapshotRequest = z.strictObject({
   remove: z.array(z.string().max(200)).max(50).default([]),
   /** Where a copy goes afterwards; absent means it stays here alone. */
   offsite: OffsiteTarget.optional(),
+  /**
+   * Set when the snapshot is not on this server yet — an app arriving from
+   * another one (§17.6). The server fetches it with a one-time token and
+   * checks its size and hash before anything is written over a folder.
+   */
+  download: DumpSource.optional(),
   timeoutSeconds: z
     .number()
     .int()

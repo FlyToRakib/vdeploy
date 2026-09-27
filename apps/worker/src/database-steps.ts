@@ -1,4 +1,10 @@
-import { BackupPolicy, VDeployError, type DatabaseEngine } from '@vdeploy/contracts';
+import {
+  BackupPolicy,
+  readSpec,
+  VDeployError,
+  type DatabaseEngine,
+  type Id,
+} from '@vdeploy/contracts';
 import {
   connectionUrl,
   databaseHost,
@@ -37,6 +43,7 @@ import {
   getDatabase,
   markDatabaseDeleted,
   projects,
+  servers,
   putSecret,
   type Database,
   type Executor,
@@ -581,6 +588,105 @@ export function snapshotFileName(project: string, taken: Date): string {
   return `${project}-folders-${stamp}.tar.gz`;
 }
 
+
+/**
+ * Points a project at a different server (§17.6).
+ *
+ * The moment between the two halves of a move: the app has been stopped on
+ * the server that has its files, and has not started on the one that will.
+ * Both agents are told — the old one so it removes the containers, the new
+ * one so it makes them — and the folders on the old server are left exactly
+ * where they are. They become orphans there, which is what makes the move
+ * reversible: until somebody deletes them, the data exists twice.
+ */
+export async function moveToServerStep(
+  deps: DatabaseStepDeps,
+  state: ApplyState,
+  serverId: string,
+): Promise<void> {
+  const projectId = state.projectId;
+  if (!projectId) throw new VDeployError('internal', 'The plan has no project');
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+  if (!project) throw new VDeployError('not_found', 'The project no longer exists');
+  const [target] = await deps.db
+    .select()
+    .from(servers)
+    .where(and(eq(servers.id, serverId), eq(servers.orgId, state.orgId)));
+  if (!target?.agentPublicKey) {
+    throw new VDeployError('conflict', 'That server is not connected, so nothing can be moved to it');
+  }
+  const from = project.serverId;
+  const spec = readSpec(project.spec);
+  const next = { ...spec, placement: { ...spec.placement, server: serverId as Id<'server'> } };
+  await deps.db.transaction(async (tx) => {
+    await tx
+      .update(projects)
+      .set({ serverId, spec: next, specHash: hashOf(next), updatedAt: deps.now() })
+      .where(eq(projects.id, projectId));
+    // Both sides have to hear: the old server to let it go, the new one to
+    // take it. A generation that does not move leaves a container running
+    // somewhere nobody is looking.
+    if (from) await bumpGeneration(tx, from);
+    await bumpGeneration(tx, serverId);
+  });
+  state.notes.push(`${project.name} now belongs to ${target.name}.`);
+}
+
+/**
+ * Puts the folders back on the server the app has just moved to (§17.6).
+ *
+ * The copy is on the *old* server, so it is fetched: the receiving agent
+ * asks the control plane for it with a one-time token, and the control
+ * plane pipes it from the server that holds it. Nothing is stored in
+ * between, and the receiving agent checks the size and hash before it
+ * writes over anything.
+ */
+export async function arriveVolumesStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+): Promise<void> {
+  const projectId = state.projectId;
+  const carried = state.movedSnapshotId;
+  if (!projectId || !carried) {
+    // Nothing was copied, so there is nothing to put back: an app with no
+    // permanent folders moves by being started somewhere else.
+    return;
+  }
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+  if (!project?.serverId) throw new VDeployError('internal', 'The project has no server');
+
+  // The same queue a person's "put these files back" uses. What differs
+  // is only that the copy is on another server, and the gateway notices
+  // that when it builds the frame.
+  const queued = await deps.db.transaction((tx) =>
+    queueRestore(tx, {
+      orgId: state.orgId,
+      backupId: carried,
+      projectId,
+      serverId: project.serverId ?? '',
+      mode: 'in_place',
+    }),
+  );
+  const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
+  for (;;) {
+    const restore = await getRestore(deps.db, queued.id);
+    if (restore?.status === 'done') {
+      state.notes.push('Its files came with it.');
+      return;
+    }
+    if (restore?.status === 'failed') {
+      throw new VDeployError(
+        'unavailable',
+        `The files could not be put back on the new server, so the app was not started there. ${restore.error ?? ''}`.trim(),
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new VDeployError('unavailable', 'Moving the files did not finish in time');
+    }
+    await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+  }
+}
+
 /**
  * Deleting a permanent folder and everything in it (§17.2).
  *
@@ -690,6 +796,9 @@ export async function snapshotVolumesStep(
       reason: 'pre_destructive',
     }),
   );
+  // A move puts this copy back on the other server, and needs to know
+  // which one it was: the id does not exist when the plan is made.
+  state.movedSnapshotId = queued.id;
   const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
   for (;;) {
     const snapshot = await getBackup(deps.db, queued.id);

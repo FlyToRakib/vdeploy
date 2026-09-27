@@ -98,6 +98,21 @@ export const PlanStep = z.discriminatedUnion('kind', [
    * why this is one step and not two.
    */
   z.strictObject({ kind: z.literal('delete_volume'), volume: z.string().min(1).max(128) }),
+  /**
+   * Point a project at a different server (§17.6). On its own it moves
+   * nothing: the steps around it copy the folders first and put them back
+   * afterwards, and this is the moment between the two where the app
+   * belongs nowhere.
+   */
+  z.strictObject({ kind: z.literal('move_to_server'), serverId: idSchema('server') }),
+  /**
+   * Put back, on the server the app has just moved to, the copy this same
+   * plan took before it left (§17.6). It names no snapshot because the
+   * snapshot does not exist when the plan is made — which is exactly the
+   * difference between this and `restore_volumes`, where a person chose a
+   * copy that already existed.
+   */
+  z.strictObject({ kind: z.literal('arrive_volumes') }),
   z.strictObject({
     kind: z.literal('run_task'),
     command: z.array(z.string().max(4096)).min(1).max(64),

@@ -1,5 +1,13 @@
-import { VDeployError, type OperationName } from '@vdeploy/contracts';
-import { databases, projects, releases, servers } from '@vdeploy/db';
+import { readSpec, VDeployError, type OperationName } from '@vdeploy/contracts';
+import {
+  databases,
+  linkedDatabases,
+  placementCandidates,
+  projects,
+  releases,
+  servers,
+} from '@vdeploy/db';
+import { place } from '@vdeploy/core';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Handler, KernelDeps } from './context.js';
 
@@ -66,4 +74,56 @@ async function rollbackTargets(
     .where(and(eq(databases.serverId, serverId), isNull(databases.deletedAt)));
   for (const engine of engines) keep.add(engine.image);
   return [...keep];
+}
+
+/**
+ * What emptying a server would mean (§20 Servers).
+ *
+ * It moves nothing. Each app is a destructive change of its own — stopped,
+ * copied, put back somewhere else — and confirming them one at a time is
+ * the point: emptying a machine by accident should not be one click. So
+ * this answers with the plan a person would carry out, including the apps
+ * that cannot be moved and why.
+ */
+export async function drainPlan(
+  deps: Pick<KernelDeps, 'db'>,
+  orgId: string,
+  serverId: string,
+): Promise<{
+  moves: { projectId: string; name: string; toServerId: string; because: string }[];
+  stuck: { name: string; why: string }[];
+}> {
+  const here = await deps.db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.serverId, serverId), isNull(projects.deletedAt)));
+  const elsewhere = (await placementCandidates(deps.db, orgId)).filter((c) => c.id !== serverId);
+  const moves: { projectId: string; name: string; toServerId: string; because: string }[] = [];
+  const stuck: { name: string; why: string }[] = [];
+
+  for (const project of here) {
+    const linked = await linkedDatabases(deps.db, project.id);
+    if (linked.length > 0) {
+      stuck.push({
+        name: project.name,
+        why: `it reads ${linked.map((d) => d.name).join(', ')}, which lives on this server`,
+      });
+      continue;
+    }
+    try {
+      const placed = place(readSpec(project.spec), elsewhere);
+      moves.push({
+        projectId: project.id,
+        name: project.name,
+        toServerId: placed.serverId,
+        because: placed.because,
+      });
+    } catch (error) {
+      stuck.push({
+        name: project.name,
+        why: error instanceof Error ? error.message : 'there is nowhere for it to go',
+      });
+    }
+  }
+  return { moves, stuck };
 }

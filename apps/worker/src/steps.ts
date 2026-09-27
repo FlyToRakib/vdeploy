@@ -47,7 +47,9 @@ import {
   createDatabaseStep,
   importDumpStep,
   restoreBackupStep,
+  arriveVolumesStep,
   deleteVolumeStep,
+  moveToServerStep,
   restoreVolumesStep,
   runTaskStep,
   snapshotVolumesStep,
@@ -86,6 +88,12 @@ export interface ApplyState {
   args: Record<string, unknown>;
   projectId: string | null;
   releaseId: string | null;
+  /**
+   * The copy a move took before the app left its old server (§17.6), so
+   * the step that puts it back on the new one knows which it is. It does
+   * not exist when the plan is made, which is why it is carried here.
+   */
+  movedSnapshotId?: string;
   notes: string[];
 }
 
@@ -660,6 +668,10 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return restoreVolumesStep(deps, state, step.snapshotId);
     case 'delete_volume':
       return deleteVolumeStep(deps, state, step.volume);
+    case 'move_to_server':
+      return moveToServerStep(deps, state, step.serverId);
+    case 'arrive_volumes':
+      return arriveVolumesStep(deps, state);
     case 'restore_backup':
       return restoreBackupStep(deps, state, step.backupId, step.mode);
     case 'import_dump':
