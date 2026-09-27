@@ -28,6 +28,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
+	"github.com/FlyToRakib/vdeploy/agent/internal/reclaim"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/task"
 	"github.com/FlyToRakib/vdeploy/agent/internal/terminal"
@@ -69,6 +70,8 @@ type Client struct {
 	Terminals TerminalOpener
 	// Files looks inside a project's permanent folders; nil refuses to look.
 	Files FileReader
+	// Reclaim frees disk on this server; nil refuses to free anything.
+	Reclaim DiskReclaimer
 	// Logs streams a project's container output; nil refuses log requests.
 	Logs func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error
 
@@ -111,6 +114,11 @@ type BackupTaker interface {
 type FileReader interface {
 	List(ctx context.Context, req files.Request) files.Result
 	Send(ctx context.Context, req files.Request, each func([]byte) error) (int64, string, error)
+}
+
+// DiskReclaimer frees disk without freeing anything anyone could need (§18).
+type DiskReclaimer interface {
+	Run(ctx context.Context, req reclaim.Request) reclaim.Result
 }
 
 // TerminalOpener opens an interactive shell in one of a project's containers.
@@ -392,6 +400,17 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 			return err
 		}
 		c.startRestore(ctx, frame.Restore)
+		return nil
+	}
+	if head.Type == protocol.TypeReclaim {
+		var frame reclaimFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		go c.freeDisk(ctx, k, frame.Reclaim)
 		return nil
 	}
 	switch head.Type {
@@ -929,6 +948,35 @@ func (c *Client) forwardCheckResults(ctx context.Context, k *conn) {
 type artifactFrame struct {
 	protocol.Header
 	Artifact backup.ArtifactRequest `json:"artifact"`
+}
+
+type reclaimFrame struct {
+	protocol.Header
+	Reclaim reclaim.Request `json:"reclaim"`
+}
+
+type reclaimResultFrame struct {
+	protocol.Header
+	Result reclaim.Result `json:"result"`
+}
+
+// freeDisk frees what is safe to free and says what it actually freed. It
+// takes minutes on a full server, so the answer comes as its own frame
+// rather than holding anything open waiting for it.
+func (c *Client) freeDisk(ctx context.Context, k *conn, req reclaim.Request) {
+	result := reclaim.Result{
+		RequestID: req.RequestID,
+		At:        c.Now().UTC().Format(time.RFC3339),
+		Error:     "this agent cannot free disk on this server",
+	}
+	if c.Reclaim != nil {
+		result = c.Reclaim.Run(ctx, req)
+	}
+	if err := k.send(ctx, protocol.TypeReclaimResult, func(h protocol.Header) any {
+		return reclaimResultFrame{Header: h, Result: result}
+	}); err != nil {
+		c.Log.Warn("what was freed could not be reported", "request", req.RequestID, "error", err)
+	}
 }
 
 type filesFrame struct {

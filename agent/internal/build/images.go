@@ -53,6 +53,12 @@ func (i *Images) Add(id, buildID, projectID string) error {
 		return err
 	}
 	records[id] = imageRecord{BuildID: buildID, ProjectID: projectID, BuiltAt: time.Now().UTC()}
+	return i.save(records)
+}
+
+// save writes the record atomically: a half-written file would make every
+// locally built image unrunnable.
+func (i *Images) save(records map[string]imageRecord) error {
 	raw, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode built images: %w", err)
@@ -77,4 +83,36 @@ func (i *Images) Built(id, projectID string) bool {
 	}
 	record, ok := records[id]
 	return ok && record.ProjectID == projectID
+}
+
+// Ours reports whether this agent built the image, for any project. It is
+// what makes freeing disk safe: an image VDeploy made is VDeploy's to
+// remove, and an image somebody pulled themselves is not.
+func (i *Images) Ours(id string) bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	records, err := i.load()
+	if err != nil {
+		return false
+	}
+	_, ok := records[id]
+	return ok
+}
+
+// Forget drops images that are no longer on this server, so the record does
+// not grow forever with ids of things that are gone.
+func (i *Images) Forget(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	records, err := i.load()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		delete(records, id)
+	}
+	return i.save(records)
 }

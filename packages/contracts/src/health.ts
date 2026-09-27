@@ -32,9 +32,16 @@ export const DockerDisk = z.strictObject({
   imagesBytes: z.number().int().min(0),
   imagesReclaimableBytes: z.number().int().min(0),
   containersBytes: z.number().int().min(0),
+  /** Permanent folders VDeploy made, and nothing else. */
   volumesBytes: z.number().int().min(0),
+  /**
+   * What builds keep between runs: the Engine's own builder cache and the
+   * volume BuildKit writes to, which is where almost all of it actually is.
+   */
   buildCacheBytes: z.number().int().min(0),
   buildCacheReclaimableBytes: z.number().int().min(0),
+  /** Volumes on this server that VDeploy did not make, so the total adds up. */
+  otherBytes: z.number().int().min(0),
 });
 
 /**
@@ -50,6 +57,23 @@ export const OrphanVolume = z.strictObject({
   createdAt: z.string().max(64),
 });
 export type OrphanVolume = z.infer<typeof OrphanVolume>;
+
+/**
+ * What freeing disk actually freed (§18). Measured by asking Docker what
+ * its disk held before and after, never added up from what was deleted —
+ * an estimate of freed space is the one number nobody would forgive.
+ */
+export const ReclaimResult = z.strictObject({
+  requestId: z.string().max(64),
+  ok: z.boolean(),
+  imagesRemoved: z.number().int().min(0),
+  bytesFreed: z.number().int().min(0),
+  /** The more reassuring number: what was left alone. */
+  imagesKept: z.number().int().min(0),
+  at: z.iso.datetime({ offset: true }),
+  error: z.string().max(2048).optional(),
+});
+export type ReclaimResult = z.infer<typeof ReclaimResult>;
 
 export const ServerHealth = z.strictObject({
   at: z.iso.datetime({ offset: true }),

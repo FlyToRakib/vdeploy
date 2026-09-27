@@ -675,6 +675,65 @@ describe('agent channel', () => {
     fake.inbox.length = 0;
   });
 
+  it('names every version somebody could roll back to before freeing anything', async () => {
+    const { agent, fake, orgId } = await downloadServer();
+    const projectId = await seedProjectWithFolder(orgId, agent.serverId);
+    // Twelve deploys; only the last ten stay reachable by rolling back.
+    const spec = ApplicationSpec.parse({
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'shop' },
+      source: { type: 'image', image: 'nginx:1.27' },
+      build: { strategy: 'image' },
+    });
+    for (let version = 1; version <= 12; version++) {
+      await t.database.db.insert(releases).values({
+        id: newId('release'),
+        projectId,
+        version,
+        spec,
+        specHash: hashOf(spec),
+        image: `nginx@sha256:${String(version).padStart(64, '0')}`,
+        secretVersions: {},
+      });
+    }
+
+    const freeing = owner.request('POST', '/api/v1/operations/server.reclaim_safe', {
+      input: { serverId: agent.serverId },
+    });
+    const asked = await fake.next();
+    expect(asked.type).toBe('reclaim');
+    const { keep, requestId } = asked.reclaim as { keep: string[]; requestId: string };
+    expect(keep).toContain(`nginx@sha256:${'0'.repeat(62)}12`);
+    expect(keep).toContain(`nginx@sha256:${'0'.repeat(63)}3`);
+    // The two oldest are history, not rollback targets: their images may go.
+    expect(keep).not.toContain(`nginx@sha256:${'0'.repeat(63)}1`);
+    expect((await freeing).json<{ result: { started: boolean } }>().result.started).toBe(true);
+
+    // What it actually freed arrives in its own time and lands on the server.
+    fake.send({
+      ...fake.session.next('reclaim_result'),
+      result: {
+        requestId,
+        ok: true,
+        imagesRemoved: 7,
+        bytesFreed: 4 * 1024 ** 3,
+        imagesKept: 11,
+        at: new Date().toISOString(),
+      },
+    });
+    await expect
+      .poll(async () => {
+        const [row] = await t.database.db
+          .select({ lastReclaim: servers.lastReclaim })
+          .from(servers)
+          .where(eq(servers.id, agent.serverId));
+        return row?.lastReclaim?.bytesFreed;
+      })
+      .toBe(4 * 1024 ** 3);
+    fake.inbox.length = 0;
+  });
+
   it('refuses a folder this app does not have, without asking the server', async () => {
     const { agent, fake, orgId } = await downloadServer();
     const projectId = await seedProjectWithFolder(orgId, agent.serverId);

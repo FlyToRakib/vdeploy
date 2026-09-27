@@ -7,6 +7,7 @@ import type {
   ObservedReport,
   Plan,
   Reachability,
+  ReclaimResult,
   UrlSettings,
 } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
@@ -55,6 +56,8 @@ export const servers = pgTable('servers', {
   provider: text('provider'),
   /** The last check, from the control plane, that visitors can reach ports 80 and 443. */
   reachability: jsonb('reachability').$type<Reachability>(),
+  /** The last time disk was freed here, and what it actually freed (§18). */
+  lastReclaim: jsonb('last_reclaim').$type<ReclaimResult>(),
   createdAt: createdAt(),
 });
 

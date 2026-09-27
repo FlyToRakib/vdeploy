@@ -57,9 +57,12 @@ const (
 	TypeTerminalClose  = "terminal_close"
 	TypeTerminalOutput = "terminal_output"
 	TypeTerminalEnd    = "terminal_end"
-	TypeFiles          = "files"
-	TypeFilesResult    = "files_result"
-	TypeFileRead       = "file_read"
+	TypeReclaim        = "reclaim"
+	TypeReclaimResult  = "reclaim_result"
+
+	TypeFiles       = "files"
+	TypeFilesResult = "files_result"
+	TypeFileRead    = "file_read"
 
 	TypeLogs      = "logs"
 	TypeLogsStop  = "logs_stop"

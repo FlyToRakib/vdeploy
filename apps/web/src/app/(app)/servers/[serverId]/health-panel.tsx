@@ -1,5 +1,6 @@
 'use client';
 
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Status } from '@/components/ui/status';
 import { sizeWords } from '@/lib/databases';
@@ -20,8 +21,19 @@ export interface ServerHealth {
     volumesBytes: number;
     buildCacheBytes: number;
     buildCacheReclaimableBytes: number;
+    otherBytes: number;
   };
   orphans: { volume: string; projectId: string; sizeBytes: number; createdAt: string }[];
+}
+
+/** What freeing disk last freed here. */
+export interface LastReclaim {
+  ok: boolean;
+  imagesRemoved: number;
+  bytesFreed: number;
+  imagesKept: number;
+  at: string;
+  error?: string;
 }
 
 export interface ServerUsing {
@@ -53,9 +65,15 @@ function pressure(used: number, total: number) {
 export function HealthPanel({
   health,
   using,
+  lastReclaim,
+  onReclaim,
+  freeing,
 }: {
   health: ServerHealth | null;
   using: ServerUsing | null;
+  lastReclaim: LastReclaim | null;
+  onReclaim: () => void;
+  freeing: boolean;
 }) {
   if (!health && !using) {
     return (
@@ -113,6 +131,12 @@ export function HealthPanel({
               <dd>{sizeWords(docker.volumesBytes)}</dd>
               <dt className="text-muted-foreground">Running apps</dt>
               <dd>{sizeWords(docker.containersBytes)}</dd>
+              {docker.otherBytes > 0 && (
+                <>
+                  <dt className="text-muted-foreground">Not VDeploy’s</dt>
+                  <dd>{sizeWords(docker.otherBytes)} in volumes something else made</dd>
+                </>
+              )}
             </dl>
           )}
         </div>
@@ -142,6 +166,31 @@ export function HealthPanel({
               ' — almost gone. A disk out of these says “no space left on device” with space left on it.'}
           </dd>
         </dl>
+      )}
+
+      {docker && (
+        <div className="grid gap-2 border-t border-border pt-4">
+          <p className="text-sm text-muted-foreground">
+            Old images and build cache can go without touching anything you could go back to: the
+            last {String(10)} versions of every app stay, whatever else is freed.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="justify-self-start"
+            disabled={freeing}
+            onClick={onReclaim}
+          >
+            {freeing ? 'Freeing…' : 'Free what is not needed'}
+          </Button>
+          {lastReclaim && (
+            <p className="text-xs text-muted-foreground" title={lastReclaim.at}>
+              {lastReclaim.ok
+                ? `Last freed ${ago(lastReclaim.at)}: ${sizeWords(lastReclaim.bytesFreed)} from ${String(lastReclaim.imagesRemoved)} images, keeping ${String(lastReclaim.imagesKept)}.`
+                : `The last attempt, ${ago(lastReclaim.at)}, did not work: ${lastReclaim.error ?? 'the server did not say why'}.`}
+            </p>
+          )}
+        </div>
       )}
 
       {health && health.orphans.length > 0 && (

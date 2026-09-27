@@ -46,6 +46,7 @@ const report = (usedGb: number, reclaimableGb = 0) =>
               volumesBytes: 0,
               buildCacheBytes: 0,
               buildCacheReclaimableBytes: 0,
+              otherBytes: 0,
             },
             orphans: [],
           },

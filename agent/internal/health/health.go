@@ -39,14 +39,22 @@ type Load struct {
 	CPUs    int     `json:"cpus"`
 }
 
-// Docker is what the Engine is holding, from its own accounting.
+// Docker is what the Engine is holding, from its own accounting, sorted
+// into the four piles a person can act on differently.
 type Docker struct {
-	ImagesBytes                int64 `json:"imagesBytes"`
-	ImagesReclaimableBytes     int64 `json:"imagesReclaimableBytes"`
-	ContainersBytes            int64 `json:"containersBytes"`
-	VolumesBytes               int64 `json:"volumesBytes"`
+	ImagesBytes            int64 `json:"imagesBytes"`
+	ImagesReclaimableBytes int64 `json:"imagesReclaimableBytes"`
+	ContainersBytes        int64 `json:"containersBytes"`
+	// VolumesBytes is permanent folders VDeploy made, and nothing else.
+	VolumesBytes int64 `json:"volumesBytes"`
+	// BuildCacheBytes counts the Engine's own builder cache *and* the volume
+	// BuildKit writes to — which is where nearly all of it actually is, and
+	// which Docker files under volumes, where nobody would look for it.
 	BuildCacheBytes            int64 `json:"buildCacheBytes"`
 	BuildCacheReclaimableBytes int64 `json:"buildCacheReclaimableBytes"`
+	// OtherBytes is volumes on this server VDeploy did not make, so that the
+	// four numbers add up to the disk rather than nearly to it.
+	OtherBytes int64 `json:"otherBytes"`
 }
 
 // Orphan is a permanent folder whose app is gone. Deleting a project never
@@ -107,16 +115,25 @@ func (r *Reader) Read(ctx context.Context, live map[string]bool, now time.Time) 
 		ImagesBytes:                usage.ImagesBytes,
 		ImagesReclaimableBytes:     usage.ImagesReclaimableBytes,
 		ContainersBytes:            usage.ContainersBytes,
-		VolumesBytes:               usage.VolumesBytes,
 		BuildCacheBytes:            usage.BuildCacheBytes,
 		BuildCacheReclaimableBytes: usage.BuildCacheReclaimableBytes,
 	}
 	for _, volume := range usage.Volumes {
+		// The cache builds keep between runs is a volume, which would
+		// otherwise be filed under "permanent folders" — where nobody
+		// looking for gigabytes of build cache would ever find it.
+		if volume.Name == docker.BuildCacheVolume {
+			report.Docker.BuildCacheBytes += volume.SizeBytes
+			report.Docker.BuildCacheReclaimableBytes += volume.SizeBytes
+			continue
+		}
 		// Only folders VDeploy made: another tool's data on this server is
 		// not VDeploy's to count, name, or offer to delete.
 		if volume.Labels[compose.ManagedLabel] != "true" {
+			report.Docker.OtherBytes += volume.SizeBytes
 			continue
 		}
+		report.Docker.VolumesBytes += volume.SizeBytes
 		project := volume.Labels[compose.ProjectLabel]
 		if project == "" || live[project] || volume.InUse > 0 {
 			continue

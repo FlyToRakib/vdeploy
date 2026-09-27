@@ -139,6 +139,16 @@ interface FileRequest {
   done: (result: FileListResult) => void;
 }
 
+/** Where disk is freed: the server that is full. */
+export interface ReclaimSource {
+  /**
+   * Asks a server to free disk. It returns as soon as the server has been
+   * asked, because freeing takes minutes on a full disk; what was actually
+   * freed arrives later and lands on the server's record.
+   */
+  reclaim(serverId: string, keep: readonly string[]): void;
+}
+
 /** Where a folder's contents come from: the agent holding the folder. */
 export interface FileSource {
   /**
@@ -232,7 +242,9 @@ export interface LogSource {
  * records acks and observed state. Agent input is validated like any other
  * untrusted input: a compromised server cannot hurt the control plane.
  */
-export class Gateway implements LogSource, ArtifactSource, TerminalSource, FileSource {
+export class Gateway
+  implements LogSource, ArtifactSource, TerminalSource, FileSource, ReclaimSource
+{
   private readonly connections = new Map<string, Connection>();
   private readonly logRequests = new Map<string, LogRequest>();
   private readonly artifactRequests = new Map<string, ArtifactTransfer>();
@@ -848,6 +860,25 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource, FileS
   }
 
   /**
+   * Asks one server to free disk (§18). The keep list is the part only the
+   * control plane knows: every image a person could still roll back to.
+   * Nothing waits for the answer — it can take minutes, and it arrives as
+   * its own frame.
+   */
+  reclaim(serverId: string, keep: readonly string[]): void {
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      throw new VDeployError('unavailable', 'This server is offline, so nothing can be freed on it');
+    }
+    connection.socket.send(
+      seal(this.deps.key, {
+        ...connection.session.next('reclaim'),
+        reclaim: { requestId: randomBytes(16).toString('base64url'), keep: [...keep] },
+      }),
+    );
+  }
+
+  /**
    * Lists one of a project's permanent folders (§20 Runtime). A listing is a
    * question, so it is asked and answered: nothing is stored about it, and
    * an agent that has gone quiet means an empty answer with a reason rather
@@ -1254,6 +1285,12 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource, FileS
         return;
       }
       request.onChunk(Buffer.from(frame.data, 'base64'));
+    } else if (frame.type === 'reclaim_result') {
+      // Only the server that was asked answers for itself.
+      await db
+        .update(servers)
+        .set({ lastReclaim: frame.result })
+        .where(eq(servers.id, serverId));
     } else if (frame.type === 'files_result') {
       // Only the server a listing went to may answer it.
       const request = this.fileRequests.get(frame.result.requestId);

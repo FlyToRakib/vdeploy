@@ -131,3 +131,78 @@ func readDiskUsage(raw dfBody) DiskUsage {
 	}
 	return out
 }
+
+// Image is one image on this server, as the Engine lists it.
+type Image struct {
+	ID        string
+	RepoTags  []string
+	SizeBytes int64
+}
+
+// ListImages lists every image on this server, tagged or not.
+func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
+	var raw []struct {
+		ID       string   `json:"Id"`
+		RepoTags []string `json:"RepoTags"`
+		Size     int64    `json:"Size"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/images/json", url.Values{"all": {"0"}}, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Image, 0, len(raw))
+	for _, r := range raw {
+		tags := make([]string, 0, len(r.RepoTags))
+		for _, tag := range r.RepoTags {
+			// Docker writes "<none>:<none>" for an image with no name.
+			if tag != "" && tag != "<none>:<none>" {
+				tags = append(tags, tag)
+			}
+		}
+		out = append(out, Image{ID: r.ID, RepoTags: tags, SizeBytes: r.Size})
+	}
+	return out, nil
+}
+
+// ImagesOfContainers maps every container on this server — running, stopped
+// or merely created — to the image it was made from. An image any of them
+// references is in use, whoever created the container.
+func (c *Client) ImagesOfContainers(ctx context.Context) (map[string]bool, error) {
+	var raw []struct {
+		ImageID string `json:"ImageID"`
+		Image   string `json:"Image"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/containers/json", url.Values{"all": {"1"}}, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, r := range raw {
+		if r.ImageID != "" {
+			out[r.ImageID] = true
+		}
+		if r.Image != "" {
+			out[r.Image] = true
+		}
+	}
+	return out, nil
+}
+
+// RemoveImage deletes one image by id. Force is never set: an image a
+// container still references must stay, and the Engine saying so is one
+// more check this does not have to get right by itself.
+func (c *Client) RemoveImage(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/images/"+url.PathEscape(id),
+		url.Values{"force": {"false"}, "noprune": {"false"}}, nil, nil)
+}
+
+// PruneBuildCache frees the Engine's own builder cache — derived data, and
+// never an image anything could be rolled back to. `all` false keeps what a
+// build is using right now.
+func (c *Client) PruneBuildCache(ctx context.Context) (int64, error) {
+	var out struct {
+		SpaceReclaimed int64 `json:"SpaceReclaimed"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/build/prune", url.Values{"all": {"false"}}, nil, &out); err != nil {
+		return 0, err
+	}
+	return out.SpaceReclaimed, nil
+}

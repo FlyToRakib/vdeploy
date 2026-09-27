@@ -6,6 +6,7 @@ import type {
   ArtifactSource,
   FileSource,
   LogSource,
+  ReclaimSource,
   TerminalSource,
 } from '../agents/gateway.js';
 import type { PortProbe } from '../agents/reachability.js';
@@ -35,6 +36,8 @@ export interface KernelDeps {
   artifacts?: ArtifactSource;
   /** Lists what is in an app’s permanent folders (§20 Runtime); absent in tests. */
   files?: FileSource;
+  /** Frees disk on a server that is filling up (§18); absent in tests. */
+  reclaim?: ReclaimSource;
   /** Whether a server's agent is on this connection right now; absent in tests. */
   connected?: (serverId: string) => boolean;
   /** Connects to a server's web ports from here; tests replace it. */

@@ -152,6 +152,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     artifacts: gateway,
     terminals: gateway,
     files: gateway,
+    reclaim: gateway,
     connected: (serverId: string) => gateway.isConnected(serverId),
     probe,
     ...(github ? { github } : {}),

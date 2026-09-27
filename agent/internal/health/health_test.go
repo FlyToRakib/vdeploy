@@ -43,7 +43,33 @@ func usage() docker.DiskUsage {
 			{Name: "vd-gone-uploads", SizeBytes: 2 << 30, Labels: managed(gone), CreatedAt: "2026-01-01T00:00:00Z"},
 			// Somebody else's data on the same server.
 			{Name: "postgres-of-another-tool", SizeBytes: 9 << 30, Labels: map[string]string{}},
+			// Where almost all of the build cache actually lives.
+			{Name: docker.BuildCacheVolume, SizeBytes: 5 << 30, Labels: map[string]string{"io.vdeploy.infra": "build"}},
 		},
+	}
+}
+
+func TestTheBuildCacheIsCountedAsBuildCacheNotAsSomebodysFiles(t *testing.T) {
+	// Docker files BuildKit's cache under volumes, which is the last place
+	// somebody hunting for gigabytes of build cache would look.
+	r := reader(t, &fakeEngine{usage: usage()})
+	report := r.Read(context.Background(), map[string]bool{live: true}, time.Now())
+
+	if report.Docker.BuildCacheBytes != 7<<30 {
+		t.Fatalf("build cache = %d GB", report.Docker.BuildCacheBytes>>30)
+	}
+	// Only the two folders VDeploy made, never the other tool's nine.
+	if report.Docker.VolumesBytes != 3<<30 {
+		t.Fatalf("permanent folders = %d GB", report.Docker.VolumesBytes>>30)
+	}
+	if report.Docker.OtherBytes != 9<<30 {
+		t.Fatalf("other = %d GB", report.Docker.OtherBytes>>30)
+	}
+	// And the build cache volume is never offered as somebody's lost folder.
+	for _, orphan := range report.Orphans {
+		if orphan.Volume == docker.BuildCacheVolume {
+			t.Fatal("the build cache was offered as an app's folder")
+		}
 	}
 }
 

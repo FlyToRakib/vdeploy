@@ -28,6 +28,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
 	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
+	"github.com/FlyToRakib/vdeploy/agent/internal/reclaim"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
 	"github.com/FlyToRakib/vdeploy/agent/internal/sealed"
@@ -276,6 +277,13 @@ func serve(configPath string, log *slog.Logger) error {
 			// Looking at what an app has written (§20 Runtime), confined to
 			// the folder asked for by the kernel rather than by a check.
 			Files: &files.Reader{Engine: engine, Log: log},
+			// Freeing disk without freeing a rollback target (§18).
+			Reclaim: &reclaim.Runner{
+				Engine: engine,
+				Ours:   images.Ours,
+				Forget: images.Forget,
+				Log:    log,
+			},
 			Tasks: &task.Runner{
 				Engine:   engine,
 				Projects: reconciler.Project,

@@ -13,7 +13,12 @@ import { Status } from '@/components/ui/status';
 import { formText } from '@/lib/forms';
 import { OperationError, query, runOperation } from '@/lib/operations';
 import { ago, serverHealth, splitCommand } from '@/lib/servers';
-import { HealthPanel, type ServerHealth, type ServerUsing } from './health-panel';
+import {
+  HealthPanel,
+  type LastReclaim,
+  type ServerHealth,
+  type ServerUsing,
+} from './health-panel';
 
 interface Reachability {
   status: 'reachable' | 'partly' | 'blocked' | 'unknown';
@@ -37,6 +42,7 @@ interface ServerStatus {
   /** What the agent last said the machine is made of (§18); absent until it has looked. */
   health: ServerHealth | null;
   using: ServerUsing | null;
+  lastReclaim: LastReclaim | null;
 }
 
 const REACH_HEALTH = {
@@ -65,6 +71,7 @@ export function ServerDetail({ serverId }: { serverId: string }) {
   const [capacity, setCapacity] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [freeing, setFreeing] = useState(false);
   const [command, setCommand] = useState<string | null>(null);
   const [editingAddress, setEditingAddress] = useState(false);
   useCrumbName(serverId, server?.name);
@@ -98,6 +105,25 @@ export function ServerDetail({ serverId }: { serverId: string }) {
       live.current = false;
     };
   }, [serverId, version]);
+
+  /**
+   * Freeing takes minutes on a full disk, so the server answers in its own
+   * time: the request returns as soon as it has been asked, and the result
+   * arrives on the server's record, which this reads again shortly after.
+   */
+  async function freeDisk() {
+    setFreeing(true);
+    try {
+      await runOperation('server.reclaim_safe', { serverId });
+      setTimeout(() => {
+        setFreeing(false);
+        reload();
+      }, 20_000);
+    } catch (err) {
+      setFreeing(false);
+      setError(message(err, 'Nothing could be freed.'));
+    }
+  }
 
   async function checkReachability() {
     setChecking(true);
@@ -289,7 +315,13 @@ export function ServerDetail({ serverId }: { serverId: string }) {
           <h2 className="font-medium">Room for apps</h2>
           <p className="text-sm">{capacity ?? 'Known once the agent connects.'}</p>
         </Card>
-        <HealthPanel health={server.health} using={server.using} />
+        <HealthPanel
+          health={server.health}
+          using={server.using}
+          lastReclaim={server.lastReclaim}
+          freeing={freeing}
+          onReclaim={() => void freeDisk()}
+        />
         <Card className="grid content-start gap-2 md:col-span-2">
           <h2 className="font-medium">Agent</h2>
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">

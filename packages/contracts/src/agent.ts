@@ -12,7 +12,7 @@ import { BuildResult } from './builds.js';
 import { DesiredDatabase, ObservedDatabase } from './databases.js';
 import { ReplicaEvidence } from './diagnosis.js';
 import { FileListResult } from './files.js';
-import { ServerHealth } from './health.js';
+import { ReclaimResult, ServerHealth } from './health.js';
 import { LogLine } from './logs.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
@@ -270,6 +270,12 @@ export const AgentFrame = z.discriminatedUnion('type', [
     ...FrameHeader,
     type: z.literal('files_result'),
     result: FileListResult,
+  }),
+  /** What freeing disk on this server actually freed (§18). */
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('reclaim_result'),
+    result: ReclaimResult,
   }),
   z.strictObject({
     ...FrameHeader,
