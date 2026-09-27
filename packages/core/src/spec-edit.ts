@@ -126,7 +126,8 @@ export function specAfter(
     | 'cron.create'
     | 'cron.update'
     | 'cron.delete'
-    | 'storage.make_persistent',
+    | 'storage.make_persistent'
+    | SectionEdit,
   args: Record<string, unknown>,
   current: ApplicationSpec | null,
 ): ApplicationSpec {
@@ -156,7 +157,135 @@ export function specAfter(
     return setCron(current, (args as OperationArgs<'cron.create'>).cron);
   }
   if (name === 'cron.delete') return removeCron(current, String(args.name));
+  if (isSectionEdit(name)) return editSection(name, args, current);
   return name === 'env.set'
     ? setEnv(current, args as OperationArgs<'env.set'>)
     : unsetEnv(current, args as OperationArgs<'env.unset'>);
+}
+
+/**
+ * Operations that change exactly one part of the spec (§24).
+ *
+ * Each of these could be done with `project.update_spec` and the whole
+ * document, and that is the point of having them separately: an operation
+ * that can only change the health checks is one the AI can be trusted with
+ * where editing the whole spec would not be, and one whose proposal a
+ * person can read in a second. The spec they produce goes through the same
+ * validation, the same gate and the same deploy as any other.
+ */
+export type SectionEdit =
+  | 'domain.add'
+  | 'domain.remove'
+  | 'tls.configure'
+  | 'health.configure'
+  | 'resources.limits'
+  | 'deploy.strategy'
+  | 'scaling.rules'
+  | 'network.middleware'
+  | 'loadbalancer.configure'
+  | 'volume.create';
+
+export const SECTION_EDITS: readonly SectionEdit[] = [
+  'domain.add',
+  'domain.remove',
+  'tls.configure',
+  'health.configure',
+  'resources.limits',
+  'deploy.strategy',
+  'scaling.rules',
+  'network.middleware',
+  'loadbalancer.configure',
+  'volume.create',
+];
+
+export function isSectionEdit(name: string): name is SectionEdit {
+  return (SECTION_EDITS as readonly string[]).includes(name);
+}
+
+/** An app with no port has no network section to put a domain in. */
+function network(current: ApplicationSpec): NonNullable<ApplicationSpec['network']> {
+  if (!current.network) {
+    throw new VDeployError(
+      'conflict',
+      'This app is not reachable from the web: give it a port before giving it a domain',
+    );
+  }
+  return current.network;
+}
+
+function editSection(
+  name: SectionEdit,
+  args: Record<string, unknown>,
+  current: ApplicationSpec,
+): ApplicationSpec {
+  switch (name) {
+    case 'domain.add': {
+      const host = String(args.host);
+      const net = network(current);
+      if (net.domains.some((d) => d.host === host)) {
+        throw new VDeployError('conflict', `${host} is already attached to this app`);
+      }
+      return valid({ ...current, network: { ...net, domains: [...net.domains, { host }] } });
+    }
+    case 'domain.remove': {
+      const host = String(args.host);
+      const net = network(current);
+      if (!net.domains.some((d) => d.host === host)) {
+        throw new VDeployError('not_found', `${host} is not attached to this app`);
+      }
+      return valid({
+        ...current,
+        network: { ...net, domains: net.domains.filter((d) => d.host !== host) },
+      });
+    }
+    case 'tls.configure': {
+      const host = String(args.host);
+      const net = network(current);
+      const domain = net.domains.find((d) => d.host === host);
+      if (!domain) throw new VDeployError('not_found', `${host} is not attached to this app`);
+      return valid({
+        ...current,
+        network: {
+          ...net,
+          domains: net.domains.map((d) =>
+            d.host === host
+              ? { ...d, tls: { ...d.tls, challenge: args.challenge as 'http-01' | 'dns-01' } }
+              : d,
+          ),
+        },
+      });
+    }
+    case 'health.configure':
+      return valid({ ...current, health: args.health });
+    case 'resources.limits':
+      return valid({
+        ...current,
+        runtime: { ...current.runtime, resources: args.resources },
+      });
+    case 'deploy.strategy':
+      return valid({ ...current, deploy: args.deploy });
+    case 'scaling.rules':
+      return valid({ ...current, scaling: args.scaling });
+    case 'network.middleware':
+      return valid({ ...current, network: { ...network(current), middleware: args.middleware } });
+    case 'loadbalancer.configure':
+      return valid({
+        ...current,
+        network: { ...network(current), loadBalancer: args.loadBalancer },
+      });
+    case 'volume.create': {
+      const volume = args.volume as { name: string; mountPath: string };
+      const volumes = current.runtime.volumes;
+      if (volumes.some((v) => v.name === volume.name || v.mountPath === volume.mountPath)) {
+        throw new VDeployError(
+          'conflict',
+          `This app already keeps ${volume.mountPath}`,
+        );
+      }
+      return valid({
+        ...current,
+        runtime: { ...current.runtime, volumes: [...volumes, volume] },
+      });
+    }
+  }
 }

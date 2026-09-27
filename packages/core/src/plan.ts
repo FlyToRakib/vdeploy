@@ -18,6 +18,7 @@ import { hashOf } from './canonical.js';
 import { diffSpecs, removedVolumes } from './diff.js';
 import { describeCron } from './cron.js';
 import { defaultEnvKey, engineProfile } from './databases.js';
+import type { SectionEdit } from './spec-edit.js';
 import { templateSecrets } from './templates.js';
 import { checkFits, footprint, type ServerBudget } from './governor.js';
 import { maxTier } from './risk.js';
@@ -251,6 +252,24 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       context,
     );
   },
+  /*
+   * One section of the spec each (§24). They exist separately from
+   * `project.update_spec` because an operation that can only change the
+   * health checks is one the AI can be granted where editing the whole
+   * document would not be, and one whose proposal a person reads in a
+   * second. Every one lands in the same place: a new spec, planned,
+   * approved and deployed like any other.
+   */
+  'domain.add': sectionEdit('domain.add'),
+  'domain.remove': sectionEdit('domain.remove'),
+  'tls.configure': sectionEdit('tls.configure'),
+  'health.configure': sectionEdit('health.configure'),
+  'resources.limits': sectionEdit('resources.limits'),
+  'deploy.strategy': sectionEdit('deploy.strategy'),
+  'scaling.rules': sectionEdit('scaling.rules'),
+  'network.middleware': sectionEdit('network.middleware'),
+  'loadbalancer.configure': sectionEdit('loadbalancer.configure'),
+  'volume.create': sectionEdit('volume.create'),
   'storage.make_persistent': (args, context) => {
     const project = requireProject(context);
     return specChange(
@@ -747,6 +766,20 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     };
   },
 };
+
+/**
+ * A planner for an operation that replaces one part of the spec. The
+ * governor still checks it fits, the diff is still shown field by field,
+ * and unsaved files are still counted as at risk — because changing the
+ * memory limit replaces the containers exactly as changing the image does.
+ */
+function sectionEdit<N extends SectionEdit>(name: N): Planner<N> {
+  return (args, context) => {
+    const project = requireProject(context);
+    const asked = args as Record<string, unknown>;
+    return specChange(project, specAfter(name, asked, project.spec), 'sensitive', context);
+  };
+}
 
 /** Whether an operation changes what runs, and so goes through planning and approval. */
 export function isPlannable(name: OperationName): boolean {

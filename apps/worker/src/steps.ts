@@ -16,6 +16,7 @@ import {
   generateSecret,
   hashOf,
   installationToken,
+  SECTION_EDITS,
   specAfter,
   tarballPath,
   type GithubAppConfig,
@@ -137,6 +138,13 @@ async function chooseServer(deps: StepDeps, state: ApplyState, spec: Application
   return server.id;
 }
 
+/**
+ * Every operation whose plan writes a new spec. It is a list rather than a
+ * check because the worker must never be talked into rewriting a spec by an
+ * operation that was not meant to — but a planner that produces an
+ * `update_spec` step and is missing from here fails at the very last
+ * moment, so `isSpecEdit` in core is what decides and this only guards.
+ */
 const SPEC_EDITS = new Set([
   'project.create',
   'project.update_spec',
@@ -144,6 +152,10 @@ const SPEC_EDITS = new Set([
   'env.unset',
   'project.deploy_upload',
   'storage.make_persistent',
+  'cron.create',
+  'cron.update',
+  'cron.delete',
+  ...SECTION_EDITS,
 ]);
 
 async function updateSpec(deps: StepDeps, state: ApplyState) {
