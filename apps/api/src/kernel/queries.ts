@@ -3,6 +3,7 @@ import {
   describeCapacity,
   diagnoseBuild,
   footprint,
+  readCompose,
   TEMPLATES,
   templateLink,
 } from '@vdeploy/core';
@@ -161,6 +162,12 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         afterwards: t.afterwards,
       })),
     ),
+  /**
+   * What bringing a compose file across would make (§15). A reading, not a
+   * change: it creates nothing, and the list of what will *not* come over
+   * is the part worth reading.
+   */
+  'compose.read': ({ args }) => Promise.resolve(readCompose(String(args.file))),
   'server.status': async ({ deps, args }) => {
     const [row] = await deps.db
       .select({

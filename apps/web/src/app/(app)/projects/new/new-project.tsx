@@ -1,6 +1,6 @@
 'use client';
 
-import { Blocks, Box, FolderUp, GitBranch, Server } from 'lucide-react';
+import { Blocks, Box, FileStack, FolderUp, GitBranch, Server } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -17,10 +17,11 @@ import { followPlan, OperationError, query, runOperation, type PlanView } from '
 import { projectName, type DetectionSummary } from '@/lib/projects';
 import type { ServerSummary } from '@/lib/servers';
 import { GithubSource } from './github-source';
+import { ComposeSource, ComposeSummary, type ComposeRead } from './compose-source';
 import { TemplateNote, TemplateSource, type TemplateSummary } from './template-source';
 import { UploadSource } from './upload-source';
 
-type SourceKind = 'template' | 'upload' | 'github' | 'image';
+type SourceKind = 'template' | 'upload' | 'github' | 'image' | 'compose';
 
 /** A source the person chose, ready to become a project. */
 export interface ReadySource {
@@ -31,6 +32,8 @@ export interface ReadySource {
   secretsLeftOut: string[];
   /** Set when the person picked an app from the catalog (§15). */
   template?: TemplateSummary;
+  /** Set when this came out of a compose file: its whole spec, already read. */
+  compose?: { name: string; spec: Record<string, unknown> };
 }
 
 const SOURCES: { kind: SourceKind; icon: typeof FolderUp; title: string; text: string }[] = [
@@ -57,6 +60,12 @@ const SOURCES: { kind: SourceKind; icon: typeof FolderUp; title: string; text: s
     icon: Box,
     title: 'Run an image',
     text: 'A Docker image you already have.',
+  },
+  {
+    kind: 'compose',
+    icon: FileStack,
+    title: 'Bring a compose file',
+    text: 'Moving from somewhere else? Read your docker-compose.yml.',
   },
 ];
 
@@ -116,6 +125,7 @@ export function NewProject() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
+  const [compose, setCompose] = useState<ComposeRead | null>(null);
 
   useEffect(() => {
     query<ServerSummary[]>('server.list').then(
@@ -171,16 +181,18 @@ export function NewProject() {
     setError(null);
     const name = formText(form, 'name');
     const template = ready.template;
-    const spec = {
-      apiVersion: 'vdeploy/v1',
-      kind: 'Application',
-      metadata: { name },
-      source: ready.source,
-      build: ready.build,
-      // A template already knows its port, its folders and its settings;
-      // asking a person for them is asking them to get it wrong.
-      ...(template ? {} : { network: { containerPort: Number(formText(form, 'port')) } }),
-    };
+    const spec = ready.compose
+      ? { ...ready.compose.spec, metadata: { name } }
+      : {
+          apiVersion: 'vdeploy/v1',
+          kind: 'Application',
+          metadata: { name },
+          source: ready.source,
+          build: ready.build,
+          // A template already knows its port, its folders and its settings;
+          // asking a person for them is asking them to get it wrong.
+          ...(template ? {} : { network: { containerPort: Number(formText(form, 'port')) } }),
+        };
     try {
       const outcome = await stepUp(() => runOperation('project.create', { spec, serverId }));
       if (outcome.status === 'done') return;
@@ -263,6 +275,24 @@ export function NewProject() {
           ))}
         </div>
         {kind === 'template' && !ready && <TemplateSource onReady={setReady} />}
+        {kind === 'compose' && !ready && (
+          <ComposeSource
+            onRead={(read) => {
+              setCompose(read);
+              const first = read.apps[0];
+              if (first) {
+                setReady({
+                  source: (first.spec as { source: Record<string, unknown> }).source,
+                  build: { strategy: 'image' },
+                  name: first.name,
+                  detection: null,
+                  secretsLeftOut: [],
+                  compose: first,
+                });
+              }
+            }}
+          />
+        )}
         {kind === 'upload' && !ready && <UploadSource serverId={serverId} onReady={setReady} />}
         {kind === 'github' && !ready && <GithubSource onReady={setReady} />}
         {kind === 'image' && !ready && <ImageSource onReady={setReady} />}
@@ -301,6 +331,7 @@ export function NewProject() {
               </p>
             )}
             {ready.template && <TemplateNote template={ready.template} />}
+            {compose && <ComposeSummary read={compose} />}
             <form action={create} className="grid gap-4 sm:grid-cols-2">
               <Field
                 label="Name"
@@ -310,7 +341,7 @@ export function NewProject() {
                 pattern="[a-z]([a-z0-9-]{0,61}[a-z0-9])?"
                 hint="It becomes part of the address."
               />
-              {!ready.template && (
+              {!ready.template && !ready.compose && (
                 <Field
                   label="Port the app listens on"
                   name="port"

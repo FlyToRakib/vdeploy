@@ -15,7 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@vdeploy/contracts": "workspace:*"
+    "@vdeploy/contracts": "workspace:*",
+    "yaml": "^2.9.1"
   },
   "files": [
     "dist"

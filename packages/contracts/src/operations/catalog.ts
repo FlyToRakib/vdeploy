@@ -118,6 +118,13 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'compose.read',
+    'org',
+    'config',
+    'Read a docker-compose file and say what bringing it across would make',
+    obj({ file: z.string().min(1).max(256_000) }),
+  ),
+  query(
     'template.list',
     'org',
     'config',
