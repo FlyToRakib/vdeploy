@@ -1,4 +1,12 @@
-import { doublePrecision, index, bigint, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  doublePrecision,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+} from 'drizzle-orm/pg-core';
 import { projects, servers } from './kernel.js';
 
 /**
@@ -33,6 +41,8 @@ export const metricSamples = pgTable(
      * the total is what is kept: a rate computed on the server would need a
      * window, and a window is a second clock to disagree with.
      */
+    /** How many copies these numbers were summed across, for a per-copy rate. */
+    replicas: integer('replicas').notNull().default(1),
     requests: bigint('requests', { mode: 'number' }).notNull().default(0),
     failures: bigint('failures', { mode: 'number' }).notNull().default(0),
   },

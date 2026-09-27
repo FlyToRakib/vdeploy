@@ -4,6 +4,7 @@ import { parseEnv } from '@vdeploy/contracts';
 import {
   APPLY_QUEUE,
   connect,
+  createApplyQueue,
   notifyOfflineServers,
   pruneEvents,
   pruneMetrics,
@@ -16,6 +17,7 @@ import { createTransport } from 'nodemailer';
 import { pino } from 'pino';
 import { z } from 'zod';
 import { applyPlan } from './apply.js';
+import { runAutoscaling } from './autoscale-loop.js';
 import { runDueBackups, runDueVerifications } from './backup-schedule.js';
 import { runDueCrons } from './cron-schedule.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
@@ -64,6 +66,8 @@ const config = parseEnv(
 setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 const log = pino({ level: config.LOG_LEVEL });
+// The worker queues work for itself when a rule fires (§14).
+const applyQueue = createApplyQueue(config.DATABASE_URL);
 const { db, close } = connect(config.DATABASE_URL);
 const github =
   config.GITHUB_APP_ID && config.GITHUB_APP_PRIVATE_KEY_FILE
@@ -166,6 +170,29 @@ const cronTimer = setInterval(() => {
     });
 }, 60_000);
 
+// Rules that resize an app without anybody watching (§14). Once a minute,
+// like the other schedules: a rule that has held for five minutes has not
+// stopped holding in the last thirty seconds.
+let scaling = false;
+const scaleTimer = setInterval(() => {
+  if (scaling) return;
+  scaling = true;
+  runAutoscaling({
+    db,
+    queue: applyQueue,
+    now: () => new Date(),
+    logError: (err, projectId) => {
+      log.error({ err, projectId }, 'an autoscaling rule could not be applied');
+    },
+  })
+    .catch((err: unknown) => {
+      log.error({ err }, 'autoscaling round failed');
+    })
+    .finally(() => {
+      scaling = false;
+    });
+}, 60_000);
+
 // Proving those backups by putting them back (§17.5). Checked every ten
 // minutes: a weekly check does not need a closer watch than that.
 let verifying = false;
@@ -243,6 +270,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     clearInterval(backupTimer);
     clearInterval(verifyTimer);
     clearInterval(cronTimer);
+    clearInterval(scaleTimer);
     clearInterval(pruneTimer);
     clearInterval(notifyTimer);
     clearInterval(offlineTimer);

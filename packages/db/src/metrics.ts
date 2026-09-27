@@ -1,7 +1,7 @@
 import type { ObservedReport } from '@vdeploy/contracts';
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
-import { metricSamples } from './schema/index.js';
+import { auditLog, metricSamples, projects } from './schema/index.js';
 
 export type MetricSample = typeof metricSamples.$inferSelect;
 
@@ -42,6 +42,7 @@ export async function recordUsage(
       diskTotalBytes: usage.server.diskTotalBytes,
       rxBytes: 0,
       txBytes: 0,
+      replicas: 1,
       requests: 0,
       failures: 0,
     },
@@ -56,6 +57,7 @@ export async function recordUsage(
       diskTotalBytes: null,
       rxBytes: project.rxBytes,
       txBytes: project.txBytes,
+      replicas: Math.max(1, project.replicas),
       requests: whole(project.requests),
       failures: whole(project.failures),
     })),
@@ -131,4 +133,46 @@ export function downsample(samples: MetricSample[], points: number): MetricSampl
     if (peak) out.push(peak);
   }
   return out;
+}
+
+/**
+ * Apps whose rules could fire: running, deployed, and not deleted. Whether
+ * they actually have rules is in the spec, read where the rules are
+ * evaluated rather than in SQL.
+ */
+export async function scalableProjects(tx: Executor) {
+  return tx
+    .select({
+      id: projects.id,
+      orgId: projects.orgId,
+      serverId: projects.serverId,
+      spec: projects.spec,
+    })
+    .from(projects)
+    .where(
+      and(
+        isNull(projects.deletedAt),
+        eq(projects.running, true),
+        isNotNull(projects.currentReleaseId),
+      ),
+    );
+}
+
+/**
+ * When this app was last resized, by anybody.
+ *
+ * Read from the audit log rather than kept in a column of its own: the
+ * entry has to exist anyway, and one place holding the answer cannot
+ * disagree with another. That it counts a *person's* change too is the
+ * behaviour wanted, not a side effect — an app somebody just resized by
+ * hand should not be resized again by a rule a minute later.
+ */
+export async function lastScaledAt(tx: Executor, projectId: string): Promise<Date | null> {
+  const [row] = await tx
+    .select({ at: auditLog.occurredAt })
+    .from(auditLog)
+    .where(and(eq(auditLog.target, projectId), eq(auditLog.action, 'project.scale')))
+    .orderBy(desc(auditLog.occurredAt))
+    .limit(1);
+  return row?.at ?? null;
 }

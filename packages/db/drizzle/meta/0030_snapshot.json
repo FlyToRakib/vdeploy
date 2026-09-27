@@ -1,5 +1,5 @@
 {
-  "id": "c458b635-f5a8-47f5-ad0e-771867bbd169",
+  "id": "59c9cfbe-c5dd-4c03-b197-404cb0c5f5d3",
   "prevId": "d63e60f0-239c-4883-9ab3-98cb47e4cceb",
   "version": "7",
   "dialect": "postgresql",
@@ -5142,6 +5142,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "replicas": {
+          "name": "replicas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "requests": {
           "name": "requests",

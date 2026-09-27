@@ -19,3 +19,4 @@ export * from './github.js';
 export * from './project-status.js';
 export * from './templates.js';
 export * from './compose.js';
+export * from './autoscale.js';

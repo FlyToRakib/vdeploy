@@ -141,6 +141,7 @@ describe('thinning a series so a graph can draw it', () => {
     serverId: 'srv_1',
     projectId: 'prj_1',
     at: new Date(2026, 8, 26, 12, minute),
+    replicas: 1,
     requests: 0,
     failures: 0,
     cpuPercent: cpu,
