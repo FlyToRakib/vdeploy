@@ -89,6 +89,7 @@ export async function serverBudget(
       ? { memoryBytes: server.capacity.memoryBytes, cpus: server.capacity.cpus }
       : null,
     committed,
+    role: server.role,
   };
 }
 
@@ -154,6 +155,21 @@ function linkedTo(world: PlanWorld, databaseId: string | null): boolean {
   return databaseId !== null && (world.linkedDatabases ?? []).some((d) => d.id === databaseId);
 }
 
+/**
+ * What the governor should weigh this plan against: the server it names,
+ * or the one the app already runs on. A move that named another server and
+ * was checked against the one it is leaving is a move that passes every
+ * time and then fails at the last step of the apply.
+ */
+async function budgetFor(
+  db: Database,
+  row: { id: string; serverId: string | null },
+  named: string | null,
+): Promise<ServerBudget | null> {
+  if (named && named !== row.serverId) return serverBudget(db, named, null);
+  return row.serverId ? serverBudget(db, row.serverId, row.id) : null;
+}
+
 export async function loadPlanWorld(
   db: Database,
   projectId: string | null,
@@ -192,9 +208,16 @@ export async function loadPlanWorld(
       currentReleaseId: row.currentReleaseId as Id<'release'> | null,
       running: row.running,
     },
-    server: row.serverId ? await serverBudget(db, row.serverId, row.id) : null,
+    // The server the plan is *about*. For everything but a move that is
+    // the one the app is on; a move names another, and checking the app
+    // fits where it is going is the whole point of checking at all.
+    server: await budgetFor(db, row, requestedServer(args)),
     unsaved: await unsavedFor(db, row),
   };
+  // Choosing which machine compiles this app needs to see the machines.
+  if (args.builder !== undefined && orgId) {
+    world.candidates = await placementCandidates(db, orgId);
+  }
   // Which kind of backup was named decides what putting it back means.
   if (typeof args.backupId === 'string') {
     const backup = await getBackup(db, args.backupId);
@@ -230,7 +253,12 @@ export async function placementCandidates(db: Database, orgId: string): Promise<
   for (const server of rows) {
     const budget = await serverBudget(db, server.id, null);
     if (!budget) continue;
-    out.push({ id: server.id, budget, connected: server.agentPublicKey !== null });
+    out.push({
+      id: server.id,
+      budget,
+      connected: server.agentPublicKey !== null,
+      role: server.role,
+    });
   }
   return out;
 }

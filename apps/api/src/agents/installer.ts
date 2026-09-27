@@ -59,6 +59,7 @@ export function installScript(publicUrl: string, sums: Record<AgentArch, string>
 #   --token <token>   the one-time token from the dashboard (first install only)
 #   --dry-run         check this server and stop; nothing is installed or changed
 #   --no-service      do not set up systemd (containers and test machines)
+#   --builder         this machine only compiles: no Traefik, ports 80/443 left alone
 # Running it again updates the agent; it never touches anything else.
 set -eu
 
@@ -70,11 +71,13 @@ STATE_DIR=/var/lib/vdeploy
 TOKEN=''
 DRY_RUN=0
 SERVICE=1
+BUILDER=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --token) TOKEN="\${2:-}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-service) SERVICE=0; shift ;;
+    --builder) BUILDER=1; shift ;;
     *) echo "VDeploy: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -102,6 +105,14 @@ fetch "$CP_URL/api/v1/agent/download/vd-agent-linux-$ARCH" "$TMP/vd-agent"
 echo "$SUM  $TMP/vd-agent" | sha256sum -c - >/dev/null 2>&1 \\
   || fail "the download is damaged (its checksum does not match); nothing was installed. Please try again."
 chmod 755 "$TMP/vd-agent"
+
+# A builder never serves traffic, so it runs no router and leaves ports 80
+# and 443 to whatever already has them. Written before the checks, because
+# the checks read it.
+if [ "$BUILDER" = 1 ] && [ ! -f /etc/vdeploy/agent.json ]; then
+  mkdir -p /etc/vdeploy
+  printf '{\n  "routing": false\n}\n' > /etc/vdeploy/agent.json
+fi
 
 if [ -f "$STATE_DIR/identity.json" ]; then
   # Connected already: its own router holds ports 80 and 443, so the first-install checks do not apply.

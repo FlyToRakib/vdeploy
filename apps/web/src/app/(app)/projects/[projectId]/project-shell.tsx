@@ -31,6 +31,7 @@ export interface ProjectRow {
   running: boolean;
   spec: {
     source: { type: string; repo?: string; branch?: string };
+    build?: { strategy: string; builder?: string };
     network?: { containerPort: number };
     runtime: { replicas: number; volumes: { name: string; mountPath: string }[] };
   };

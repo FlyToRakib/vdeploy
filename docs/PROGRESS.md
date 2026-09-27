@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M5 — scale and balance (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27)
-**Task:** 5.4 — builder servers, then the M5 exit
+**Task:** 5.4b — a WireGuard mesh between servers
 **Status:** in progress
-**Updated:** 2026-09-28 07:30 UTC
+**Updated:** 2026-09-27 17:20 UTC
 
 ## M4 exit — met 2026-09-27
 
@@ -197,7 +197,8 @@ GitHub.
 
 ## Doing
 
-- [ ] 5.4 the rest of M5: WireGuard mesh between servers, a dedicated edge tier, and builder servers — then the M5 exit on the VPS testbed
+- [x] 5.4a builder servers (§15): a build is the heaviest thing a small server ever does, and a production box that compiles is a production box that goes slow on the evening somebody deploys — so a project can name **another machine to build on**, and a machine can be added as a builder that compiles for the others and serves nothing at all. Queueing the build elsewhere was one field; what it costs is that the image then exists on a server that will never start it, and **ADR 0008 says a local image ID names nothing** — any id could be any image on the disk, which is why an agent runs only what its own record says it built. That rule is not relaxed but **narrowed** (ADR 0017): the bytes must match the size and hash the builder measured as it wrote them, *and* loading them must produce exactly the id the control plane named. An image id is the hash of its own config, so “these bytes, and this id out” cannot be satisfied by pointing at something already on the disk — it is the same guarantee as having built it. The image travels the way an app's folders travel when it moves: a one-time token, piped through the control plane, nothing kept. The builder drops its copy the moment it has sent it, and sweeps anything a dead deploy abandoned. And the thing that keeps it all honest: **the build is not finished until the image has arrived** — it stays running until then, so a transfer that failed is a build that failed, with a reason, rather than a deploy that starts an image that is not there. A builder is never placed on, cannot be moved onto, runs no router, and its preflight skips ports 80 and 443 because it serves nothing. **One latent bug found on the way**: `project.move` was checking the app against the server it was *leaving* — the plan context loads the project's own server, and nobody had told it that a move names a different one — so a move onto a full machine passed the governor every time and failed at the last step of the apply
+- [ ] 5.4b the rest of M5: a WireGuard mesh between servers and a dedicated edge tier — then the M5 exit on the VPS testbed
 
 ## Next
 

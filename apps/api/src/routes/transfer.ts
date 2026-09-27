@@ -3,10 +3,12 @@ import { VDeployError } from '@vdeploy/contracts';
 import { backupSubject, claimTransfer, getBackup } from '@vdeploy/db';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import type { ArtifactRequest } from '../agents/gateway.js';
 import type { KernelDeps } from '../kernel/context.js';
 
 /**
- * An app's folders on their way from one server to another (§17.6).
+ * An app's folders on their way from one server to another (§17.6), or an
+ * image from the server that built it to the one that will run it (§15).
  *
  * The bytes are **piped**, not stored. The server that needs them asks for
  * them; the control plane reads them off the server that has them, over the
@@ -35,11 +37,30 @@ export const transferRoutes =
         const claim = await deps.db.transaction((tx) =>
           claimTransfer(tx, req.params.transferId, token, deps.now()),
         );
-        // Reading the store needs an image already on that server; the
-        // copy's own subject names one.
-        const backup = await getBackup(deps.db, claim.backupId);
-        const subject = backup ? await backupSubject(deps.db, backup) : null;
-        if (!subject) throw new VDeployError('not_found', 'The copy being moved is no longer here');
+        let request: ArtifactRequest;
+        if (claim.kind === 'image') {
+          request = {
+            kind: 'image',
+            requestId: randomBytes(16).toString('base64url'),
+            buildId: claim.buildId,
+            expectSha256: claim.sha256,
+          };
+        } else {
+          // Reading the store needs an image already on that server; the
+          // copy's own subject names one.
+          const backup = await getBackup(deps.db, claim.backupId);
+          const subject = backup ? await backupSubject(deps.db, backup) : null;
+          if (!subject) {
+            throw new VDeployError('not_found', 'The copy being moved is no longer here');
+          }
+          request = {
+            kind: 'backup',
+            requestId: randomBytes(16).toString('base64url'),
+            fileName: claim.fileName,
+            image: subject.image,
+            expectSha256: claim.sha256,
+          };
+        }
 
         reply.hijack();
         const raw = reply.raw;
@@ -65,18 +86,7 @@ export const transferRoutes =
           });
 
         try {
-          await deps.artifacts.artifact(
-            claim.fromServerId,
-            {
-              kind: 'backup',
-              requestId: randomBytes(16).toString('base64url'),
-              fileName: claim.fileName,
-              image: subject.image,
-              expectSha256: claim.sha256,
-            },
-            write,
-            leaving.signal,
-          );
+          await deps.artifacts.artifact(claim.fromServerId, request, write, leaving.signal);
           raw.end();
         } catch {
           // Half a folder must never look like a whole one.

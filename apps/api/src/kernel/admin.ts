@@ -293,9 +293,15 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
   },
   'server.add': async (context) => {
     const serverId = newId('server');
-    await context.deps.db
-      .insert(servers)
-      .values({ id: serverId, orgId: context.actor.orgId, name: String(context.args.name) });
+    await context.deps.db.insert(servers).values({
+      id: serverId,
+      orgId: context.actor.orgId,
+      name: String(context.args.name),
+      // What the machine is for, decided when it is added and not after:
+      // a server that has been running apps for a month cannot become a
+      // builder without moving them off first (§15).
+      role: context.args.role === 'builder' ? 'builder' : 'apps',
+    });
     return enrollmentToken(context, serverId);
   },
   'server.enrollment_token': async (context) => {

@@ -42,6 +42,15 @@ export const servers = pgTable('servers', {
   /** The agent's X25519 key (from its signed hello): secrets are sealed to it. */
   agentBoxKey: text('agent_box_key'),
   agentVersion: text('agent_version'),
+  /**
+   * What this machine is for (§15). A builder compiles and serves nothing:
+   * no app is ever placed on it, so a build that eats the box takes down
+   * nothing anybody visits. Apps servers do both, which is right until a
+   * build and a busy evening land together.
+   */
+  role: text('role', { enum: ['apps', 'builder'] })
+    .notNull()
+    .default('apps'),
   arch: text('arch'),
   capacity: jsonb('capacity').$type<{ cpus: number; memoryBytes: number; diskBytes: number }>(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),

@@ -23,6 +23,8 @@ export interface Candidate {
   budget: ServerBudget;
   /** False while its agent has never connected: nothing can be placed there. */
   connected: boolean;
+  /** A builder compiles and serves nothing, so nothing is ever placed on it (§15). */
+  role?: 'apps' | 'builder';
 }
 
 export interface Placed {
@@ -39,8 +41,18 @@ export interface Placed {
  * considered and what the largest one had left.
  */
 export function place(spec: ApplicationSpec, candidates: readonly Candidate[]): Placed {
-  const usable = candidates.filter((c) => c.connected && c.budget.capacity);
+  const serving = candidates.filter((c) => c.role !== 'builder');
+  const usable = serving.filter((c) => c.connected && c.budget.capacity);
   if (usable.length === 0) {
+    // A builder is a machine on purpose empty of apps, so "you have servers
+    // but none of them runs anything" is its own sentence rather than a
+    // count that looks wrong.
+    if (serving.length === 0 && candidates.length > 0) {
+      throw new VDeployError(
+        'conflict',
+        'Every server you have is a builder, and a builder never runs apps. Connect one to run them on.',
+      );
+    }
     throw new VDeployError(
       'conflict',
       candidates.length === 0
@@ -49,7 +61,8 @@ export function place(spec: ApplicationSpec, candidates: readonly Candidate[]): 
     );
   }
   const needs = footprint(spec);
-  const room = (c: Candidate) => (c.budget.capacity?.memoryBytes ?? 0) - c.budget.committed.memoryBytes;
+  const room = (c: Candidate) =>
+    (c.budget.capacity?.memoryBytes ?? 0) - c.budget.committed.memoryBytes;
   const fits = usable.filter(
     (c) =>
       room(c) >= needs.memoryBytes &&

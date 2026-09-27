@@ -1,6 +1,15 @@
 import type { BuildStatus, StorageFinding } from '@vdeploy/contracts';
 import { sql } from 'drizzle-orm';
-import { customType, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  customType,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+} from 'drizzle-orm/pg-core';
 import { organization } from './identity.js';
 import { projects, servers, type ActorRecord } from './kernel.js';
 
@@ -55,6 +64,11 @@ export const builds = pgTable(
         args: Record<string, string>;
         /** Leading folders to drop: 1 for a GitHub tarball. */
         strip?: number;
+        /**
+         * Keep the image on disk afterwards, because the machine that will
+         * run it is not this one (§15).
+         */
+        export?: boolean;
       }>()
       .notNull(),
     /** Build-time secrets, by name and pinned version: sealed only when sent. */
@@ -66,6 +80,13 @@ export const builds = pgTable(
     tokenHash: text('token_hash'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     image: text('image'),
+    /**
+     * When the build ran somewhere other than where the app runs (§15):
+     * the size and hash of the image the builder kept, so the server that
+     * must run it can check the bytes before it loads them.
+     */
+    exportSizeBytes: bigint('export_size_bytes', { mode: 'number' }),
+    exportSha256: text('export_sha256'),
     detection: jsonb('detection'),
     /** Folders the app will keep lasting data in, found in its source. */
     persistence: jsonb('persistence')

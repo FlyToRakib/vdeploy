@@ -8,7 +8,7 @@ import {
   VerifyResult,
 } from './backups.js';
 import { TaskResult } from './tasks.js';
-import { BuildResult } from './builds.js';
+import { BuildResult, ImageArrivalResult } from './builds.js';
 import { DesiredDatabase, ObservedDatabase } from './databases.js';
 import { ReplicaEvidence } from './diagnosis.js';
 import { FileListResult } from './files.js';
@@ -216,6 +216,12 @@ export const AgentFrame = z.discriminatedUnion('type', [
   }),
   z.strictObject({ ...FrameHeader, type: z.literal('observed_state'), report: ObservedReport }),
   z.strictObject({ ...FrameHeader, type: z.literal('build_result'), result: BuildResult }),
+  /** Whether an image built elsewhere arrived whole, and can be run here (§15). */
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('image_result'),
+    result: ImageArrivalResult,
+  }),
   z.strictObject({ ...FrameHeader, type: z.literal('backup_result'), result: BackupResult }),
   z.strictObject({ ...FrameHeader, type: z.literal('restore_result'), result: RestoreResult }),
   z.strictObject({ ...FrameHeader, type: z.literal('verify_result'), result: VerifyResult }),

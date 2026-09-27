@@ -29,8 +29,47 @@ export const BuildResult = z.strictObject({
   log: z.string().max(300_000),
   /** Folders the app will keep lasting data in. */
   persistence: z.array(StorageFinding).max(50).optional(),
+  /**
+   * When the build was asked to keep the image for another server (§15):
+   * what it kept, so the server that will run it can check the bytes it
+   * receives before loading them.
+   */
+  exportSizeBytes: z.number().int().min(0).optional(),
+  exportSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
 export type BuildResult = z.infer<typeof BuildResult>;
+
+/**
+ * An image built on one server, on its way to the one that will run it
+ * (§15). The bytes are fetched exactly as an imported dump is — a one-time
+ * token, size and hash checked on disk before anything loads them — and
+ * then one more check the others do not need: the image the Engine ends up
+ * with must be the **same ID the control plane named**. That is what keeps
+ * ADR 0008's rule intact. A local image ID names nothing by itself, so an
+ * agent runs one only if it built it, or if it loaded these exact bytes at
+ * the control plane's request and got exactly that ID out.
+ */
+export const ImageArrival = z.strictObject({
+  buildId: idSchema('build'),
+  projectId: idSchema('project'),
+  /** The ID the build reported on the server that made it. */
+  image: LocalImageId,
+  url: z.url({ protocol: /^https?$/ }).max(2048),
+  token: z.string().min(16).max(256),
+  sizeBytes: z.number().int().min(0),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type ImageArrival = z.infer<typeof ImageArrival>;
+
+export const ImageArrivalResult = z.strictObject({
+  buildId: idSchema('build'),
+  ok: z.boolean(),
+  error: z.string().max(4096).optional(),
+});
+export type ImageArrivalResult = z.infer<typeof ImageArrivalResult>;
 
 /** A build as people and the AI see it. */
 export const BuildView = z.strictObject({

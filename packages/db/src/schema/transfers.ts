@@ -1,6 +1,8 @@
-import { index, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { check, index, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organization } from './identity.js';
 import { backups } from './databases.js';
+import { builds } from './builds.js';
 import { servers } from './kernel.js';
 
 /**
@@ -21,9 +23,9 @@ export const transfers = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: 'cascade' }),
     /** The artifact to send: it names the server that holds it and its hash. */
-    backupId: text('backup_id')
-      .notNull()
-      .references(() => backups.id, { onDelete: 'cascade' }),
+    backupId: text('backup_id').references(() => backups.id, { onDelete: 'cascade' }),
+    /** Or the image a builder server made, on its way to the one that runs it (§15). */
+    buildId: text('build_id').references(() => builds.id, { onDelete: 'cascade' }),
     /** The only server this token works for. */
     toServerId: text('to_server_id')
       .notNull()
@@ -35,5 +37,13 @@ export const transfers = pgTable(
     usedAt: timestamp('used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('transfers_token').on(t.tokenHash)],
+  (t) => [
+    index('transfers_token').on(t.tokenHash),
+    // Exactly one subject: a permission to send "either or neither" is a
+    // permission to send the wrong thing.
+    check(
+      'transfers_one_subject',
+      sql`(${t.backupId} is not null)::int + (${t.buildId} is not null)::int = 1`,
+    ),
+  ],
 );

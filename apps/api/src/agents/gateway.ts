@@ -5,6 +5,7 @@ import {
   memoryBytes,
   EnrollRequest,
   VDeployError,
+  type BuildResult,
   type FileListResult,
   type LogLine,
 } from '@vdeploy/contracts';
@@ -57,6 +58,11 @@ import {
   desiredStateFor,
   listen,
   finishBuild,
+  holdBuiltImage,
+  settleArrival,
+  getBuild,
+  builds,
+  projects,
   observedState,
   readSecret,
   recordEvents,
@@ -165,9 +171,11 @@ export interface FileSource {
 }
 
 /**
- * Something on a server on its way to the person who owns it: a backup out
- * of the store, or one file out of an app's permanent folder. Both travel
- * the same paced channel.
+ * Something on a server on its way somewhere else: a backup out of the
+ * store, one file out of an app's permanent folder, or an image a builder
+ * server made for a server that will run it (§15). All three travel the
+ * same paced channel, because a 4 GB image and a 4 GB database dump fill a
+ * small control plane in exactly the same way.
  */
 export type ArtifactRequest =
   | {
@@ -177,7 +185,8 @@ export type ArtifactRequest =
       image: string;
       expectSha256: string | null;
     }
-  | { kind: 'file'; requestId: string; projectId: string; folder: string; path: string };
+  | { kind: 'file'; requestId: string; projectId: string; folder: string; path: string }
+  | { kind: 'image'; requestId: string; buildId: string; expectSha256: string };
 
 export interface ArtifactSource {
   /**
@@ -505,7 +514,7 @@ export class Gateway
       const allowed = await db.transaction((tx) =>
         allowTransfer(tx, {
           orgId: snapshot.orgId,
-          backupId: snapshot.id,
+          subject: { backupId: snapshot.id },
           toServerId: serverId,
           now: now(),
         }),
@@ -675,7 +684,7 @@ export class Gateway
         const allowed = await db.transaction((tx) =>
           allowTransfer(tx, {
             orgId: backup.orgId,
-            backupId: backup.id,
+            subject: { backupId: backup.id },
             toServerId: serverId,
             now: now(),
           }),
@@ -767,6 +776,71 @@ export class Gateway
   }
 
   /**
+   * Sends an image a builder server just made to the server that will run
+   * it (§15), and reports whether that is where it now is.
+   *
+   * It answers true when it has taken responsibility for the build, which
+   * is the whole reason it exists: the build is **not finished** until the
+   * image is where it will be started, so everything waiting on the build
+   * — the deploy, the person watching the log — waits on the right thing
+   * rather than on an image sitting on a machine that will never run it.
+   *
+   * The bytes go the way an app's folders go when it moves: a one-time
+   * token for that server alone, the control plane piping from the builder
+   * rather than keeping a copy of its own.
+   */
+  private async deliverImage(serverId: string, result: BuildResult): Promise<boolean> {
+    const { db, key, now, publicUrl } = this.deps;
+    if (!result.ok || !result.image || !result.exportSha256) return false;
+    const [row] = await db.select().from(builds).where(eq(builds.id, result.buildId));
+    if (row?.serverId !== serverId || !row.options.export || !row.projectId) return false;
+    const [app] = await db.select().from(projects).where(eq(projects.id, row.projectId));
+    const runner = app?.serverId;
+    // Nothing to move: the app landed back on the machine that built it.
+    if (!runner || runner === serverId) return false;
+
+    const held = await holdBuiltImage(db, serverId, result);
+    if (!held) return false;
+    const target = this.connections.get(runner);
+    if (!target) {
+      await settleArrival(
+        db,
+        result.buildId,
+        {
+          ok: false,
+          error:
+            'the image was built, but the server that runs this app is offline, so it could not be moved there',
+        },
+        now(),
+      );
+      return true;
+    }
+    const allowed = await db.transaction((tx) =>
+      allowTransfer(tx, {
+        orgId: row.orgId,
+        subject: { buildId: row.id },
+        toServerId: runner,
+        now: now(),
+      }),
+    );
+    target.socket.send(
+      seal(key, {
+        ...target.session.next('image_load'),
+        image: {
+          buildId: row.id,
+          projectId: row.projectId,
+          image: result.image,
+          url: `${publicUrl.replace(/\/$/, '')}/api/v1/transfers/${allowed.id}`,
+          token: allowed.token,
+          sizeBytes: result.exportSizeBytes ?? 0,
+          sha256: result.exportSha256,
+        },
+      }),
+    );
+    return true;
+  }
+
+  /**
    * Hands one backup back to the person who owns it (§17.5). The agent sends
    * it in chunks and waits for an acknowledgement after every one, so a slow
    * download paces the server rather than filling this process; and the last
@@ -844,8 +918,7 @@ export class Gateway
               return;
             }
             const sum = running.digest('hex');
-            const expected =
-              (request.kind === 'backup' ? request.expectSha256 : null) ?? end.sha256;
+            const expected = (request.kind === 'file' ? null : request.expectSha256) ?? end.sha256;
             if (expected && sum !== expected) {
               // The last chunk never goes: an incomplete download is honest,
               // a complete one that is not what was on the server is not.
@@ -890,15 +963,20 @@ export class Gateway
                 ...connection.session.next('artifact'),
                 artifact: { requestId, fileName: request.fileName, image: request.image },
               }
-            : {
-                ...connection.session.next('file_read'),
-                files: {
-                  requestId,
-                  projectId: request.projectId,
-                  folder: request.folder,
-                  path: request.path,
+            : request.kind === 'image'
+              ? {
+                  ...connection.session.next('image_read'),
+                  image: { requestId, buildId: request.buildId },
+                }
+              : {
+                  ...connection.session.next('file_read'),
+                  files: {
+                    requestId,
+                    projectId: request.projectId,
+                    folder: request.folder,
+                    path: request.path,
+                  },
                 },
-              },
         ),
       );
     });
@@ -913,7 +991,10 @@ export class Gateway
   reclaim(serverId: string, keep: readonly string[]): void {
     const connection = this.connections.get(serverId);
     if (!connection) {
-      throw new VDeployError('unavailable', 'This server is offline, so nothing can be freed on it');
+      throw new VDeployError(
+        'unavailable',
+        'This server is offline, so nothing can be freed on it',
+      );
     }
     connection.socket.send(
       seal(this.deps.key, {
@@ -936,7 +1017,10 @@ export class Gateway
     const connection = this.connections.get(serverId);
     if (!connection) {
       return Promise.reject(
-        new VDeployError('unavailable', 'This app’s server is offline, so its files cannot be read'),
+        new VDeployError(
+          'unavailable',
+          'This app’s server is offline, so its files cannot be read',
+        ),
       );
     }
     const requestId = randomBytes(16).toString('base64url');
@@ -1234,7 +1318,19 @@ export class Gateway
       await recordUptime(db, serverId, frame.report, now());
       await notifyFromReport(db, serverId, frame.report, now());
     } else if (frame.type === 'build_result') {
+      if (await this.deliverImage(serverId, frame.result)) return;
       await finishBuild(db, serverId, frame.result, now());
+    } else if (frame.type === 'image_result') {
+      const build = await getBuild(db, orgId, frame.result.buildId);
+      // Only the server the image was sent to may say whether it arrived.
+      if (build) {
+        await settleArrival(
+          db,
+          frame.result.buildId,
+          { ok: frame.result.ok, ...(frame.result.error ? { error: frame.result.error } : {}) },
+          now(),
+        );
+      }
     } else if (frame.type === 'restore_result') {
       const restore = await getRestore(db, frame.result.restoreId);
       if (restore?.serverId === serverId) await finishRestore(db, frame.result, now());
@@ -1334,10 +1430,7 @@ export class Gateway
       request.onChunk(Buffer.from(frame.data, 'base64'));
     } else if (frame.type === 'reclaim_result') {
       // Only the server that was asked answers for itself.
-      await db
-        .update(servers)
-        .set({ lastReclaim: frame.result })
-        .where(eq(servers.id, serverId));
+      await db.update(servers).set({ lastReclaim: frame.result }).where(eq(servers.id, serverId));
     } else if (frame.type === 'files_result') {
       // Only the server a listing went to may answer it.
       const request = this.fileRequests.get(frame.result.requestId);

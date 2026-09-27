@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { idSchema } from '../ids.js';
 import { ApplicationSpec } from '../spec/application.js';
 import {
+  Build,
   Deploy,
   EnvKey,
   Health,
@@ -530,9 +531,7 @@ export const OPERATIONS = [
        * WordPress and Ghost among them. Each piece becomes its own setting,
        * and the password is still a secret the app reads and nobody sees.
        */
-      parts: z
-        .record(z.enum(['host', 'port', 'user', 'password', 'name']), EnvKey)
-        .optional(),
+      parts: z.record(z.enum(['host', 'port', 'user', 'password', 'name']), EnvKey).optional(),
     }),
   ),
   operation(
@@ -598,6 +597,18 @@ export const OPERATIONS = [
     'project',
     'Return to an earlier release, exactly as it was',
     obj({ ...P, releaseId: idSchema('release') }),
+  ),
+  operation(
+    'build.configure',
+    'sensitive',
+    'project',
+    'Choose which server compiles this app, and whether it keeps a layer cache',
+    obj({
+      ...P,
+      /** Null puts the build back on the server the app runs on. */
+      builder: serverId.nullable(),
+      cache: Build.shape.cache.optional(),
+    }),
   ),
   operation(
     'volume.create',
@@ -875,7 +886,11 @@ export const OPERATIONS = [
     'human_only',
     'org',
     'Create a server enrollment token',
-    obj({ name: ResourceName }),
+    obj({
+      name: ResourceName,
+      /** A builder compiles for the others and runs nothing itself (§15). */
+      role: z.enum(['apps', 'builder']).default('apps'),
+    }),
     { stepUp: true },
   ),
   operation(

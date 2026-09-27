@@ -8,13 +8,17 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +30,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/files"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
+	"github.com/FlyToRakib/vdeploy/agent/internal/image"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reclaim"
@@ -70,6 +75,12 @@ type Client struct {
 	Terminals TerminalOpener
 	// Files looks inside a project's permanent folders; nil refuses to look.
 	Files FileReader
+	// Exports hands out an image this server built for another (§15); nil
+	// means this server never builds for anybody else.
+	Exports ImageKeeper
+	// Images takes an image built on another server; nil refuses to run
+	// anything this server did not build itself (ADR 0008).
+	Images ImageLoader
 	// Reclaim frees disk on this server; nil refuses to free anything.
 	Reclaim DiskReclaimer
 	// Logs streams a project's container output; nil refuses log requests.
@@ -135,6 +146,18 @@ type TaskRunner interface {
 // Builder runs one build to completion.
 type Builder interface {
 	Run(ctx context.Context, req build.Request) build.Result
+}
+
+// ImageKeeper holds images this server built for servers that will run
+// them (§15), and hands each out exactly once.
+type ImageKeeper interface {
+	OpenExport(buildID string) (*os.File, int64, error)
+	DropExport(buildID string)
+}
+
+// ImageLoader takes an image built elsewhere and makes it runnable here.
+type ImageLoader interface {
+	Load(ctx context.Context, req image.Arrival) image.Result
 }
 
 // maxBuildTime bounds a build; the builder's own limits apply inside it.
@@ -433,6 +456,26 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 			return err
 		}
 		c.sendFile(ctx, k, frame.Files)
+		return nil
+	case protocol.TypeImageRead:
+		var frame imageReadFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.sendImage(ctx, k, frame.Image)
+		return nil
+	case protocol.TypeImageLoad:
+		var frame imageLoadFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		go c.takeImage(ctx, k, frame.Image)
 		return nil
 	case protocol.TypeArtifact:
 		var frame artifactFrame
@@ -1020,6 +1063,94 @@ func (c *Client) sendFile(ctx context.Context, k *conn, req files.Request) {
 		func(sendCtx context.Context, each func([]byte) error) (int64, string, error) {
 			return c.Files.Send(sendCtx, req, each)
 		})
+}
+
+type imageReadFrame struct {
+	protocol.Header
+	Image struct {
+		RequestID string `json:"requestId"`
+		BuildID   string `json:"buildId"`
+	} `json:"image"`
+}
+
+type imageLoadFrame struct {
+	protocol.Header
+	Image image.Arrival `json:"image"`
+}
+
+type imageResultFrame struct {
+	protocol.Header
+	Result image.Result `json:"result"`
+}
+
+// sendImage hands an image this server built to the server that will run
+// it, on the same paced channel a backup uses — an image is as big as a
+// database and fills a small control plane in exactly the same way.
+//
+// The copy here is dropped as soon as it has gone out. The token that
+// fetched it was good once, so a second reader would be a mistake, and a
+// builder that keeps every image it has ever made is a builder that fills
+// up. A build whose image did not survive the trip is one to run again.
+func (c *Client) sendImage(ctx context.Context, k *conn, req struct {
+	RequestID string `json:"requestId"`
+	BuildID   string `json:"buildId"`
+},
+) {
+	if c.Exports == nil {
+		c.sendArtifactEnd(ctx, k, artifactEndFrame{
+			RequestID: req.RequestID,
+			Error:     "this server does not build for other servers",
+		})
+		return
+	}
+	file, size, err := c.Exports.OpenExport(req.BuildID)
+	if err != nil {
+		c.sendArtifactEnd(ctx, k, artifactEndFrame{RequestID: req.RequestID, Error: err.Error()})
+		return
+	}
+	c.startArtifact(ctx, k, req.RequestID, "image",
+		func(_ context.Context, each func([]byte) error) (int64, string, error) {
+			defer func() {
+				_ = file.Close()
+				c.Exports.DropExport(req.BuildID)
+			}()
+			sum := sha256.New()
+			buf := make([]byte, files.ChunkBytes)
+			for {
+				n, readErr := file.Read(buf)
+				if n > 0 {
+					sum.Write(buf[:n])
+					if sendErr := each(buf[:n]); sendErr != nil {
+						return 0, "", sendErr
+					}
+				}
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				if readErr != nil {
+					return 0, "", fmt.Errorf("read the kept image: %w", readErr)
+				}
+			}
+			return size, hex.EncodeToString(sum.Sum(nil)), nil
+		})
+}
+
+// takeImage loads an image built on another server, and says whether this
+// server can now run it. The deploy waiting on the build is waiting on
+// this answer, so a failure is a sentence rather than a silence.
+func (c *Client) takeImage(ctx context.Context, k *conn, req image.Arrival) {
+	result := image.Result{
+		BuildID: req.BuildID,
+		Error:   "this agent cannot take an image built on another server",
+	}
+	if c.Images != nil {
+		result = c.Images.Load(ctx, req)
+	}
+	if err := k.send(ctx, protocol.TypeImageResult, func(h protocol.Header) any {
+		return imageResultFrame{Header: h, Result: result}
+	}); err != nil {
+		c.Log.Warn("an arrived image could not be reported", "build", req.BuildID, "error", err)
+	}
 }
 
 type artifactControlFrame struct {

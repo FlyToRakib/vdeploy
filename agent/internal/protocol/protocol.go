@@ -60,6 +60,10 @@ const (
 	TypeReclaim        = "reclaim"
 	TypeReclaimResult  = "reclaim_result"
 
+	TypeImageRead   = "image_read"
+	TypeImageLoad   = "image_load"
+	TypeImageResult = "image_result"
+
 	TypeFiles       = "files"
 	TypeFilesResult = "files_result"
 	TypeFileRead    = "file_read"

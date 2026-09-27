@@ -33,6 +33,7 @@ export function AddServerDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(false);
+  const [role, setRole] = useState<'apps' | 'builder'>('apps');
 
   // While the command is shown, ask every few seconds whether the server has connected.
   useEffect(() => {
@@ -54,7 +55,7 @@ export function AddServerDialog({
     setError(null);
     try {
       const outcome = await stepUp(() =>
-        runOperation<Enrollment>('server.add', { name: formText(form, 'name') }),
+        runOperation<Enrollment>('server.add', { name: formText(form, 'name'), role }),
       );
       if (outcome.status === 'done') setEnrollment(outcome.result);
     } catch (err) {
@@ -75,6 +76,7 @@ export function AddServerDialog({
           setEnrollment(null);
           setError(null);
           setOnline(false);
+          setRole('apps');
         }
         onOpenChange(next);
       }}
@@ -96,6 +98,47 @@ export function AddServerDialog({
             hint="Lowercase letters, digits and hyphens."
             autoFocus
           />
+          {/*
+            What the machine is for (§15). It is asked here and not later
+            because it decides what gets installed: a builder runs no
+            router and leaves ports 80 and 443 to whatever already has
+            them, and a machine that has been serving sites for a month
+            cannot quietly become one.
+          */}
+          <fieldset className="grid gap-2">
+            <legend className="text-sm font-medium">What is it for?</legend>
+            {(
+              [
+                [
+                  'apps',
+                  'Running your apps',
+                  'The normal choice. It serves your sites, and builds them too.',
+                ],
+                [
+                  'builder',
+                  'Building only',
+                  'It compiles for your other servers and serves nothing, so a build never slows down a live site.',
+                ],
+              ] as const
+            ).map(([value, title, what]) => (
+              <label key={value} className="flex cursor-pointer items-start gap-3 text-sm">
+                <input
+                  type="radio"
+                  name="role"
+                  value={value}
+                  checked={role === value}
+                  onChange={() => {
+                    setRole(value);
+                  }}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="font-medium">{title}</span>
+                  <span className="block text-muted-foreground">{what}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           {error && (
             <p role="alert" className="text-sm text-status-failed">
               {error}
@@ -116,7 +159,11 @@ export function AddServerDialog({
             <li className="grid gap-2">
               Paste this command and press Enter. It checks the server first and changes nothing if
               it is not ready.
-              <CopyCommand command={enrollment.command} />
+              <CopyCommand
+                command={
+                  role === 'builder' ? `${enrollment.command} --builder` : enrollment.command
+                }
+              />
               <span className="text-xs text-muted-foreground">
                 It works once, until {new Date(enrollment.expiresAt).toLocaleTimeString()}.
               </span>

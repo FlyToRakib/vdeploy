@@ -116,6 +116,62 @@ export async function finishBuild(
   return updated.length > 0;
 }
 
+/**
+ * A build that succeeded somewhere other than where the app runs (§15).
+ *
+ * It is **not finished yet**, and that is the point: the image exists on a
+ * machine that will never start it, so the build stays `running` until the
+ * bytes have reached the server that will. Everything waiting on the build
+ * — the deploy, the person watching it — is waiting on the right thing.
+ */
+export async function holdBuiltImage(
+  db: Executor,
+  serverId: string,
+  result: BuildResult,
+): Promise<BuildRow | null> {
+  const [updated] = await db
+    .update(builds)
+    .set({
+      image: result.image ?? null,
+      exportSizeBytes: result.exportSizeBytes ?? null,
+      exportSha256: result.exportSha256 ?? null,
+      detection: result.detection ?? null,
+      persistence: result.persistence ?? [],
+      log: result.log,
+      tokenHash: null,
+      tokenExpiresAt: null,
+    })
+    .where(
+      and(
+        eq(builds.id, result.buildId),
+        eq(builds.serverId, serverId),
+        inArray(builds.status, ['queued', 'running']),
+      ),
+    )
+    .returning();
+  return updated ?? null;
+}
+
+/** Whether the image a builder made reached the server that will run it. */
+export async function settleArrival(
+  db: Executor,
+  buildId: string,
+  outcome: { ok: boolean; error?: string },
+  now: Date,
+): Promise<void> {
+  await db
+    .update(builds)
+    .set({
+      status: outcome.ok ? 'succeeded' : 'failed',
+      error: outcome.ok
+        ? null
+        : (outcome.error ??
+          'the image was built, but it could not be moved to the server that runs this app'),
+      finishedAt: now,
+    })
+    .where(and(eq(builds.id, buildId), inArray(builds.status, ['queued', 'running'])));
+}
+
 /** Gives up on a build that never reported back (the agent restarted mid-build). */
 export async function abandonBuild(db: Executor, buildId: string, now: Date): Promise<void> {
   await db

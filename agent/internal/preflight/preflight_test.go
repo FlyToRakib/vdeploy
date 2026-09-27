@@ -48,7 +48,7 @@ func result(results []Result, id string) Result {
 }
 
 func TestHealthyServerPasses(t *testing.T) {
-	results := Run(context.Background(), healthy(), "/var/lib/vdeploy")
+	results := Run(context.Background(), healthy(), "/var/lib/vdeploy", true)
 	for _, r := range results {
 		if r.Status != Pass {
 			t.Errorf("%s: %s %s", r.ID, r.Status, r.Message)
@@ -83,7 +83,7 @@ func TestProblemsFailWithAFix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := healthy()
 			tc.spoil(h)
-			r := result(Run(context.Background(), h, "/"), tc.id)
+			r := result(Run(context.Background(), h, "/", true), tc.id)
 			if r.Status != tc.status {
 				t.Fatalf("%s = %s (%s)", tc.id, r.Status, r.Message)
 			}
@@ -203,5 +203,20 @@ func TestATestMachineCanAllowAnUnsupportedSystem(t *testing.T) {
 	r := RunServer(context.Background(), m, Options{AllowUnsupportedOS: true})[0]
 	if r.Status != Warn || !strings.Contains(r.Message, "allowUnsupportedOS") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+// A builder compiles and serves nothing, so whatever already holds the web
+// ports on that machine is not VDeploy's business (§15).
+func TestBuilderIgnoresTheWebPorts(t *testing.T) {
+	h := healthy()
+	h.busy[80] = true
+	for _, r := range Run(context.Background(), h, "/", false) {
+		if r.ID == "ports" {
+			t.Fatalf("a build-only server was checked for the web ports: %s", r.Message)
+		}
+	}
+	if result(Run(context.Background(), h, "/", true), "ports").Status != Fail {
+		t.Fatal("a serving server with a busy port 80 should be refused")
 	}
 }

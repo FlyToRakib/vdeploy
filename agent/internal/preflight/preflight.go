@@ -46,18 +46,23 @@ const (
 )
 
 // Run executes every check. Order matters only for reading.
-func Run(ctx context.Context, h Host, stateDir string) []Result {
-	return []Result{
+//
+// A build-only server is checked for everything except the web ports: it
+// serves nothing, so whether something else on the machine holds 80 and
+// 443 is none of VDeploy's business (§15).
+func Run(ctx context.Context, h Host, stateDir string, serving bool) []Result {
+	results := []Result{
 		checkOS(h),
 		checkArch(h),
 		checkRoot(h),
 		checkDocker(ctx, h),
 		checkMemory(h),
 		checkDisk(h, stateDir),
-		checkPorts(h),
-		checkClock(h),
-		checkCgroup(h),
 	}
+	if serving {
+		results = append(results, checkPorts(h))
+	}
+	return append(results, checkClock(h), checkCgroup(h))
 }
 
 // Failed reports whether any check failed.

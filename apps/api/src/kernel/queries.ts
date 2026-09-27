@@ -127,6 +127,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         agentVersion: servers.agentVersion,
         publicIpv4: servers.publicIpv4,
         provider: servers.provider,
+        role: servers.role,
         reachability: servers.reachability,
         capacity: servers.capacity,
       })
@@ -293,7 +294,8 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
     const folder = String(args.folder);
     const spec = readSpec(row.spec);
     const mount = spec.runtime.volumes.find((v) => v.name === folder);
-    if (!mount) throw new VDeployError('not_found', 'This app has no permanent folder by that name');
+    if (!mount)
+      throw new VDeployError('not_found', 'This app has no permanent folder by that name');
     if (!row.serverId || !deps.files) {
       throw new VDeployError('unavailable', 'This app is not running anywhere yet');
     }

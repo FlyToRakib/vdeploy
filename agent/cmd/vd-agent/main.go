@@ -25,6 +25,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/files"
 	"github.com/FlyToRakib/vdeploy/agent/internal/health"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
+	"github.com/FlyToRakib/vdeploy/agent/internal/image"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
 	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
@@ -123,7 +124,10 @@ func doctor(configPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	host := preflight.LinuxHost{Docker: docker.New(cfg.DockerSocket)}
-	results := append(preflight.Run(ctx, host, cfg.StateDir), preflight.RunServer(ctx, host, preflight.Options{AllowUnsupportedOS: cfg.AllowUnsupportedOS})...)
+	results := append(
+		preflight.Run(ctx, host, cfg.StateDir, cfg.Routing),
+		preflight.RunServer(ctx, host, preflight.Options{AllowUnsupportedOS: cfg.AllowUnsupportedOS})...,
+	)
 	marks := map[preflight.Status]string{preflight.Pass: "✓", preflight.Warn: "!", preflight.Fail: "✗"}
 	for _, r := range results {
 		fmt.Printf("%s %s\n", marks[r.Status], r.Message)
@@ -252,6 +256,10 @@ func serve(configPath string, log *slog.Logger) error {
 			Log:    log,
 			Open:   sealed.Opener{Key: box, ServerID: id.ServerID}.Open,
 		}
+		// Images this server built for other servers (§15). Anything left
+		// from a build nobody came to collect goes now: the failure mode of
+		// a builder is a disk full of images for apps deleted a week ago.
+		builder.SweepExports(time.Now())
 		backups := &backup.Runner{
 			Engine: engine,
 			Open:   sealed.Opener{Key: box, ServerID: id.ServerID}.Open,
@@ -283,6 +291,15 @@ func serve(configPath string, log *slog.Logger) error {
 			// Looking at what an app has written (§20 Runtime), confined to
 			// the folder asked for by the kernel rather than by a check.
 			Files: &files.Reader{Engine: engine, Log: log},
+			// Building for another server, and being built for (§15).
+			Exports: builder,
+			Images: &image.Loader{
+				Engine:  engine,
+				HTTP:    &http.Client{Timeout: 45 * time.Minute},
+				TempDir: backups.TempDir,
+				Images:  images,
+				Log:     log,
+			},
 			// Freeing disk without freeing a rollback target (§18).
 			Reclaim: &reclaim.Runner{
 				Engine: engine,

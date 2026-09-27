@@ -52,6 +52,11 @@ type Request struct {
 	Strip int `json:"strip,omitempty"`
 	// DetectOnly runs Railpack's detection and reports it, building nothing.
 	DetectOnly bool `json:"detectOnly"`
+	// Export keeps the built image on disk as a tarball, because the server
+	// that will run it is not this one (§15). Without it the image is loaded
+	// into the Engine and the work directory is thrown away, which is right
+	// for every build that runs where its app does.
+	Export bool `json:"export,omitempty"`
 	// Secrets are build-time secrets, each sealed to this agent (ADR 0007).
 	Secrets []Secret `json:"secrets"`
 }
@@ -85,6 +90,28 @@ type Result struct {
 	Log string `json:"log"`
 	// Persistence lists folders the app will write lasting data to (§17.2).
 	Persistence []Finding `json:"persistence,omitempty"`
+	// ExportSizeBytes and ExportSHA256 describe the tarball kept for another
+	// server to collect, measured as it was written (§15).
+	ExportSizeBytes int64  `json:"exportSizeBytes,omitempty"`
+	ExportSHA256    string `json:"exportSha256,omitempty"`
+}
+
+// outcome is everything one build produced. It is a struct rather than a
+// row of unnamed returns because a build now has two results — an image on
+// this server, and possibly a file for another one — and a caller that
+// swapped two of six strings would compile.
+type outcome struct {
+	Image     string
+	Detection json.RawMessage
+	Log       string
+	Findings  []Finding
+	Export    *Export
+}
+
+// Export is the image this build kept on disk for another server.
+type Export struct {
+	SizeBytes int64
+	SHA256    string
 }
 
 // Engine is what a build needs from Docker.
@@ -183,10 +210,10 @@ func (b *Builder) Run(ctx context.Context, req Request) Result {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	result := Result{BuildID: req.BuildID}
-	image, detection, log, findings, err := b.run(ctx, req)
-	result.Log = log
-	result.Detection = detection
-	result.Persistence = findings
+	built, err := b.run(ctx, req)
+	result.Log = built.Log
+	result.Detection = built.Detection
+	result.Persistence = built.Findings
 	if err != nil {
 		var plain failure
 		if errors.As(err, &plain) {
@@ -194,34 +221,41 @@ func (b *Builder) Run(ctx context.Context, req Request) Result {
 		} else {
 			result.Error = "the build could not run: " + err.Error()
 		}
+		// A build that failed after keeping a tarball keeps nothing: the
+		// only thing that would ever collect it is a build that succeeded.
+		b.dropExport(req.BuildID)
 		return result
 	}
 	result.OK = true
-	result.Image = image
+	result.Image = built.Image
+	if built.Export != nil {
+		result.ExportSizeBytes = built.Export.SizeBytes
+		result.ExportSHA256 = built.Export.SHA256
+	}
 	return result
 }
 
-func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage, string, []Finding, error) {
+func (b *Builder) run(ctx context.Context, req Request) (outcome, error) {
 	if err := req.validate(); err != nil {
-		return "", nil, "", nil, err
+		return outcome{}, err
 	}
 	folder, err := relative(req.Context, "build folder")
 	if err != nil {
-		return "", nil, "", nil, err
+		return outcome{}, err
 	}
 	dockerfile, err := relative(req.Dockerfile, "Dockerfile")
 	if err != nil {
-		return "", nil, "", nil, err
+		return outcome{}, err
 	}
 	if err := b.watermarks(ctx); err != nil {
-		return "", nil, "", nil, err
+		return outcome{}, err
 	}
 	work := filepath.Join(b.Dir, req.BuildID)
 	defer func() { _ = os.RemoveAll(work) }()
 	src, plan, out := filepath.Join(work, "src"), filepath.Join(work, "plan"), filepath.Join(work, "out")
 	for _, dir := range []string{src, plan, out} {
 		if err := os.MkdirAll(dir, 0o755); err != nil { // #nosec G301 -- the builder user reads it
-			return "", nil, "", nil, fmt.Errorf("work dir: %w", err)
+			return outcome{}, fmt.Errorf("work dir: %w", err)
 		}
 	}
 	// The rootless builder runs as uid 1000 and writes the plan and the image here.
@@ -229,11 +263,11 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	_ = os.Chown(out, 1000, 1000)
 
 	if err := b.fetch(ctx, req.Source, src, req.Strip); err != nil {
-		return "", nil, "", nil, err
+		return outcome{}, err
 	}
 	buildDir := filepath.Join(src, filepath.FromSlash(folder))
 	if info, err := os.Stat(buildDir); err != nil || !info.IsDir() {
-		return "", nil, "", nil, fail("the build folder %q is not in the source", folder)
+		return outcome{}, fail("the build folder %q is not in the source", folder)
 	}
 
 	// The whole source is mounted at /repo; the build folder and the
@@ -243,11 +277,15 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	if req.Strategy == "railpack" {
 		info, log, err := b.prepare(ctx, req.BuildID, buildDir, plan)
 		if err != nil {
-			return "", info, log, nil, err
+			return outcome{Detection: info, Log: log}, err
 		}
 		if req.DetectOnly {
 			// Railpack images work in /app.
-			return "", info, log, ContainerFindings(ScanPersistence(buildDir), "/app"), nil
+			return outcome{
+				Detection: info,
+				Log:       log,
+				Findings:  ContainerFindings(ScanPersistence(buildDir), "/app"),
+			}, nil
 		}
 		detection = info
 		frontend = []string{
@@ -259,7 +297,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 			dockerfile = path.Join(folder, "Dockerfile")
 		}
 		if info, err := os.Stat(filepath.Join(src, filepath.FromSlash(dockerfile))); err != nil || info.IsDir() {
-			return "", nil, "", nil, fail("there is no %s in the source; choose auto-detect to build without one", dockerfile)
+			return outcome{}, fail("there is no %s in the source; choose auto-detect to build without one", dockerfile)
 		}
 		frontend = []string{
 			"--frontend", "dockerfile.v0",
@@ -283,7 +321,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	binds := []string{src + ":/repo:ro", plan + ":/plan:ro", out + ":/out"}
 	if len(req.Secrets) > 0 {
 		if err := b.writeSecrets(req, secretsDir); err != nil {
-			return "", detection, "", nil, err
+			return outcome{Detection: detection}, err
 		}
 		binds = append(binds, secretsDir+":/secrets:ro")
 		for _, secret := range req.Secrets {
@@ -292,7 +330,7 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 	}
 
 	if err := b.Engine.EnsureBuildCache(ctx); err != nil {
-		return "", detection, "", nil, fmt.Errorf("build cache: %w", err)
+		return outcome{Detection: detection}, fmt.Errorf("build cache: %w", err)
 	}
 	b.clearStaleLock(ctx)
 	name := "vd-build/" + strings.ToLower(strings.TrimPrefix(req.ProjectID, "prj_")) + ":" + strings.ToLower(req.BuildID)
@@ -323,28 +361,45 @@ func (b *Builder) run(ctx context.Context, req Request) (string, json.RawMessage
 		code, log, err = b.Engine.RunHelper(ctx, builder)
 	}
 	if err != nil {
-		return "", detection, log, nil, err
+		return outcome{Detection: detection, Log: log}, err
 	}
 	if code != 0 {
-		return "", detection, log, nil, fail("the build failed (exit %d); the end of its output says why", code)
+		return outcome{Detection: detection, Log: log}, fail("the build failed (exit %d); the end of its output says why", code)
+	}
+	// Another server will run this, so the tarball is kept and measured on
+	// the way past — one read, not two. Hashing it again later could not
+	// prove the same thing anyway: an export is only reproducible if
+	// nothing about the Engine changed in between.
+	var kept *Export
+	if req.Export {
+		kept, err = b.keepExport(req.BuildID, filepath.Join(out, "image.tar"))
+		if err != nil {
+			return outcome{Detection: detection, Log: log}, err
+		}
 	}
 	tarball, err := os.Open(filepath.Join(out, "image.tar")) // #nosec G304 -- our own work dir
 	if err != nil {
-		return "", detection, log, nil, fmt.Errorf("built image: %w", err)
+		return outcome{Detection: detection, Log: log}, fmt.Errorf("built image: %w", err)
 	}
 	defer func() { _ = tarball.Close() }()
 	id, err := b.Engine.LoadImage(ctx, tarball, name)
 	if err != nil {
-		return "", detection, log, nil, err
+		return outcome{Detection: detection, Log: log}, err
 	}
 	workdir, err := b.Engine.ImageWorkdir(ctx, id)
 	if err != nil {
-		return "", detection, log, nil, err
+		return outcome{Detection: detection, Log: log}, err
 	}
 	if err := b.Images.Add(id, req.BuildID, req.ProjectID); err != nil {
-		return "", detection, log, nil, err
+		return outcome{Detection: detection, Log: log}, err
 	}
-	return id, detection, log, ContainerFindings(ScanPersistence(buildDir), workdir), nil
+	return outcome{
+		Image:     id,
+		Detection: detection,
+		Log:       log,
+		Findings:  ContainerFindings(ScanPersistence(buildDir), workdir),
+		Export:    kept,
+	}, nil
 }
 
 // clearStaleLock removes a lock left by a build that never finished, so the

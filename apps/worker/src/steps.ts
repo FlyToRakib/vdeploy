@@ -400,8 +400,18 @@ const sleep = (ms: number) =>
   });
 
 /**
- * Builds an uploaded source on the project's own server and waits for the
- * image (ADR 0008). The build's secrets are pinned by name, like runtime ones.
+ * Builds an uploaded source and waits for the image (ADR 0008).
+ *
+ * Normally that happens on the server the app runs on. A project can name
+ * another (§15), and then a build is the one thing on this platform that
+ * deliberately happens somewhere the app will never run: a build is the
+ * heaviest thing a small box ever does, and a production machine that
+ * compiles is a production machine that goes slow on the evening somebody
+ * deploys. The image then has to travel, and the build is not finished
+ * until it has — so nothing here changes: this still waits for one build to
+ * succeed, and success still means the image is where it will be started.
+ *
+ * The build's secrets are pinned by name, like runtime ones.
  */
 async function buildImage(
   deps: StepDeps,
@@ -440,11 +450,16 @@ async function buildImage(
     }
     return { name, secretId: found.id, version: found.version };
   });
+  // A builder that is where the app already runs is not an offload, and
+  // shipping an image to the machine it is already on would be silly.
+  const builder = spec.build.builder;
+  const elsewhere = builder !== undefined && builder !== row.serverId;
+  const on = elsewhere ? builder : row.serverId;
   const buildId = await deps.db.transaction((tx) =>
     queueBuild(tx, {
       orgId: state.orgId,
       projectId: row.id,
-      serverId: row.serverId,
+      serverId: on,
       uploadId,
       kind: 'build',
       strategy,
@@ -454,11 +469,13 @@ async function buildImage(
         ...(spec.build.target ? { target: spec.build.target } : {}),
         args: spec.build.args,
         ...(strip ? { strip } : {}),
+        // Keep the image on disk afterwards: another server must collect it.
+        ...(elsewhere ? { export: true } : {}),
       },
       secrets: buildSecrets,
     }),
   );
-  state.notes.push(`Built as ${buildId}.`);
+  state.notes.push(elsewhere ? `Built as ${buildId}, on another server.` : `Built as ${buildId}.`);
   const deadline = Date.now() + (deps.buildTimeoutMs ?? 60 * 60_000);
   for (;;) {
     const build = await getBuild(deps.db, state.orgId, buildId);

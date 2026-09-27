@@ -9,6 +9,8 @@ export interface ServerSummary {
   agentVersion: string | null;
   publicIpv4: string | null;
   provider: string | null;
+  /** A builder compiles for the others and runs nothing itself (§15). */
+  role?: 'apps' | 'builder';
   reachable: 'reachable' | 'partly' | 'blocked' | 'unknown' | null;
   capacity: { cpus: number; memoryBytes: number; diskBytes: number } | null;
   projects: number;

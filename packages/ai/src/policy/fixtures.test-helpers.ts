@@ -131,6 +131,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'cron.create': { cron: CRON },
   'cron.update': { cron: CRON },
   'volume.create': { volume: { name: 'uploads', mountPath: '/app/uploads' } },
+  'build.configure': { builder: newId('server') },
   'storage.make_persistent': { mountPath: '/app/uploads' },
   'backup.schedule': { expr: '0 3 * * *', timezone: 'UTC', keepLocal: 7, keepOffsite: 30 },
   'backup.download': { backupId: newId('backup') },

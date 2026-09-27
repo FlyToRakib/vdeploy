@@ -135,7 +135,8 @@ export function specAfter(
     // A template is scaffolding, not a kind of project: it expands here, so
     // what is planned, approved, stored and sent to the agent is an ordinary
     // spec. Nothing downstream ever learns a template was involved.
-    const asked = args.spec as { source?: { type?: string; template?: string }; metadata?: { name?: string } } | undefined;
+    const asked = args.spec as
+      { source?: { type?: string; template?: string }; metadata?: { name?: string } } | undefined;
     if (asked?.source?.type === 'template') {
       return templateSpec(asked.source.template ?? '', asked.metadata?.name ?? '');
     }
@@ -183,7 +184,8 @@ export type SectionEdit =
   | 'scaling.rules'
   | 'network.middleware'
   | 'loadbalancer.configure'
-  | 'volume.create';
+  | 'volume.create'
+  | 'build.configure';
 
 export const SECTION_EDITS: readonly SectionEdit[] = [
   'domain.add',
@@ -196,6 +198,7 @@ export const SECTION_EDITS: readonly SectionEdit[] = [
   'network.middleware',
   'loadbalancer.configure',
   'volume.create',
+  'build.configure',
 ];
 
 export function isSectionEdit(name: string): name is SectionEdit {
@@ -273,14 +276,34 @@ function editSection(
         ...current,
         network: { ...network(current), loadBalancer: args.loadBalancer },
       });
+    case 'build.configure': {
+      // A prebuilt image is not compiled, so naming a machine to compile it
+      // on is a setting that would quietly do nothing.
+      if (current.build.strategy === 'image') {
+        throw new VDeployError(
+          'conflict',
+          'This app runs an image somebody else built, so there is nothing here to compile',
+        );
+      }
+      const builder = args.builder as string | null | undefined;
+      // Dropped rather than set to undefined: the spec is strict, and an
+      // absent builder is what "build it where it runs" means.
+      const rest = { ...current.build };
+      delete rest.builder;
+      return valid({
+        ...current,
+        build: {
+          ...rest,
+          ...(builder ? { builder } : {}),
+          ...(args.cache === undefined ? {} : { cache: args.cache }),
+        },
+      });
+    }
     case 'volume.create': {
       const volume = args.volume as { name: string; mountPath: string };
       const volumes = current.runtime.volumes;
       if (volumes.some((v) => v.name === volume.name || v.mountPath === volume.mountPath)) {
-        throw new VDeployError(
-          'conflict',
-          `This app already keeps ${volume.mountPath}`,
-        );
+        throw new VDeployError('conflict', `This app already keeps ${volume.mountPath}`);
       }
       return valid({
         ...current,

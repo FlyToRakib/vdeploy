@@ -235,7 +235,6 @@ function simple(
   };
 }
 
-
 /**
  * Putting an app's folders back the way a snapshot has them (§17.5). The
  * app stops first — writing over files underneath a running app is how both
@@ -279,7 +278,9 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     // A server was named, or the caller already resolved one: place only
     // when there is genuinely no answer yet.
     const named = args.serverId ?? asDrafted.placement.server ?? context.server;
-    const spec = named ? asDrafted : withServer(asDrafted, place(asDrafted, context.candidates ?? []));
+    const spec = named
+      ? asDrafted
+      : withServer(asDrafted, place(asDrafted, context.candidates ?? []));
     const draft = specChange(null, spec, 'sensitive', context);
     // A template may need settings only the server should ever know. They
     // are made once the project exists — between writing the spec and
@@ -329,6 +330,33 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'network.middleware': sectionEdit('network.middleware'),
   'loadbalancer.configure': sectionEdit('loadbalancer.configure'),
   'volume.create': sectionEdit('volume.create'),
+  /**
+   * Which machine compiles this app (§15). The spec edit is ordinary; the
+   * part worth checking is the machine, because a build queued on a server
+   * that is not there is a deploy that hangs rather than one that fails.
+   */
+  'build.configure': (args, context) => {
+    const project = requireProject(context);
+    if (args.builder) {
+      const known = context.candidates ?? [];
+      const chosen = known.find((c) => c.id === args.builder);
+      if (!chosen) {
+        throw new VDeployError('not_found', 'That server is not one of yours');
+      }
+      if (!chosen.connected) {
+        throw new VDeployError(
+          'conflict',
+          `${chosen.budget.name} has never connected, so it cannot build anything yet`,
+        );
+      }
+    }
+    return specChange(
+      project,
+      specAfter('build.configure', args, project.spec),
+      'sensitive',
+      context,
+    );
+  },
   'storage.make_persistent': (args, context) => {
     const project = requireProject(context);
     return specChange(
@@ -482,7 +510,11 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     return {
       specHash: null,
       changes: [
-        { path: 'release', before: 'the version running now', after: 'the same source, built again' },
+        {
+          path: 'release',
+          before: 'the version running now',
+          after: 'the same source, built again',
+        },
       ],
       // A release is created from the current spec, which builds because the
       // source needs building; then it rolls out health-gated like any other.
@@ -889,11 +921,21 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     if (project.spec.placement.server === args.serverId) {
       throw new VDeployError('conflict', 'It is already on that server');
     }
+    if (context.server?.role === 'builder') {
+      throw new VDeployError(
+        'conflict',
+        `${context.server.name} is a build server: it compiles for your other servers and runs nothing itself.`,
+      );
+    }
     checkFits(context.server, footprint(project.spec, project.running));
     return {
       specHash: null,
       changes: [
-        { path: 'placement.server', before: project.spec.placement.server ?? null, after: args.serverId },
+        {
+          path: 'placement.server',
+          before: project.spec.placement.server ?? null,
+          after: args.serverId,
+        },
       ],
       steps: [
         // Copies first, on the server that still has everything.
@@ -962,12 +1004,8 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     // restoring over a database on its own does.
     return {
       specHash: null,
-      changes: [
-        { path: 'data', before: 'what is there now', after: 'what the backup holds' },
-      ],
-      steps: [
-        { kind: 'restore_backup', backupId: args.backupId, mode: args.mode },
-      ],
+      changes: [{ path: 'data', before: 'what is there now', after: 'what the backup holds' }],
+      steps: [{ kind: 'restore_backup', backupId: args.backupId, mode: args.mode }],
       tier: args.mode === 'in_place' ? 'destructive' : 'sensitive',
       blastRadius: radius(project.spec, {
         downtime: args.mode === 'in_place' ? 'brief' : 'none',

@@ -305,6 +305,81 @@ export function SizeSection() {
 }
 
 /**
+ * Which server compiles this app (§15).
+ *
+ * The reason this is worth a setting: a build is the heaviest thing a
+ * small box ever does, and a production machine that compiles is a
+ * production machine that goes slow on the evening somebody deploys.
+ * Sending the build elsewhere is the cheapest way to never have that
+ * happen. The image then travels back, checked on the way, and the deploy
+ * does not count as built until it has arrived.
+ */
+export function BuildServerSection() {
+  const { projectId, row, act } = useProject();
+  const [servers, setServers] = useState<ServerSummary[] | null>(null);
+  const current = row.spec.build?.builder ?? '';
+
+  useEffect(() => {
+    void query<ServerSummary[]>('server.list').then(
+      (list) => {
+        setServers(list.filter((s) => s.status !== 'pending'));
+      },
+      () => {
+        setServers([]);
+      },
+    );
+  }, []);
+
+  // An app running an image somebody else built is not compiled at all.
+  if (row.spec.build?.strategy === 'image') return null;
+  const elsewhere = servers?.filter((s) => s.id !== row.serverId) ?? [];
+  return (
+    <Section
+      title="Where it is built"
+      hint="A build is the heaviest thing a small server does. It does not have to happen on the one serving your site."
+    >
+      {servers === null && <Skeleton className="h-10" />}
+      {servers !== null && elsewhere.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          This is your only server, so it builds here. Add a second one — there is a “building only”
+          choice when you do — and this app can be compiled there instead.
+        </p>
+      )}
+      {elsewhere.length > 0 && (
+        <div className="grid gap-3">
+          <select
+            aria-label="Build on"
+            value={current}
+            onChange={(e) => {
+              void act(
+                'build.configure',
+                { projectId, builder: e.target.value === '' ? null : e.target.value },
+                'Changing where it is built',
+              );
+            }}
+            className="h-10 max-w-sm rounded-md border border-border bg-surface-raised px-3 text-sm"
+          >
+            <option value="">On the server that runs it</option>
+            {elsewhere.map((s) => (
+              <option key={s.id} value={s.id}>
+                On {s.name}
+                {s.role === 'builder' ? ' (a build server)' : ''}
+              </option>
+            ))}
+          </select>
+          {current !== '' && (
+            <p className="text-sm text-muted-foreground">
+              The image is built there and copied here before the new version starts. If the copy
+              does not arrive whole, the deploy fails and what is running keeps running.
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/**
  * Which server the app runs on, and moving it to another (§17.6).
  *
  * A move is not a setting: it stops the app, copies its files across and
@@ -321,7 +396,12 @@ export function ServerSection() {
   useEffect(() => {
     void query<ServerSummary[]>('server.list').then(
       (list) => {
-        setServers(list.filter((s) => s.status !== 'pending' && s.id !== row.serverId));
+        // A builder runs nothing, so it is not somewhere an app can go.
+        setServers(
+          list.filter(
+            (s) => s.status !== 'pending' && s.id !== row.serverId && s.role !== 'builder',
+          ),
+        );
       },
       () => {
         setServers([]);
@@ -329,7 +409,7 @@ export function ServerSection() {
     );
   }, [row.serverId]);
 
-  const here = servers === null ? null : (servers.length === 0 ? [] : servers);
+  const here = servers === null ? null : servers.length === 0 ? [] : servers;
   return (
     <Section
       title="Where it runs"
@@ -361,8 +441,8 @@ export function ServerSection() {
           {moveTo !== '' && (
             <>
               <p className="text-sm text-muted-foreground">
-                The app stops, a copy of its files is taken and put back on the other server, and
-                it starts there. Its files stay on this server too until you delete them.
+                The app stops, a copy of its files is taken and put back on the other server, and it
+                starts there. Its files stay on this server too until you delete them.
               </p>
               <Button
                 variant="danger"
