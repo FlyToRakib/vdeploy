@@ -47,6 +47,7 @@ import {
   createDatabaseStep,
   importDumpStep,
   restoreBackupStep,
+  arriveDatabasesStep,
   arriveVolumesStep,
   deleteVolumeStep,
   moveToServerStep,
@@ -94,6 +95,8 @@ export interface ApplyState {
    * not exist when the plan is made, which is why it is carried here.
    */
   movedSnapshotId?: string;
+  /** The databases that moved with it, so their dumps can follow (§17.6). */
+  movedDatabaseIds?: string[];
   notes: string[];
 }
 
@@ -672,6 +675,8 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return moveToServerStep(deps, state, step.serverId);
     case 'arrive_volumes':
       return arriveVolumesStep(deps, state);
+    case 'arrive_databases':
+      return arriveDatabasesStep(deps, state);
     case 'restore_backup':
       return restoreBackupStep(deps, state, step.backupId, step.mode);
     case 'import_dump':

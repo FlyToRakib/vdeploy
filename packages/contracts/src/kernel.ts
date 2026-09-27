@@ -113,6 +113,13 @@ export const PlanStep = z.discriminatedUnion('kind', [
    * copy that already existed.
    */
   z.strictObject({ kind: z.literal('arrive_volumes') }),
+  /**
+   * Load each database that moved with the app back into the copy of it
+   * now standing on the new server (§17.6). Like `arrive_volumes`, it
+   * names nothing: the backups are the ones this plan took, and they do
+   * not exist when the plan is made.
+   */
+  z.strictObject({ kind: z.literal('arrive_databases') }),
   z.strictObject({
     kind: z.literal('run_task'),
     command: z.array(z.string().max(4096)).min(1).max(64),

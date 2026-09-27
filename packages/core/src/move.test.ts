@@ -57,13 +57,31 @@ describe('moving an app to another server (§17.6)', () => {
     expect(plan.changes[0]).toMatchObject({ path: 'placement.server', before: from, after: to });
   });
 
-  it('refuses to strand an app from its own database', () => {
-    // A managed database is internal to its server: moving the app alone
-    // would leave it unable to reach its data, which is worse than not
-    // moving at all.
+  it('brings a database only this app reads along with it', () => {
+    // A managed database is internal to its server, so the app cannot be
+    // moved away from it: it comes too, data first.
+    const plan = move({
+      linkedDatabases: [{ id: 'dbs_01J9Z3Q8S7M2K4X6V1B5N0C9D8', name: 'shop-db', readers: 1 }],
+    });
+    expect(plan.steps.map((s) => s.kind)).toEqual([
+      'take_backup',
+      'snapshot_volumes',
+      'stop',
+      'move_to_server',
+      // The data before the files, and both before the app starts: an app
+      // started against an empty database is an app that writes into one.
+      'arrive_databases',
+      'arrive_volumes',
+      'start',
+    ]);
+  });
+
+  it('will not take a database another app also reads', () => {
     expect(() =>
-      move({ linkedDatabases: [{ id: 'dbs_01J9Z3Q8S7M2K4X6V1B5N0C9D8', name: 'shop-db' }] }),
-    ).toThrow(/unable to reach its own data/);
+      move({
+        linkedDatabases: [{ id: 'dbs_01J9Z3Q8S7M2K4X6V1B5N0C9D8', name: 'shared-db', readers: 2 }],
+      }),
+    ).toThrow(/also read by another app/);
   });
 
   it('refuses a move to where it already is', () => {

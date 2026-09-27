@@ -47,8 +47,12 @@ export interface PlanContext {
   project: ProjectState | null;
   /** The database an operation names, for the data layer (§17.3). */
   database?: DatabaseState | null;
-  /** Databases this project reads, so a deploy copies them first (§17.4). */
-  linkedDatabases?: { id: Id<'database'>; name: string }[];
+  /**
+   * Databases this project reads, so a deploy copies them first (§17.4).
+   * `readers` is how many apps read each, which decides whether one can
+   * move with this app or is stuck where it is (§17.6).
+   */
+  linkedDatabases?: { id: Id<'database'>; name: string; readers?: number }[];
   /** The release a rollback returns to, loaded by the caller. */
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   /**
@@ -870,12 +874,16 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'project.move': (args, context) => {
     const project = requireProject(context);
     const volumes = project.spec.runtime.volumes.map((v) => v.name);
+    // A database only this app reads comes with it. One another app also
+    // reads cannot: moving it would leave that app unable to reach its own
+    // data, and the person moving this one has not agreed to that.
     const databases = context.linkedDatabases ?? [];
-    if (databases.length > 0) {
+    const shared = databases.filter((d) => (d.readers ?? 1) > 1);
+    if (shared.length > 0) {
       throw new VDeployError(
         'conflict',
-        `This app reads ${databases.map((d) => d.name).join(', ')}, which lives on the server it is on. ` +
-          'Moving the app alone would leave it unable to reach its own data.',
+        `${shared.map((d) => d.name).join(', ')} is also read by another app, so it cannot move with this one. ` +
+          'Move the other app first, or take this app off that database.',
       );
     }
     if (project.spec.placement.server === args.serverId) {
@@ -888,11 +896,15 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
         { path: 'placement.server', before: project.spec.placement.server ?? null, after: args.serverId },
       ],
       steps: [
-        // A copy first, on the server that still has the files.
+        // Copies first, on the server that still has everything.
+        ...databases.map((d) => ({ kind: 'take_backup', databaseId: d.id }) as const),
         ...(volumes.length ? [{ kind: 'snapshot_volumes', volumes } as const] : []),
         { kind: 'stop' } as const,
         { kind: 'move_to_server', serverId: args.serverId } as const,
-        // And back, on the server that now has the app.
+        // And back, on the server that now has the app. The data before
+        // the files: an app started against an empty database is an app
+        // that writes into one.
+        ...(databases.length ? [{ kind: 'arrive_databases' } as const] : []),
         ...(volumes.length ? [{ kind: 'arrive_volumes' } as const] : []),
         { kind: 'start' } as const,
       ],

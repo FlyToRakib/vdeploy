@@ -658,17 +658,35 @@ export class Gateway
       if (!target || (!backup && !upload)) continue;
       const profile = engineProfile(target.engine);
       const password = await databasePassword(db, secretsKey, target);
-      // A dump from another host is fetched by the server itself, with a
-      // one-time token, and checked against what was uploaded (§17.5).
-      const download =
-        upload && token
-          ? {
-              url: `${new URL(this.deps.publicUrl).origin}/api/v1/agent/dumps/${restore.id}`,
-              token,
-              sha256: upload.sha256,
-              sizeBytes: upload.size,
-            }
-          : null;
+      // A dump the server does not have is fetched by the server itself,
+      // with a one-time token, and checked before it goes near a database.
+      // There are two ways not to have it: it was uploaded from somebody's
+      // laptop (§17.5), or it is on the server this database has just moved
+      // away from (§17.6).
+      let download = null;
+      if (upload && token) {
+        download = {
+          url: `${new URL(this.deps.publicUrl).origin}/api/v1/agent/dumps/${restore.id}`,
+          token,
+          sha256: upload.sha256,
+          sizeBytes: upload.size,
+        };
+      } else if (backup?.serverId && backup.serverId !== serverId && backup.sha256) {
+        const allowed = await db.transaction((tx) =>
+          allowTransfer(tx, {
+            orgId: backup.orgId,
+            backupId: backup.id,
+            toServerId: serverId,
+            now: now(),
+          }),
+        );
+        download = {
+          url: `${this.deps.publicUrl.replace(/\/$/, '')}/api/v1/transfers/${allowed.id}`,
+          token: allowed.token,
+          sha256: backup.sha256,
+          sizeBytes: backup.sizeBytes ?? 0,
+        };
+      }
       connection.socket.send(
         seal(key, {
           ...connection.session.next('restore'),

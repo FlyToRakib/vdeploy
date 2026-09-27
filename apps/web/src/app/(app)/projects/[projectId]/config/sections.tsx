@@ -19,6 +19,7 @@ import {
 import { formText } from '@/lib/forms';
 import { query } from '@/lib/operations';
 import { ago, sizeWords, type BackupSummary } from '@/lib/databases';
+import type { ServerSummary } from '@/lib/servers';
 import type { TaskView } from '@vdeploy/contracts';
 import { useProject } from '../project-shell';
 
@@ -299,6 +300,84 @@ export function SizeSection() {
         />
         <Button type="submit">Save</Button>
       </form>
+    </Section>
+  );
+}
+
+/**
+ * Which server the app runs on, and moving it to another (§17.6).
+ *
+ * A move is not a setting: it stops the app, copies its files across and
+ * starts it again somewhere else. So it says that, and goes through
+ * approval like anything else that can lose data — the copy it takes first
+ * is what makes it safe, and the folders it leaves behind are what make it
+ * reversible.
+ */
+export function ServerSection() {
+  const { projectId, row, act } = useProject();
+  const [servers, setServers] = useState<ServerSummary[] | null>(null);
+  const [moveTo, setMoveTo] = useState('');
+
+  useEffect(() => {
+    void query<ServerSummary[]>('server.list').then(
+      (list) => {
+        setServers(list.filter((s) => s.status !== 'pending' && s.id !== row.serverId));
+      },
+      () => {
+        setServers([]);
+      },
+    );
+  }, [row.serverId]);
+
+  const here = servers === null ? null : (servers.length === 0 ? [] : servers);
+  return (
+    <Section
+      title="Where it runs"
+      hint="Its files are on that server's disk, so moving it means copying them across."
+    >
+      {here === null && <Skeleton className="h-10" />}
+      {here?.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          This is your only server, so there is nowhere else to put it.
+        </p>
+      )}
+      {here && here.length > 0 && (
+        <div className="grid gap-3">
+          <select
+            aria-label="Move to"
+            value={moveTo}
+            onChange={(e) => {
+              setMoveTo(e.target.value);
+            }}
+            className="h-10 max-w-sm rounded-md border border-border bg-surface-raised px-3 text-sm"
+          >
+            <option value="">Leave it where it is</option>
+            {here.map((s) => (
+              <option key={s.id} value={s.id}>
+                Move to {s.name}
+              </option>
+            ))}
+          </select>
+          {moveTo !== '' && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                The app stops, a copy of its files is taken and put back on the other server, and
+                it starts there. Its files stay on this server too until you delete them.
+              </p>
+              <Button
+                variant="danger"
+                size="sm"
+                className="justify-self-start"
+                onClick={() =>
+                  void act('project.move', { projectId, serverId: moveTo }, 'Moving the app')
+                }
+              >
+                Move it
+              </Button>
+            </>
+          )}
+        </div>
+      )}
     </Section>
   );
 }

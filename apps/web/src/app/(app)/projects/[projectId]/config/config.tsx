@@ -9,6 +9,7 @@ import { useProject } from '../project-shell';
 import {
   DomainsSection,
   ScheduleSection,
+  ServerSection,
   SettingsSection,
   SizeSection,
   StorageSection,
@@ -132,6 +133,7 @@ export function ProjectConfig() {
       <SizeSection />
       <StorageSection />
       <ScheduleSection />
+      <ServerSection />
       {mode === 'advanced' && <RawSpec />}
     </div>
   );

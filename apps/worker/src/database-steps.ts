@@ -42,6 +42,8 @@ import {
   databases,
   getDatabase,
   markDatabaseDeleted,
+  newestGoodBackup,
+  linkedDatabases,
   projects,
   servers,
   putSecret,
@@ -618,18 +620,86 @@ export async function moveToServerStep(
   const from = project.serverId;
   const spec = readSpec(project.spec);
   const next = { ...spec, placement: { ...spec.placement, server: serverId as Id<'server'> } };
+  // Every database only this app reads comes with it: the planner already
+  // refused the move if one of them is shared.
+  const moving = await linkedDatabases(deps.db, projectId);
   await deps.db.transaction(async (tx) => {
     await tx
       .update(projects)
       .set({ serverId, spec: next, specHash: hashOf(next), updatedAt: deps.now() })
       .where(eq(projects.id, projectId));
+    for (const database of moving) {
+      // The new agent stands an empty one up with the same password,
+      // which is sealed to *its* key when the desired state is pushed;
+      // the dump goes in next, before the app starts.
+      await tx.update(databases).set({ serverId }).where(eq(databases.id, database.id));
+    }
     // Both sides have to hear: the old server to let it go, the new one to
     // take it. A generation that does not move leaves a container running
     // somewhere nobody is looking.
     if (from) await bumpGeneration(tx, from);
     await bumpGeneration(tx, serverId);
   });
-  state.notes.push(`${project.name} now belongs to ${target.name}.`);
+  state.movedDatabaseIds = moving.map((d) => d.id);
+  state.notes.push(
+    moving.length === 0
+      ? `${project.name} now belongs to ${target.name}.`
+      : `${project.name} and ${moving.map((d) => d.name).join(', ')} now belong to ${target.name}.`,
+  );
+}
+
+/**
+ * Loads each moved database back into the copy of it now standing on the
+ * new server (§17.6).
+ *
+ * The dump is on the old server, so the receiving agent fetches it the same
+ * way it fetches anything it does not have: a one-time token, the bytes
+ * piped from the server that holds them, size and hash checked before a
+ * byte reaches a database. It happens **before the app starts**, because an
+ * app started against an empty database is an app that writes into one.
+ */
+export async function arriveDatabasesStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+): Promise<void> {
+  const moved = state.movedDatabaseIds ?? [];
+  if (moved.length === 0) return;
+  for (const databaseId of moved) {
+    const row = await getDatabase(deps.db, databaseId);
+    if (!row) continue;
+    const copy = await newestGoodBackup(deps.db, databaseId);
+    if (!copy) {
+      throw new VDeployError(
+        'unavailable',
+        `There is no checked copy of ${row.name} to load on the new server, so the app was not started there.`,
+      );
+    }
+    const queued = await deps.db.transaction((tx) =>
+      queueRestore(tx, {
+        orgId: state.orgId,
+        backupId: copy.id,
+        databaseId,
+        serverId: row.serverId,
+        mode: 'in_place',
+      }),
+    );
+    const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
+    for (;;) {
+      const restore = await getRestore(deps.db, queued.id);
+      if (restore?.status === 'done') break;
+      if (restore?.status === 'failed') {
+        throw new VDeployError(
+          'unavailable',
+          `${row.name} could not be loaded on the new server, so the app was not started there. ${restore.error ?? ''}`.trim(),
+        );
+      }
+      if (Date.now() > deadline) {
+        throw new VDeployError('unavailable', `Moving ${row.name} did not finish in time`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+    }
+    state.notes.push(`${row.name} came with it.`);
+  }
 }
 
 /**

@@ -1,6 +1,7 @@
 'use client';
 
 import { RefreshCw } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useCrumbName } from '@/components/breadcrumbs';
@@ -27,6 +28,11 @@ interface Reachability {
   plain: string;
   fix: string[];
   checkedAt: string;
+}
+
+interface Drain {
+  moves: { projectId: string; name: string; toServerId: string; because: string }[];
+  stuck: { name: string; why: string }[];
 }
 
 interface ServerStatus {
@@ -74,6 +80,7 @@ export function ServerDetail({ serverId }: { serverId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [freeing, setFreeing] = useState(false);
+  const [drain, setDrain] = useState<Drain | null>(null);
   const [command, setCommand] = useState<string | null>(null);
   const [editingAddress, setEditingAddress] = useState(false);
   useCrumbName(serverId, server?.name);
@@ -146,6 +153,19 @@ export function ServerDetail({ serverId }: { serverId: string }) {
       reload();
     } catch (err) {
       toast.error(message(err, 'That folder could not be deleted.') ?? 'It did not work.', { id });
+    }
+  }
+
+  /**
+   * What emptying this server would mean (§20 Servers). It shows the plan
+   * and starts nothing: each move is destructive and confirmed on its own,
+   * because emptying a machine by accident should not be one click.
+   */
+  async function planDrain() {
+    try {
+      setDrain(await query<Drain>('server.drain', { serverId }));
+    } catch (err) {
+      setError(message(err, 'That could not be worked out.'));
     }
   }
 
@@ -343,6 +363,51 @@ export function ServerDetail({ serverId }: { serverId: string }) {
         <Card className="grid content-start gap-2">
           <h2 className="font-medium">Room for apps</h2>
           <p className="text-sm">{capacity ?? 'Known once the agent connects.'}</p>
+        </Card>
+        <Card className="grid content-start gap-3 md:col-span-2">
+          <h2 className="font-medium">Emptying this server</h2>
+          <p className="text-sm text-muted-foreground">
+            Before you turn a machine off, or replace it. Each app moves on its own, and each move
+            stops that app while its files are copied across.
+          </p>
+          {drain === null ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="justify-self-start"
+              onClick={() => void planDrain()}
+            >
+              See what this would take
+            </Button>
+          ) : (
+            <div className="grid gap-3 text-sm">
+              {drain.moves.length === 0 && drain.stuck.length === 0 && (
+                <p>Nothing runs here, so there is nothing to move.</p>
+              )}
+              {drain.moves.map((move) => (
+                <div key={move.projectId} className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{move.name}</span>
+                  <span className="text-muted-foreground">{move.because}</span>
+                  <Link
+                    className="underline underline-offset-2"
+                    href={`/projects/${move.projectId}/config`}
+                  >
+                    Move it
+                  </Link>
+                </div>
+              ))}
+              {drain.stuck.length > 0 && (
+                <div className="grid gap-1 rounded-md border border-status-warning p-3">
+                  <p className="font-medium">These cannot move yet</p>
+                  {drain.stuck.map((one) => (
+                    <p key={one.name}>
+                      <span className="font-medium">{one.name}</span>: {one.why}.
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </Card>
         <HealthPanel
           health={server.health}

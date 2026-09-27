@@ -128,14 +128,25 @@ async function requestedDatabase(
 export async function linkedDatabases(
   db: Database,
   projectId: string,
-): Promise<{ id: Id<'database'>; name: string }[]> {
+): Promise<{ id: Id<'database'>; name: string; readers: number }[]> {
   const rows = await db
     .select({ id: databases.id, name: databases.name })
     .from(databaseLinks)
     .innerJoin(databases, eq(databases.id, databaseLinks.databaseId))
     .where(and(eq(databaseLinks.projectId, projectId), isNull(databases.deletedAt)));
   const seen = new Map(rows.map((row) => [row.id, row.name]));
-  return [...seen].map(([id, name]) => ({ id: id as Id<'database'>, name }));
+  const out = [];
+  for (const [id, name] of seen) {
+    // How many apps read it, which is what decides whether it can move
+    // with this one or is stuck where it is (§17.6).
+    const links = await linksOf(db, id);
+    out.push({
+      id: id as Id<'database'>,
+      name,
+      readers: new Set(links.map((link) => link.projectId)).size,
+    });
+  }
+  return out;
 }
 
 /** Whether a database this app reads is the one a backup belongs to. */
