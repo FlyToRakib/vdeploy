@@ -18,6 +18,7 @@ import {
   metricsOf,
   latestMetric,
   downsample,
+  observedState,
   servers,
   urlSettingsFor,
 } from '@vdeploy/db';
@@ -150,7 +151,19 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       })
       .from(servers)
       .where(eq(servers.id, id(args, 'serverId')));
-    return row;
+    if (!row) return row;
+    // What the machine is made of, as its agent last saw it (§18). It is
+    // stamped with when it was taken, because it is taken slowly and a
+    // number of unknown age is a number nobody can act on.
+    const [seen] = await deps.db
+      .select({ report: observedState.report })
+      .from(observedState)
+      .where(eq(observedState.serverId, row.id));
+    return {
+      ...row,
+      health: seen?.report.health ?? null,
+      using: seen?.report.usage?.server ?? null,
+    };
   },
   'server.resources': async ({ deps, args }) => {
     const serverId = id(args, 'serverId');

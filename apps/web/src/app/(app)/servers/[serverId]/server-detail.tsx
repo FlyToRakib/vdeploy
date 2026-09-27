@@ -13,6 +13,7 @@ import { Status } from '@/components/ui/status';
 import { formText } from '@/lib/forms';
 import { OperationError, query, runOperation } from '@/lib/operations';
 import { ago, serverHealth, splitCommand } from '@/lib/servers';
+import { HealthPanel, type ServerHealth, type ServerUsing } from './health-panel';
 
 interface Reachability {
   status: 'reachable' | 'partly' | 'blocked' | 'unknown';
@@ -33,6 +34,9 @@ interface ServerStatus {
   addressManual: boolean;
   provider: string | null;
   reachability: Reachability | null;
+  /** What the agent last said the machine is made of (§18); absent until it has looked. */
+  health: ServerHealth | null;
+  using: ServerUsing | null;
 }
 
 const REACH_HEALTH = {
@@ -285,6 +289,7 @@ export function ServerDetail({ serverId }: { serverId: string }) {
           <h2 className="font-medium">Room for apps</h2>
           <p className="text-sm">{capacity ?? 'Known once the agent connects.'}</p>
         </Card>
+        <HealthPanel health={server.health} using={server.using} />
         <Card className="grid content-start gap-2 md:col-span-2">
           <h2 className="font-medium">Agent</h2>
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">

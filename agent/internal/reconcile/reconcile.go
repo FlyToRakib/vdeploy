@@ -16,6 +16,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/guard"
+	"github.com/FlyToRakib/vdeploy/agent/internal/health"
 	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
 	"github.com/FlyToRakib/vdeploy/agent/internal/spec"
 )
@@ -76,6 +77,8 @@ type Report struct {
 	Settling bool `json:"settling"`
 	// Usage is what the server and its apps are actually using (§27).
 	Usage *metrics.Usage `json:"usage,omitempty"`
+	// Health is what the server is made of (§18), on its own slower pace.
+	Health *health.Report `json:"health,omitempty"`
 }
 
 // SecretSource opens a secret value sealed to this server for one project.
@@ -107,6 +110,10 @@ type Reconciler struct {
 	Metrics *metrics.Reader
 	// MetricsEvery paces those readings (default metrics.Every).
 	MetricsEvery time.Duration
+	// Health reads what the server is made of (§18); nil reads none.
+	Health *health.Reader
+	// HealthEvery paces that look (default health.Every).
+	HealthEvery time.Duration
 	// Inspector gathers evidence on replicas that are not serving; nil gathers none.
 	Inspector Inspector
 	Now       func() time.Time
@@ -117,6 +124,7 @@ type Reconciler struct {
 	unsaved       map[string][]UnsavedFolder
 	unsavedAt     time.Time
 	measured      time.Time
+	healthAt      time.Time
 	// moving: new permanent folders (by volume) whose files still have to be copied in.
 	moving   map[string]bool
 	evidence map[string]evidenceCache
@@ -195,6 +203,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 		p.report.Projects[i].Unsaved = r.unsaved[p.report.Projects[i].ProjectID]
 	}
 	p.measure(ctx)
+	p.inspect(ctx, state)
 	p.retire(ctx)
 	return p.report, nil
 }
@@ -220,6 +229,33 @@ func (p *pass) measure(ctx context.Context) {
 	}
 	usage := r.Metrics.Read(ctx, containers, r.now())
 	p.report.Usage = &usage
+}
+
+/*
+inspect looks at what the server is made of (§18) — the disk broken down,
+swap, inodes, load, and permanent folders whose app is gone. Asking Docker
+what its disk holds walks the filesystem, so this runs on its own much
+slower pace and never in the same breath as converging.
+*/
+func (p *pass) inspect(ctx context.Context, state *spec.DesiredState) {
+	r := p.r
+	if r.Health == nil {
+		return
+	}
+	every := r.HealthEvery
+	if every <= 0 {
+		every = health.Every
+	}
+	if !r.healthAt.IsZero() && r.now().Sub(r.healthAt) < every {
+		return
+	}
+	r.healthAt = r.now()
+	live := make(map[string]bool, len(state.Projects))
+	for _, project := range state.Projects {
+		live[project.ProjectID] = true
+	}
+	report := r.Health.Read(ctx, live, r.now())
+	p.report.Health = &report
 }
 
 func (p *pass) project(ctx context.Context, project spec.DesiredProject) ProjectState {

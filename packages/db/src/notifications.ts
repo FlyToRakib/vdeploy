@@ -284,6 +284,7 @@ export async function notifyFromReport(
   report: ObservedReport,
   now: Date,
 ): Promise<void> {
+  await notifyDiskFilling(db, serverId, report, now);
   const troubled = (report.projects ?? []).filter((p) =>
     p.evidence?.some((e) => e.oomKilled || e.restarts >= 3),
   );
@@ -329,6 +330,51 @@ export async function notifyFromReport(
       now,
     );
   }
+}
+
+/** Past this the machine is close enough to stopping to say so (§18). */
+const DISK_FULL_PERCENT = 85;
+
+/**
+ * A disk filling up is how a self-hosted server actually dies, and it is
+ * the one failure that is completely visible in advance. Told once a day
+ * while it lasts — daily, not hourly, because nothing about it changes in
+ * an hour and a message nobody can act on twice is a message ignored.
+ *
+ * What is filling it is named, because on almost every server the answer is
+ * old images and build cache rather than anything a person put there.
+ */
+async function notifyDiskFilling(
+  db: Executor,
+  serverId: string,
+  report: ObservedReport,
+  now: Date,
+): Promise<void> {
+  const disk = report.usage?.server;
+  if (!disk || disk.diskTotalBytes <= 0) return;
+  const full = Math.round((disk.diskUsedBytes / disk.diskTotalBytes) * 100);
+  if (full < DISK_FULL_PERCENT) return;
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return;
+  const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  const spare = report.health?.docker;
+  const unused = spare ? spare.imagesReclaimableBytes + spare.buildCacheReclaimableBytes : 0;
+  await notify(
+    db,
+    server.orgId,
+    {
+      trigger: 'disk_filling',
+      key: `disk:${serverId}:${now.toISOString().slice(0, 10)}`,
+      title: `${server.name} is ${String(full)}% full`,
+      message:
+        `${server.name} has ${gb(disk.diskTotalBytes - disk.diskUsedBytes)} of disk left out of ${gb(disk.diskTotalBytes)}. ` +
+        (unused > 0
+          ? `About ${gb(unused)} of that is old images and build cache nothing is using, which VDeploy can free without touching anything you could roll back to.`
+          : 'When a server runs out of disk, apps stop being able to write and deploys stop working.'),
+      serverId,
+    },
+    now,
+  );
 }
 
 /** Servers silent for more than five minutes; each outage is told once. */

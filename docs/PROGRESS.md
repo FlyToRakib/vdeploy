@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.3f — putting files back, reclaim, templates, compose import, status page
+**Task:** 4.3g — safe reclaim, templates, compose import, status page, firewall
 **Status:** in progress
-**Updated:** 2026-09-27 09:40 UTC
+**Updated:** 2026-09-27 11:05 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -148,10 +148,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 - [x] 4.3d metrics and graphs (§27, §20.1): what a server and its apps are actually using, as opposed to what they were promised — which the resource governor already knew. The agent takes a reading every thirty seconds: each app's processor and memory summed across its copies, against what those copies are allowed together, and the machine's own processor, memory and disk read from the kernel. Page cache is subtracted from an app's memory, because a graph that counts it frightens people for no reason; the first reading after a start reports no processor figure rather than one averaged over the machine's whole uptime; and one container that will not answer is not a failed reading. Readings are kept two days and pruned hourly, and a series is thinned to something a graph can draw by keeping the **peak** in each slot — averaging away a spike hides the thing somebody opened the graph to find. The project screen draws the last day with a dotted line at the limit, so "busy" is visible without reading an axis
 - [x] 4.3d-fix a snapshot of a folder that was never anybody’s (found while reading for 4.3e): the control plane names a permanent folder — “uploads” — and the agent mounted that name as if it were the volume. Docker makes a volume that does not exist on the spot, so every pre-destructive snapshot copied a brand-new empty one, found nothing in it, and failed — and a failing copy stops the plan, which means **every destructive change to an app with permanent folders was blocked**, and each attempt left a stray volume behind. The agent now derives the volume from the project and the folder name exactly as it does when it creates a replica, and refuses a request whose project id is not one. Snapshots and putting them back were the only place this reached
 - [x] 4.3e the file browser (§20 Runtime, ADR 0015): the answer to “did my upload actually arrive?”, which until now meant opening a shell. A permanent folder is listed one level at a time — folders first, then by name, with sizes and when each was last written — and one file can be taken away as a plain file. **Nothing runs to do it**: the agent reads the folder on the host, as it already reads /proc for metrics and diagnosis, with the folder opened as an os.Root so the kernel itself refuses anything outside it. A shortcut is shown as what it is and never followed; an absolute path and a `..` do not resolve; the control plane names a project and a folder as the dashboard writes them, never a path, and the agent refuses a volume that does not carry its own label for that project. Downloading reuses the credit-paced channel the backups use, last chunk held back until the whole file hashes to what was read. Reading an app’s files is the one read grant off by default for the assistant, and taking a file off the server is Tier 4, as a backup download is
+- [x] 4.3f server health (§18): what a server **is made of**, as opposed to what it is doing — which the usage graphs already say every thirty seconds. A self-hosted box does not die of processor; it dies of a full disk, and what fills it is almost never the apps. So the agent asks Docker what its own disk holds — images, build cache, permanent folders, running apps, and how much of each nothing is using — together with swap, load against the number of cores, and **inodes**, because a disk out of those says “no space left on device” with space left on it. It costs a walk of the filesystem, so it is taken every ten minutes and stamped with when: a number of unknown age is one nobody can act on. Permanent folders whose app is gone are named with their size — deleting an app never deletes its data, which is right, and which is why they pile up unseen — and only ones VDeploy made, never another tool’s data on the same server. And it is no longer only a panel: past 85 % full a notification goes out once a day, naming how much of it is old images and cache that can go without losing anything you could roll back to
 
 ## Doing
 
-- [ ] 4.3f the rest of M4: writing into a folder, orphan volumes and reclaim, template catalog, compose import, status page, server health, firewall management
+- [ ] 4.3g the rest of M4: safe reclaim, deleting an orphan folder, template catalog, compose import, status page, firewall management
 
 ## Next
 
@@ -159,7 +160,7 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 ## Known gaps (tracked, not forgotten)
 
-- Notifications: Slack, Discord and Telegram channels; certificate-renewal, disk > 85 %, backup and autoscale triggers arrive with the features that produce them; an app that runs but fails its health check (not crashing) is not a trigger yet.
+- Notifications: Slack, Discord and Telegram channels; certificate-renewal and autoscale triggers arrive with the features that produce them; an app that runs but fails its health check (not crashing) is not a trigger yet.
 - Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
@@ -167,7 +168,7 @@ image, an upload or GitHub already works, and the AI can do all three.
 - Liveness/readiness probes after startup (§ health.liveness/readiness) are not run by the agent yet; startup probes gate traffic (2.2). Snapshots before destructive steps arrive with backups (M4); until then the agent never deletes volumes at all.
 - Instant URLs: settings are per org only (not per server); `{env}`/`{team}` patterns wait for environments and teams; no automatic sslip.io ↔ nip.io failover on Let's Encrypt rate limits (needs ACME outcomes from the agent, 2.12); a custom domain added later is not yet checked against other projects' instant hosts (2.4). The agent reads its interface addresses at start only.
 - Logs: streamed on demand from Docker's own capped log files, not a separate ring buffer; live streams need the viewer's API instance to hold the agent connection (single API instance until pub/sub, §6); log search and download arrive with the dashboard (2.16).
-- Builds: an agent restarted mid-build loses that build (the worker gives up after its timeout and the plan fails with a plain reason); registry cache and a separate builder server wait for multi-server; built images are not yet pruned (reclaim keeping rollback targets, M4); uploads are kept in the database with no retention yet.
+- Builds: an agent restarted mid-build loses that build (the worker gives up after its timeout and the plan fails with a plain reason); registry cache and a separate builder server wait for multi-server; unused images and build cache are now measured and reported but not yet freed (4.3g); uploads are kept in the database with no retention yet.
 - Governor: the brief blue/green overlap (old and new replicas together) is not counted, disk is not budgeted, and the agent's reserve is a fixed 256 MB; rule-based autoscaling with governor veto is not built yet.
 - Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); no bulk env import/export yet (2.16); build secrets are stored but used only once builds exist (2.7); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
 - DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale); `domain.add` does not yet refuse a host another project routes (the agent refuses such a frame).

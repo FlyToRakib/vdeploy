@@ -12,6 +12,7 @@ import { BuildResult } from './builds.js';
 import { DesiredDatabase, ObservedDatabase } from './databases.js';
 import { ReplicaEvidence } from './diagnosis.js';
 import { FileListResult } from './files.js';
+import { ServerHealth } from './health.js';
 import { LogLine } from './logs.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
@@ -167,6 +168,12 @@ export const ObservedReport = z.strictObject({
         .default([]),
     })
     .optional(),
+  /**
+   * What the server is made of rather than what it is doing (§18): the
+   * disk broken down, swap, inodes, load, and permanent folders whose app
+   * is gone. Measured on its own slow pace, so it is often absent.
+   */
+  health: ServerHealth.optional(),
 });
 export type ObservedReport = z.infer<typeof ObservedReport>;
 

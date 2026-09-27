@@ -19,6 +19,7 @@ export * from './builds.js';
 export * from './logs.js';
 export * from './backups.js';
 export * from './files.js';
+export * from './health.js';
 export * from './tasks.js';
 export * from './databases.js';
 export * from './diagnosis.js';

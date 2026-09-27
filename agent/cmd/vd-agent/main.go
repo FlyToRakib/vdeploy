@@ -23,6 +23,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/config"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/files"
+	"github.com/FlyToRakib/vdeploy/agent/internal/health"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
@@ -209,6 +210,9 @@ func serve(configPath string, log *slog.Logger) error {
 		log.Warn("the disk Docker writes to could not be found", "error", err)
 	}
 	reconciler.Metrics = &metrics.Reader{Engine: engine, Root: dockerRoot}
+	// And what it is made of (§18): the disk broken down, and folders whose
+	// app is gone. Slower, because asking costs a walk of the filesystem.
+	reconciler.Health = &health.Reader{Engine: engine, Root: dockerRoot}
 	loop := &reconcile.Loop{
 		Reconciler: reconciler,
 		StateDir:   cfg.StateDir,

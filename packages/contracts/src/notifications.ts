@@ -14,6 +14,7 @@ export const NotificationTrigger = z.enum([
   'ai_change_applied',
   'backup_missed',
   'backup_failed',
+  'disk_filling',
 ]);
 export type NotificationTrigger = z.infer<typeof NotificationTrigger>;
 
@@ -32,6 +33,7 @@ export const TRIGGER_LABELS: Record<NotificationTrigger, string> = {
   ai_change_applied: 'The AI applied a change',
   backup_missed: 'A backup did not happen',
   backup_failed: 'A backup did not work',
+  disk_filling: 'A server is running out of disk',
 };
 
 export const ChannelConfig = z.discriminatedUnion('kind', [
