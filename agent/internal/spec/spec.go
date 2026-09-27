@@ -219,6 +219,13 @@ type LoadBalancer struct {
 		Interval string `json:"interval"`
 		Timeout  string `json:"timeout"`
 	} `json:"healthCheck,omitempty"`
+	// CircuitBreaker stops sending to replicas that are failing, as a
+	// Traefik expression the control plane validated.
+	CircuitBreaker string `json:"circuitBreaker,omitempty"`
+	// Retry sends a request that got nowhere to another replica.
+	Retry *struct {
+		Attempts int `json:"attempts"`
+	} `json:"retry,omitempty"`
 }
 
 var (

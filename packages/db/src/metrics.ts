@@ -9,6 +9,15 @@ export type MetricSample = typeof metricSamples.$inferSelect;
 export const KEEP_METRICS_HOURS = 48;
 
 /**
+ * A counter from a server, as a whole number this side can store. An older
+ * agent sends nothing and a broken one could send anything; neither is a
+ * reason to lose the rest of the reading.
+ */
+function whole(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, Math.round(value ?? 0)) : 0;
+}
+
+/**
  * Stores one reading (§27). A server that says nothing about usage — an
  * older agent, or one that could not read the kernel — stores nothing,
  * rather than a row of zeroes that would draw a graph of a lie.
@@ -33,6 +42,8 @@ export async function recordUsage(
       diskTotalBytes: usage.server.diskTotalBytes,
       rxBytes: 0,
       txBytes: 0,
+      requests: 0,
+      failures: 0,
     },
     ...usage.projects.map((project) => ({
       serverId,
@@ -45,6 +56,8 @@ export async function recordUsage(
       diskTotalBytes: null,
       rxBytes: project.rxBytes,
       txBytes: project.txBytes,
+      requests: whole(project.requests),
+      failures: whole(project.failures),
     })),
   ];
   await tx.insert(metricSamples).values(rows);

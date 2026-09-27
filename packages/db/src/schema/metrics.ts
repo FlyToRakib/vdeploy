@@ -27,6 +27,14 @@ export const metricSamples = pgTable(
     diskTotalBytes: bigint('disk_total_bytes', { mode: 'number' }),
     rxBytes: bigint('rx_bytes', { mode: 'number' }).notNull().default(0),
     txBytes: bigint('tx_bytes', { mode: 'number' }).notNull().default(0),
+    /**
+     * What the router answered for this app since it started — a total, not
+     * a rate. A rate is the difference between two of these, which is why
+     * the total is what is kept: a rate computed on the server would need a
+     * window, and a window is a second clock to disagree with.
+     */
+    requests: bigint('requests', { mode: 'number' }).notNull().default(0),
+    failures: bigint('failures', { mode: 'number' }).notNull().default(0),
   },
   (t) => [
     index('metric_samples_project_at').on(t.projectId, t.at),

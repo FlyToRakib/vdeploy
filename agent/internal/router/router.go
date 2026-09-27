@@ -108,6 +108,27 @@ func middlewares(key string, n spec.Network) (object, []string) {
 	if m.Compression {
 		add("compress", object{"compress": object{}})
 	}
+	/*
+	   Two things that decide what a visitor sees when a replica is sick,
+	   rather than what the replica does about it.
+
+	   The breaker stops sending to a service that is failing, so a
+	   struggling app answers "unavailable" quickly instead of holding
+	   every connection open until the whole router runs out — which is how
+	   one bad app takes down every other app on the box.
+
+	   Retry sends a request that got *nowhere* to another replica. It is
+	   safe only because Traefik retries connection failures, not responses:
+	   a request that reached the app and was answered badly is never sent
+	   twice, so nothing is charged twice.
+	*/
+	lb := n.LoadBalancer
+	if lb.CircuitBreaker != "" {
+		add("breaker", object{"circuitBreaker": object{"expression": lb.CircuitBreaker}})
+	}
+	if lb.Retry != nil && lb.Retry.Attempts > 0 {
+		add("retry", object{"retry": object{"attempts": lb.Retry.Attempts}})
+	}
 	return defs, chain
 }
 

@@ -40,6 +40,14 @@ type Project struct {
 	TxBytes     int64 `json:"txBytes"`
 	// Replicas is how many containers these numbers came from.
 	Replicas int `json:"replicas"`
+	/*
+	   Requests and Failures are what the router answered for this app
+	   since it started — totals, not a rate. A rate needs a window, and a
+	   window stored here would be a second clock to disagree with; the
+	   control plane has two readings and can subtract.
+	*/
+	Requests float64 `json:"requests"`
+	Failures float64 `json:"failures"`
 }
 
 // Server is what the machine itself is using.
@@ -63,12 +71,19 @@ type Engine interface {
 	ContainerStats(ctx context.Context, id string) (docker.Stats, error)
 }
 
+// Traffic is what the router has answered for a service, if it knows.
+type Traffic interface {
+	Counts(service string) (requests, failures float64, ok bool)
+}
+
 // Reader takes readings, remembering the last CPU counters so a percentage
 // means "since the last look" rather than "since the machine booted".
 type Reader struct {
 	Engine Engine
 	// Root is the filesystem Docker keeps its data on; "" uses /.
 	Root string
+	// Traffic is the router's own counters; nil reports no requests.
+	Traffic Traffic
 	// ProcStat and ProcMeminfo are overridable for tests.
 	ProcStat    string
 	ProcMeminfo string
@@ -107,7 +122,19 @@ func (r *Reader) Read(ctx context.Context, containers []docker.Container, now ti
 		project.TxBytes += stats.TxBytes
 		project.Replicas++
 	}
-	for _, project := range byProject {
+	for id, project := range byProject {
+		// What the router answered for this app, whichever release served
+		// it: during a canary two services share the name, and the app's
+		// traffic is both of them.
+		if r.Traffic != nil {
+			key := compose.ProjectKey(id)
+			for _, service := range []string{key + "@file", key + "-stable@file", key + "-new@file"} {
+				if requests, failures, ok := r.Traffic.Counts(service); ok {
+					project.Requests += requests
+					project.Failures += failures
+				}
+			}
+		}
 		usage.Projects = append(usage.Projects, *project)
 	}
 	return usage

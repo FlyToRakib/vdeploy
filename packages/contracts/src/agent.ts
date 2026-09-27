@@ -162,6 +162,13 @@ export const ObservedReport = z.strictObject({
             rxBytes: z.number().int().min(0),
             txBytes: z.number().int().min(0),
             replicas: z.number().int().min(0).max(64),
+            /**
+             * What the router answered for this app since it started —
+             * totals, not a rate. Two readings make a rate; one reading
+             * and a window stored on the server would be a second clock.
+             */
+            requests: z.number().min(0).default(0),
+            failures: z.number().min(0).default(0),
           }),
         )
         .max(200)

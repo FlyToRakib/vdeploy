@@ -190,14 +190,16 @@ func serve(configPath string, log *slog.Logger) error {
 		// Checking containers for files a deploy would delete (§17.2).
 		StorageScan: time.Duration(cfg.StorageScanSeconds) * time.Second,
 	}
+	// What the router has answered: a stepped rollout watches it (§16) and
+	// every reading carries it (§27). One reader, read at its own pace.
+	traffic := &reconcile.TraefikTraffic{
+		URL: fmt.Sprintf("http://%s:%d/metrics", docker.TraefikName, docker.MetricsPort),
+	}
 	if cfg.Routing {
 		if err := os.MkdirAll(cfg.RoutingDir, 0o755); err != nil { // #nosec G301 -- Traefik reads it
 			return fmt.Errorf("routing dir: %w", err)
 		}
-		// What the router has answered, for a stepped rollout (§16).
-		reconciler.Traffic = &reconcile.TraefikTraffic{
-			URL: fmt.Sprintf("http://%s:%d/metrics", docker.TraefikName, docker.MetricsPort),
-		}
+		reconciler.Traffic = traffic
 		reconciler.Routing = reconcile.TraefikRouting{
 			Engine:  engine,
 			Options: docker.TraefikOptions{DynamicDir: cfg.RoutingDir, ACMEEmail: cfg.ACMEEmail, ACMEServer: cfg.ACMEServer},
@@ -214,7 +216,7 @@ func serve(configPath string, log *slog.Logger) error {
 	if err != nil {
 		log.Warn("the disk Docker writes to could not be found", "error", err)
 	}
-	reconciler.Metrics = &metrics.Reader{Engine: engine, Root: dockerRoot}
+	reconciler.Metrics = &metrics.Reader{Engine: engine, Root: dockerRoot, Traffic: traffic}
 	// And what it is made of (§18): the disk broken down, and folders whose
 	// app is gone. Slower, because asking costs a walk of the filesystem.
 	reconciler.Health = &health.Reader{Engine: engine, Root: dockerRoot}
