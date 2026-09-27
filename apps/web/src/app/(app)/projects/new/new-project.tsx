@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, FolderUp, GitBranch, Server } from 'lucide-react';
+import { Blocks, Box, FolderUp, GitBranch, Server } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -17,9 +17,10 @@ import { followPlan, OperationError, query, runOperation, type PlanView } from '
 import { projectName, type DetectionSummary } from '@/lib/projects';
 import type { ServerSummary } from '@/lib/servers';
 import { GithubSource } from './github-source';
+import { TemplateNote, TemplateSource, type TemplateSummary } from './template-source';
 import { UploadSource } from './upload-source';
 
-type SourceKind = 'upload' | 'github' | 'image';
+type SourceKind = 'template' | 'upload' | 'github' | 'image';
 
 /** A source the person chose, ready to become a project. */
 export interface ReadySource {
@@ -28,9 +29,17 @@ export interface ReadySource {
   name: string;
   detection: DetectionSummary | null;
   secretsLeftOut: string[];
+  /** Set when the person picked an app from the catalog (§15). */
+  template?: TemplateSummary;
 }
 
 const SOURCES: { kind: SourceKind; icon: typeof FolderUp; title: string; text: string }[] = [
+  {
+    kind: 'template',
+    icon: Blocks,
+    title: 'Choose an app',
+    text: 'WordPress, Ghost and others, set up properly in one step.',
+  },
   {
     kind: 'upload',
     icon: FolderUp,
@@ -106,6 +115,7 @@ export function NewProject() {
   const [plan, setPlan] = useState<PlanView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
 
   useEffect(() => {
     query<ServerSummary[]>('server.list').then(
@@ -120,23 +130,64 @@ export function NewProject() {
     );
   }, []);
 
+  /**
+   * An app from the catalog that needs a database gets one of its own, made
+   * and handed over as two more ordinary operations — each planned, gated
+   * and in the audit log, exactly as if a person had done them by hand.
+   */
+  async function giveItADatabase(name: string, template: TemplateSummary) {
+    if (!template.database) return;
+    setStage(`Making a ${template.database.engine} database for ${name}…`);
+    const made = await runOperation('database.create', {
+      serverId,
+      name: `${name}-db`,
+      engine: template.database.engine,
+      version: template.database.version,
+    });
+    if (made.status !== 'queued' && made.status !== 'pending_approval') return;
+    if ((await followPlan(made.plan.id, setPlan))?.status !== 'applied') return;
+
+    const databases = await query<{ id: string; name: string }[]>('database.list', {});
+    const database = databases.find((d) => d.name === `${name}-db`);
+    const projects = await query<{ id: string; name: string }[]>('project.list', {});
+    const project = projects.find((p) => p.name === name);
+    if (!database || !project || !template.link) return;
+
+    setStage(`Giving ${name} its database…`);
+    const linked = await runOperation('database.link', {
+      projectId: project.id,
+      databaseId: database.id,
+      ...template.link,
+    });
+    if (linked.status === 'queued' || linked.status === 'pending_approval') {
+      await followPlan(linked.plan.id, setPlan);
+    }
+    setStage(null);
+  }
+
   async function create(form: FormData) {
     if (!ready) return;
     setCreating(true);
     setError(null);
+    const name = formText(form, 'name');
+    const template = ready.template;
     const spec = {
       apiVersion: 'vdeploy/v1',
       kind: 'Application',
-      metadata: { name: formText(form, 'name') },
+      metadata: { name },
       source: ready.source,
       build: ready.build,
-      network: { containerPort: Number(formText(form, 'port')) },
+      // A template already knows its port, its folders and its settings;
+      // asking a person for them is asking them to get it wrong.
+      ...(template ? {} : { network: { containerPort: Number(formText(form, 'port')) } }),
     };
     try {
       const outcome = await stepUp(() => runOperation('project.create', { spec, serverId }));
       if (outcome.status === 'done') return;
       const last = await followPlan(outcome.plan.id, setPlan);
-      if (last?.status === 'applied') router.push('/projects');
+      if (last?.status !== 'applied') return;
+      if (template?.database) await giveItADatabase(name, template);
+      router.push('/projects');
     } catch (err) {
       if (!(err instanceof OperationError && err.code === 'cancelled')) {
         setError(err instanceof Error ? err.message : 'The project could not be created.');
@@ -189,7 +240,7 @@ export function NewProject() {
       </Step>
 
       <Step n={2} title="Where its code is">
-        <div role="radiogroup" aria-label="Source" className="grid gap-3 sm:grid-cols-3">
+        <div role="radiogroup" aria-label="Source" className="grid gap-3 sm:grid-cols-2">
           {SOURCES.map(({ kind: k, icon: Icon, title, text }) => (
             <button
               key={k}
@@ -211,6 +262,7 @@ export function NewProject() {
             </button>
           ))}
         </div>
+        {kind === 'template' && !ready && <TemplateSource onReady={setReady} />}
         {kind === 'upload' && !ready && <UploadSource serverId={serverId} onReady={setReady} />}
         {kind === 'github' && !ready && <GithubSource onReady={setReady} />}
         {kind === 'image' && !ready && <ImageSource onReady={setReady} />}
@@ -248,6 +300,7 @@ export function NewProject() {
                 settings after the project is created; they are stored encrypted.
               </p>
             )}
+            {ready.template && <TemplateNote template={ready.template} />}
             <form action={create} className="grid gap-4 sm:grid-cols-2">
               <Field
                 label="Name"
@@ -257,16 +310,18 @@ export function NewProject() {
                 pattern="[a-z]([a-z0-9-]{0,61}[a-z0-9])?"
                 hint="It becomes part of the address."
               />
-              <Field
-                label="Port the app listens on"
-                name="port"
-                type="number"
-                min={1}
-                max={65535}
-                required
-                defaultValue={port}
-                hint="Most apps use the PORT setting, which VDeploy sets for you."
-              />
+              {!ready.template && (
+                <Field
+                  label="Port the app listens on"
+                  name="port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  required
+                  defaultValue={port}
+                  hint="Most apps use the PORT setting, which VDeploy sets for you."
+                />
+              )}
               <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
                 <Button type="submit" disabled={creating}>
                   {creating ? 'Creating…' : 'Create and deploy'}
@@ -283,6 +338,7 @@ export function NewProject() {
               </div>
             </form>
             <div aria-live="polite" className="grid gap-2 text-sm">
+              {stage && <Status health="neutral">{stage}</Status>}
               {plan?.status === 'approved' || plan?.status === 'applying' ? (
                 <Status health="neutral">
                   Building and deploying… a first build takes a few minutes.

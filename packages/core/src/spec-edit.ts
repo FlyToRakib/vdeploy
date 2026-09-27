@@ -4,6 +4,7 @@ import {
   describeIssues,
   type OperationArgs,
 } from '@vdeploy/contracts';
+import { templateSpec } from './templates.js';
 
 /** A volume name for a folder: its last part, made into a resource name, never clashing. */
 export function volumeNameFor(mountPath: string, taken: readonly string[]): string {
@@ -130,6 +131,13 @@ export function specAfter(
   current: ApplicationSpec | null,
 ): ApplicationSpec {
   if (name === 'project.create' || name === 'project.update_spec') {
+    // A template is scaffolding, not a kind of project: it expands here, so
+    // what is planned, approved, stored and sent to the agent is an ordinary
+    // spec. Nothing downstream ever learns a template was involved.
+    const asked = args.spec as { source?: { type?: string; template?: string }; metadata?: { name?: string } } | undefined;
+    if (asked?.source?.type === 'template') {
+      return templateSpec(asked.source.template ?? '', asked.metadata?.name ?? '');
+    }
     return valid(args.spec);
   }
   if (!current) throw new VDeployError('not_found', 'Project not found');

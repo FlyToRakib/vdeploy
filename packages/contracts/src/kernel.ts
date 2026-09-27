@@ -59,6 +59,24 @@ export const PlanStep = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('delete_project'), keepData: z.boolean() }),
   z.strictObject({ kind: z.literal('rotate_secret'), secretId: idSchema('secret') }),
+  /**
+   * Settings a template needs VDeploy to make up — an encryption key, an
+   * admin token. They are made on the control plane, stored as secrets and
+   * referenced by the release, so no two installs share one and nobody,
+   * including the person who asked, ever sees the value.
+   */
+  z.strictObject({
+    kind: z.literal('generate_secrets'),
+    keys: z
+      .array(
+        z.strictObject({
+          key: z.string().min(1).max(128),
+          bytes: z.number().int().min(16).max(64),
+        }),
+      )
+      .min(1)
+      .max(16),
+  }),
   // The data layer (§17.3): a database is created, linked and deleted on its own.
   z.strictObject({ kind: z.literal('create_database') }),
   z.strictObject({ kind: z.literal('take_backup'), databaseId: idSchema('database') }),

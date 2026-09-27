@@ -118,6 +118,13 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'template.list',
+    'org',
+    'config',
+    'List the apps you can set up in one step, and what each is for',
+    obj({}),
+  ),
+  query(
     'database.list',
     'org',
     'config',
@@ -482,7 +489,19 @@ export const OPERATIONS = [
     'sensitive',
     'project',
     'Give an app its database: the connection string arrives as one of its settings',
-    obj({ ...P, databaseId, envKey: EnvKey.optional() }),
+    obj({
+      ...P,
+      databaseId,
+      envKey: EnvKey.optional(),
+      /**
+       * For apps that want the address in pieces rather than as one URL —
+       * WordPress and Ghost among them. Each piece becomes its own setting,
+       * and the password is still a secret the app reads and nobody sees.
+       */
+      parts: z
+        .record(z.enum(['host', 'port', 'user', 'password', 'name']), EnvKey)
+        .optional(),
+    }),
   ),
   operation(
     'database.unlink',

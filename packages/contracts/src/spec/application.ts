@@ -119,7 +119,9 @@ function checkConsistency(spec: Shape, ctx: z.core.$RefinementCtx): void {
       'a prebuilt image source must use the "image" build strategy',
     );
   }
-  if (source.type !== 'image' && build.strategy === 'image') {
+  // A template is a named image: it expands into one before anything runs,
+  // so it is the same strategy, not a different kind of build.
+  if (source.type !== 'image' && source.type !== 'template' && build.strategy === 'image') {
     issue(ctx, ['build', 'strategy'], 'the "image" build strategy requires an image source');
   }
   if (scaling.min > scaling.max) {

@@ -28,6 +28,7 @@ import {
   getBuild,
   installationForRepo,
   projects,
+  putSecret,
   queueBuild,
   readSecret,
   refreshInstantHosts,
@@ -236,6 +237,52 @@ async function pinSecrets(deps: StepDeps, projectId: string, spec: ApplicationSp
 }
 
 /** A new random value for a server-made secret, in the same shape as the old one. */
+/**
+ * The settings a template needs VDeploy to make up (§26): an encryption key,
+ * an admin token — values that must exist before the app first starts and
+ * must be different on every install.
+ *
+ * They are made here, on the control plane, stored as secrets and referenced
+ * from the spec. Nobody sees the value: not the person who picked the
+ * template, not the AI, not the frame it travels in. Running this again is
+ * harmless — a setting that already exists is left exactly as it is, because
+ * replacing an encryption key is how an app loses everything it encrypted.
+ */
+async function generateSecrets(
+  deps: StepDeps,
+  state: ApplyState,
+  keys: { key: string; bytes: number }[],
+) {
+  const row = await project(deps, state);
+  const spec = readSpec(row.spec);
+  const env = [...spec.runtime.env];
+  const made: string[] = [];
+  for (const { key, bytes } of keys) {
+    if (env.some((e) => e.key === key)) continue;
+    const { secretId, version } = await deps.db.transaction((tx) =>
+      putSecret(tx, deps.secretsKey, {
+        orgId: state.orgId,
+        projectId: row.id,
+        name: key.toLowerCase(),
+        value: generateSecret(bytes, 'hex'),
+        actor: state.actor,
+        generated: true,
+      }),
+    );
+    env.push({ key, secretRef: secretId as `sec_${string}`, version });
+    made.push(key);
+  }
+  if (made.length === 0) return;
+  const next = { ...spec, runtime: { ...spec.runtime, env } };
+  await deps.db
+    .update(projects)
+    .set({ spec: next, specHash: hashOf(next) })
+    .where(eq(projects.id, row.id));
+  state.notes.push(
+    `VDeploy made ${made.join(', ')} for this app; nobody, including you, ever sees the value.`,
+  );
+}
+
 async function rotate(deps: StepDeps, state: ApplyState, secretId: string) {
   const row = await project(deps, state);
   const old = await readSecret(deps.db, deps.secretsKey, row.id, secretId);
@@ -589,6 +636,8 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
       return deleteProject(deps, state, step.keepData);
     case 'rotate_secret':
       return rotate(deps, state, step.secretId);
+    case 'generate_secrets':
+      return generateSecrets(deps, state, step.keys);
     case 'create_database':
       return createDatabaseStep(deps, state);
     case 'run_task':

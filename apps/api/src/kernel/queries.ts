@@ -1,5 +1,11 @@
 import { readSpec, VDeployError, type LogLine, type OperationName } from '@vdeploy/contracts';
-import { describeCapacity, diagnoseBuild, footprint } from '@vdeploy/core';
+import {
+  describeCapacity,
+  diagnoseBuild,
+  footprint,
+  TEMPLATES,
+  templateLink,
+} from '@vdeploy/core';
 import {
   builds,
   buildView,
@@ -134,6 +140,27 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       projects: counts.find((c) => c.serverId === row.id)?.n ?? 0,
     }));
   },
+  /**
+   * The apps a person came here to run (§15, §26). It is a constant list,
+   * not a fetch: a catalog that can change under you is a catalog that can
+   * change what "WordPress" means on the day you press the button.
+   */
+  'template.list': () =>
+    Promise.resolve(
+      TEMPLATES.map((t) => ({
+        name: t.name,
+        title: t.title,
+        what: t.what,
+        goodFor: t.goodFor,
+        memory: t.memory,
+        database: t.database ?? null,
+        // How this app wants its database handed to it, so the screen can
+        // do the linking without knowing anything about the app itself.
+        link: templateLink(t.name),
+        keepsFiles: t.volumes.map((v) => v.mountPath),
+        afterwards: t.afterwards,
+      })),
+    ),
   'server.status': async ({ deps, args }) => {
     const [row] = await deps.db
       .select({

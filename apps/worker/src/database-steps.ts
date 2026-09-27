@@ -138,6 +138,13 @@ export async function linkDatabaseStep(
   const envKey =
     typeof state.args.envKey === 'string' ? state.args.envKey : defaultEnvKey(row.engine);
   const projectId = state.projectId;
+  // Some apps want the address in pieces. The password is still a secret
+  // among them; the rest are ordinary settings, because a hostname nobody
+  // can reach from outside is not worth hiding.
+  const parts =
+    state.args.parts && typeof state.args.parts === 'object'
+      ? (state.args.parts as Partial<Record<'host' | 'port' | 'user' | 'password' | 'name', string>>)
+      : null;
   await deps.db.transaction(async (tx) => {
     const url = connectionUrl({
       engine: row.engine,
@@ -163,7 +170,30 @@ export async function linkDatabaseStep(
         set: { secretId },
       });
     // The app reads it like any other setting; the value itself stays a secret.
-    const spec = specAfter('env.set', { key: envKey, secretRef: secretId }, app.spec);
+    let spec = specAfter('env.set', { key: envKey, secretRef: secretId }, app.spec);
+    if (parts) {
+      const password = await databasePassword(tx, deps.secretsKey, row);
+      const pieces: [string | undefined, string][] = [
+        [parts.host, databaseHost(row.id)],
+        [parts.port, String(row.port)],
+        [parts.user, row.user],
+        [parts.name, row.dbName ?? row.user],
+      ];
+      for (const [key, value] of pieces) {
+        if (key) spec = specAfter('env.set', { key, value }, spec);
+      }
+      if (parts.password) {
+        const made = await putSecret(tx, deps.secretsKey, {
+          orgId: state.orgId,
+          projectId,
+          name: parts.password.toLowerCase(),
+          value: password,
+          actor: state.actor,
+          generated: true,
+        });
+        spec = specAfter('env.set', { key: parts.password, secretRef: made.secretId }, spec);
+      }
+    }
     await tx
       .update(projects)
       .set({ spec, specHash: hashOf(spec), updatedAt: deps.now() })

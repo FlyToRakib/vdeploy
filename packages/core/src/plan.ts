@@ -18,6 +18,7 @@ import { hashOf } from './canonical.js';
 import { diffSpecs, removedVolumes } from './diff.js';
 import { describeCron } from './cron.js';
 import { defaultEnvKey, engineProfile } from './databases.js';
+import { templateSecrets } from './templates.js';
 import { checkFits, footprint, type ServerBudget } from './governor.js';
 import { maxTier } from './risk.js';
 import { specAfter } from './spec-edit.js';
@@ -219,7 +220,18 @@ function simple(
 const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'project.create': (args, context) => {
     if (context.project) throw new VDeployError('conflict', 'Project already exists');
-    return specChange(null, specAfter('project.create', args, null), 'sensitive', context);
+    const draft = specChange(null, specAfter('project.create', args, null), 'sensitive', context);
+    // A template may need settings only the server should ever know. They
+    // are made once the project exists — between writing the spec and
+    // pinning the release, so the first version already has them.
+    const asked = (args as { spec?: { source?: { type?: string; template?: string } } }).spec;
+    const keys =
+      asked?.source?.type === 'template' ? templateSecrets(asked.source.template ?? '') : [];
+    if (keys.length === 0) return draft;
+    const at = draft.steps.findIndex((step) => step.kind === 'update_spec');
+    const steps = [...draft.steps];
+    steps.splice(at + 1, 0, { kind: 'generate_secrets', keys });
+    return { ...draft, steps };
   },
   'project.update_spec': (args, context) => {
     const project = requireProject(context);
