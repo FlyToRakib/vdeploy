@@ -3,6 +3,7 @@ import { newId, UrlSettings, VDeployError, type OperationName } from '@vdeploy/c
 import {
   apikey,
   auditLog,
+  databases,
   instanceSettings,
   invitation,
   member,
@@ -89,6 +90,39 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
   ...FILE_ADMIN,
   ...RECLAIM_ADMIN,
   ...STATUS_ADMIN,
+  /**
+   * Removing a server (§20 Servers). Only once nothing is on it: a server
+   * record that goes while its apps are still running leaves containers
+   * nobody is watching and volumes nobody can find — and the agent, which
+   * keeps converging with or without a control plane, would keep them up
+   * forever. So this refuses and names what is still there.
+   */
+  'server.remove': async ({ deps, actor, args }) => {
+    const serverId = String(args.serverId);
+    const [server] = await deps.db.select().from(servers).where(eq(servers.id, serverId));
+    if (server?.orgId !== actor.orgId) throw new VDeployError('not_found', 'Server not found');
+    const here = await deps.db
+      .select({ name: projects.name })
+      .from(projects)
+      .where(and(eq(projects.serverId, serverId), isNull(projects.deletedAt)));
+    const engines = await deps.db
+      .select({ name: databases.name })
+      .from(databases)
+      .where(and(eq(databases.serverId, serverId), isNull(databases.deletedAt)));
+    const left = [...here.map((p) => p.name), ...engines.map((d) => d.name)];
+    if (left.length > 0) {
+      throw new VDeployError(
+        'conflict',
+        `${server.name} still runs ${left.join(', ')}. Delete or move them first — removing the server here would leave them running with nobody watching.`,
+      );
+    }
+    await deps.db.delete(servers).where(eq(servers.id, serverId));
+    return {
+      removed: server.name,
+      andThen:
+        'The agent is still installed on the machine and will keep trying to connect. Stop it there with: systemctl disable --now vd-agent',
+    };
+  },
   ...AI_ADMIN,
   ...GITHUB_ADMIN,
   'user.invite': async ({ deps, actor, args }) => {

@@ -50,6 +50,11 @@ export interface PlanContext {
   linkedDatabases?: { id: Id<'database'>; name: string }[];
   /** The release a rollback returns to, loaded by the caller. */
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
+  /**
+   * The backup an operation named: a database dump, or a copy of an app's
+   * folders. Which it is decides what putting it back means (§17.5).
+   */
+  targetBackup?: { id: Id<'backup'>; kind: 'dump' | 'volumes'; databaseId: Id<'database'> | null };
   /** The server the project runs (or will run) on, for the governor (§14). */
   server?: ServerBudget | null;
   /**
@@ -217,6 +222,40 @@ function simple(
     blastRadius: radius(project.spec, { downtime, rollbackTo: project.currentReleaseId }),
   };
 }
+
+
+/**
+ * Putting an app's folders back the way a snapshot has them (§17.5). The
+ * app stops first — writing over files underneath a running app is how both
+ * end up broken — and a copy of what is about to be replaced is taken
+ * before anything is.
+ */
+const restoreVolumes: Planner<'volume.restore'> = (args, context) => {
+  const project = requireProject(context);
+  const volumes = project.spec.runtime.volumes.map((v) => v.name);
+  return {
+    specHash: null,
+    changes: [
+      {
+        path: `files.${volumes.join(', ')}`,
+        before: 'what is in them now',
+        after: 'what the snapshot holds',
+      },
+    ],
+    steps: [
+      // A copy of what is about to be replaced, before it is replaced.
+      { kind: 'snapshot_volumes', volumes },
+      { kind: 'stop' },
+      { kind: 'restore_volumes', snapshotId: args.snapshotId },
+      { kind: 'start' },
+    ],
+    tier: 'destructive',
+    blastRadius: radius(project.spec, {
+      downtime: 'brief',
+      dataAtRisk: [`the files in ${volumes.join(', ')} right now`],
+    }),
+  };
+};
 
 const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'project.create': (args, context) => {
@@ -404,6 +443,39 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       'safe',
       'none',
     );
+  },
+  /**
+   * Building the same source again (§24). Not the same as redeploying:
+   * redeploy starts the image that already exists, this makes a new one.
+   * It is what somebody reaches for when a dependency they do not control
+   * changed underneath them, or when a build failed for a reason that has
+   * since gone away.
+   */
+  'project.rebuild': (_args, context) => {
+    const project = requireProject(context);
+    if (project.spec.build.strategy === 'image') {
+      throw new VDeployError(
+        'conflict',
+        'This app runs an image somebody else built, so there is nothing here to rebuild',
+      );
+    }
+    return {
+      specHash: null,
+      changes: [
+        { path: 'release', before: 'the version running now', after: 'the same source, built again' },
+      ],
+      // A release is created from the current spec, which builds because the
+      // source needs building; then it rolls out health-gated like any other.
+      steps: [
+        { kind: 'create_release' },
+        { kind: 'deploy', strategy: project.spec.deploy.strategy },
+      ],
+      tier: 'safe',
+      blastRadius: radius(project.spec, {
+        downtime: 'none',
+        rollbackTo: project.currentReleaseId,
+      }),
+    };
   },
   'project.restart': (_args, context) => {
     // A restart replaces every container: whatever they wrote outside permanent folders goes.
@@ -698,6 +770,71 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       rollbackTo: null,
     },
   }),
+  /*
+   * Backing up an *app* rather than a thing (§17.4).
+   *
+   * "Back up my site" is what somebody actually means, and a site is its
+   * files and its databases together — restoring one without the other
+   * gives you a shop whose orders and whose product images are from
+   * different days. So this is one plan covering both, and the order
+   * matters: the databases first, then the folders, so the folders are
+   * never newer than the data they describe.
+   */
+  'backup.trigger': (_args, context) => {
+    const project = requireProject(context);
+    const volumes = project.spec.runtime.volumes.map((v) => v.name);
+    const databases = context.linkedDatabases ?? [];
+    if (volumes.length === 0 && databases.length === 0) {
+      throw new VDeployError(
+        'conflict',
+        'This app has no permanent folders and no database, so there is nothing to back up',
+      );
+    }
+    const what = [
+      ...databases.map((d) => d.name),
+      ...(volumes.length ? [volumes.join(', ')] : []),
+    ].join(' and ');
+    return {
+      specHash: null,
+      changes: [{ path: 'backup', before: null, after: `a copy of ${what}` }],
+      steps: [
+        ...databases.map((database) => ({ kind: 'take_backup', databaseId: database.id }) as const),
+        ...(volumes.length ? [{ kind: 'snapshot_volumes', volumes } as const] : []),
+      ],
+      tier: 'safe',
+      blastRadius: radius(project.spec, { downtime: 'none', dataAtRisk: [] }),
+    };
+  },
+  /**
+   * When those copies happen, for every database the app reads (§17.4).
+   * The folders are copied before anything that could lose them, which is
+   * not a schedule and does not want one.
+   */
+  'backup.schedule': (args, context) => {
+    const project = requireProject(context);
+    const databases = context.linkedDatabases ?? [];
+    if (databases.length === 0) {
+      throw new VDeployError(
+        'conflict',
+        'This app has no database, so there is no backup schedule to set',
+      );
+    }
+    return {
+      specHash: null,
+      changes: [
+        {
+          path: 'backups.when',
+          before: null,
+          after: `${args.expr} (${args.timezone}), keeping ${String(args.keepLocal)} here`,
+        },
+      ],
+      steps: databases.map(
+        (database) => ({ kind: 'set_backup_policy', databaseId: database.id }) as const,
+      ),
+      tier: 'sensitive',
+      blastRadius: radius(project.spec, { downtime: 'none', dataAtRisk: [] }),
+    };
+  },
   /** Keeping a copy of what an app has written, on request (§17.4). */
   'volume.snapshot': (_args, context) => {
     const project = requireProject(context);
@@ -720,32 +857,44 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
    * Putting files back where they were (§17.4). The app stops first: writing
    * over files underneath a running app is how both end up broken.
    */
-  'volume.restore': (args, context) => {
+  /**
+   * Putting back a copy of an app (§17.5), whichever kind it is. A person
+   * chose "this backup, from Tuesday"; they did not choose between a dump
+   * and an archive of folders, and should not have to.
+   */
+  'backup.restore': (args, context) => {
     const project = requireProject(context);
-    const volumes = project.spec.runtime.volumes.map((v) => v.name);
+    const backup = context.targetBackup;
+    if (backup?.id !== args.backupId) {
+      throw new VDeployError('not_found', 'That backup is not one of this app’s');
+    }
+    // Putting folders back is its own thing, and already right: this
+    // asks it rather than writing the same steps a second way.
+    if (backup.kind === 'volumes') {
+      return restoreVolumes({ projectId: args.projectId, snapshotId: backup.id }, context);
+    }
+    if (!backup.databaseId) {
+      throw new VDeployError('conflict', 'That backup is not of a database this app reads');
+    }
+    // Restoring a database underneath a running app corrupts both, so the
+    // app stops first and starts again whatever happened — exactly as
+    // restoring over a database on its own does.
     return {
       specHash: null,
       changes: [
-        {
-          path: `files.${volumes.join(', ')}`,
-          before: 'what is in them now',
-          after: 'what the snapshot holds',
-        },
+        { path: 'data', before: 'what is there now', after: 'what the backup holds' },
       ],
       steps: [
-        // A copy of what is about to be replaced, before it is replaced.
-        { kind: 'snapshot_volumes', volumes },
-        { kind: 'stop' },
-        { kind: 'restore_volumes', snapshotId: args.snapshotId },
-        { kind: 'start' },
+        { kind: 'restore_backup', backupId: args.backupId, mode: args.mode },
       ],
-      tier: 'destructive',
+      tier: args.mode === 'in_place' ? 'destructive' : 'sensitive',
       blastRadius: radius(project.spec, {
-        downtime: 'brief',
-        dataAtRisk: [`the files in ${volumes.join(', ')} right now`],
+        downtime: args.mode === 'in_place' ? 'brief' : 'none',
+        dataAtRisk: args.mode === 'in_place' ? ['everything in the database right now'] : [],
       }),
     };
   },
+  'volume.restore': restoreVolumes,
   'release.rollback': (args, context) => {
     const project = requireProject(context);
     const target = context.targetRelease;

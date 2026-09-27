@@ -634,18 +634,17 @@ export const OPERATIONS = [
     }),
   ),
   operation(
-    'registry.add',
-    'sensitive',
-    'org',
-    'Allow images from a container registry',
-    obj({ host: z.string().min(1).max(253), credentials: idSchema('secret').optional() }),
-  ),
-  operation(
     'git.connect',
     'sensitive',
     'org',
-    'Connect a Git provider installation',
-    obj({ provider: z.enum(['github']), installationId: z.string().regex(/^\d{1,20}$/) }),
+    'Start connecting a Git provider: answers with where to go to install it',
+    // §24 writes this as taking an installation id. It does not, and
+    // deliberately: an installation belongs to whoever can see it on the
+    // provider, and a bare id proves nothing (ADR 0010). This hands back
+    // the place to go; `github.link` finishes it with the code the provider
+    // returns, which is the proof.
+    obj({ provider: z.enum(['github']) }),
+    { minRole: 'admin' },
   ),
 
   // ── Tier 3 · destructive — always explicit approval, snapshot first ──────
@@ -766,12 +765,15 @@ export const OPERATIONS = [
   ),
   operation(
     'backup.restore',
-    'destructive',
+    // Sensitive as an intent, like restoring a database on its own: putting
+    // a copy back *beside* what is live touches nothing, and that is the
+    // way people should check a backup. The plan raises it to destructive
+    // the moment it would replace something.
+    'sensitive',
     'project',
     'Restore a backup, to a new database by default',
     obj({ ...P, backupId: idSchema('backup'), mode: z.enum(['new', 'in_place']).default('new') }),
   ),
-  operation('server.drain', 'destructive', 'server', 'Move every app off a server', obj(S)),
 
   // ── Tier 4 · human only — never in any AI tool array ────────────────────
   operation(

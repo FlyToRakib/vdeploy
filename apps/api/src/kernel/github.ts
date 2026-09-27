@@ -6,6 +6,7 @@ import {
   userCanSeeInstallation,
 } from '@vdeploy/core';
 import { installationsFor, linkInstallation, unlinkInstallation } from '@vdeploy/db';
+import { signState, STATE_TTL_MS } from './install-link.js';
 import type { GithubDeps, Handler, KernelDeps } from './context.js';
 
 function app(deps: KernelDeps): GithubDeps {
@@ -29,6 +30,27 @@ const view = (i: Awaited<ReturnType<typeof installationsFor>>[number]) => ({
 
 /** GitHub connections (M2 2.15, ADR 0010). */
 export const GITHUB_ADMIN: Partial<Record<OperationName, Handler>> = {
+  /**
+   * Where to go to connect a provider (§24). It answers with a link and
+   * nothing else, because an installation belongs to whoever can see it on
+   * the provider — an id alone proves nothing (ADR 0010). `github.link`
+   * finishes it, with the code the provider returns as the proof.
+   */
+  'git.connect': ({ deps, actor, args }) => {
+    if (args.provider !== 'github') {
+      throw new VDeployError('unavailable', 'Only GitHub is supported so far');
+    }
+    const github = app(deps);
+    const state = signState(deps.approvalKey, {
+      orgId: actor.orgId,
+      userId: actor.userId,
+      exp: deps.now().getTime() + STATE_TTL_MS,
+    });
+    return Promise.resolve({
+      url: `${github.app.webUrl}/apps/${encodeURIComponent(github.slug)}/installations/new?state=${state}`,
+      then: 'Install it on the account whose repositories you want, and VDeploy connects it when GitHub sends you back.',
+    });
+  },
   'github.link': async ({ deps, actor, args }) => {
     const github = app(deps);
     const installationId = Number(args.installationId);

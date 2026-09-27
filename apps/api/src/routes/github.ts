@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { HumanActor } from '@vdeploy/ai';
 import { VDeployError, type Id, type Role } from '@vdeploy/contracts';
 import { pathMatcher, verifyGithubSignature } from '@vdeploy/core';
@@ -7,28 +6,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { resolveActor, roleIn } from '../http/actor.js';
 import type { KernelDeps } from '../kernel/context.js';
+import { readState, signState, STATE_TTL_MS } from '../kernel/install-link.js';
 import { runOperation } from '../kernel/pipeline.js';
-
-const STATE_TTL_MS = 15 * 60_000;
-
-/** The install link's state: who started it, for which org, until when — signed. */
-function signState(key: Buffer, claims: { orgId: string; userId: string; exp: number }) {
-  const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
-  const mac = createHmac('sha256', key).update(`github-install:${body}`).digest('base64url');
-  return `${body}.${mac}`;
-}
-
-function readState(key: Buffer, state: string, now: Date) {
-  const [body = '', mac = ''] = state.split('.');
-  const expected = createHmac('sha256', key).update(`github-install:${body}`).digest();
-  const given = Buffer.from(mac, 'base64url');
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
-  const claims = z
-    .object({ orgId: z.string(), userId: z.string(), exp: z.number() })
-    .safeParse(JSON.parse(Buffer.from(body, 'base64url').toString()));
-  if (!claims.success || claims.data.exp < now.getTime()) return null;
-  return claims.data;
-}
 
 const Push = z.object({
   ref: z.string(),

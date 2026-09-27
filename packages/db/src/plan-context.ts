@@ -2,7 +2,7 @@ import { readSpec, type ApplicationSpec, type Id } from '@vdeploy/contracts';
 import { footprint, NO_FOOTPRINT, type DatabaseState, type ServerBudget } from '@vdeploy/core';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
-import { getDatabase, linksOf } from './databases.js';
+import { getBackup, getDatabase, linksOf } from './databases.js';
 import {
   databaseLinks,
   databases,
@@ -24,6 +24,8 @@ export interface PlanWorld {
   database?: DatabaseState | null;
   linkedDatabases?: { id: Id<'database'>; name: string }[];
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
+  /** The backup an operation named, and which kind it is (§17.5). */
+  targetBackup?: { id: Id<'backup'>; kind: 'dump' | 'volumes'; databaseId: Id<'database'> | null };
   server?: ServerBudget | null;
   unsaved?: string[];
 }
@@ -128,6 +130,11 @@ async function linkedDatabases(
   return [...seen].map(([id, name]) => ({ id: id as Id<'database'>, name }));
 }
 
+/** Whether a database this app reads is the one a backup belongs to. */
+function linkedTo(world: PlanWorld, databaseId: string | null): boolean {
+  return databaseId !== null && (world.linkedDatabases ?? []).some((d) => d.id === databaseId);
+}
+
 export async function loadPlanWorld(
   db: Database,
   projectId: string | null,
@@ -157,6 +164,17 @@ export async function loadPlanWorld(
     server: row.serverId ? await serverBudget(db, row.serverId, row.id) : null,
     unsaved: await unsavedFor(db, row),
   };
+  // Which kind of backup was named decides what putting it back means.
+  if (typeof args.backupId === 'string') {
+    const backup = await getBackup(db, args.backupId);
+    if (backup && (backup.projectId === row.id || linkedTo(world, backup.databaseId))) {
+      world.targetBackup = {
+        id: backup.id as Id<'backup'>,
+        kind: backup.kind,
+        databaseId: backup.databaseId as Id<'database'> | null,
+      };
+    }
+  }
   if (typeof args.releaseId === 'string') {
     const [release] = await db
       .select()

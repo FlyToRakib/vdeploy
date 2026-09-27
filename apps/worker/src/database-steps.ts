@@ -555,7 +555,16 @@ export async function setBackupPolicyStep(
   state: ApplyState,
   databaseId: string,
 ): Promise<void> {
-  const policy = BackupPolicy.parse(state.args.policy);
+  // One database named it directly, or a whole app did: an app-level
+  // schedule sets the same policy on every database it reads (§17.4).
+  const policy = BackupPolicy.parse(
+    state.args.policy ?? {
+      expr: state.args.expr,
+      timezone: state.args.timezone,
+      keepLocal: state.args.keepLocal,
+      keepOffsite: state.args.keepOffsite,
+    },
+  );
   const row = await getDatabase(deps.db, databaseId);
   if (!row) throw new VDeployError('not_found', 'The database no longer exists');
   await deps.db.transaction((tx) => setBackupPolicy(tx, databaseId, policy, deps.now()));
