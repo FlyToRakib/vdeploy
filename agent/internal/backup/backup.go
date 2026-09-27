@@ -25,6 +25,7 @@ import (
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 )
 
 // Volume holds every artifact: outside the container that made it, outside
@@ -70,13 +71,13 @@ type Request struct {
 
 // Result is what the agent found after taking it.
 type Result struct {
-	BackupID  string   `json:"backupId"`
-	OK        bool     `json:"ok"`
-	SizeBytes int64    `json:"sizeBytes"`
-	SHA256    string   `json:"sha256,omitempty"`
-	Verified  bool     `json:"verified"`
-	Error     string   `json:"error,omitempty"`
-	Removed   []string `json:"removed"`
+	BackupID  string                `json:"backupId"`
+	OK        bool                  `json:"ok"`
+	SizeBytes int64                 `json:"sizeBytes"`
+	SHA256    string                `json:"sha256,omitempty"`
+	Verified  bool                  `json:"verified"`
+	Error     string                `json:"error,omitempty"`
+	Removed   protocol.List[string] `json:"removed"`
 	// Offsite is what became of the copy that was to leave this server.
 	Offsite *OffsiteOutcome `json:"offsite,omitempty"`
 	Log     string          `json:"log"`

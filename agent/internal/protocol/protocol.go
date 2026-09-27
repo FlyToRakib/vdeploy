@@ -165,3 +165,27 @@ func (s *Session) Check(h Header) error {
 	s.recvSeq = h.Seq
 	return nil
 }
+
+/*
+List is a slice that encodes as `[]` when it is empty, never as `null`.
+
+Go's encoder writes a nil slice as `null`, and every list in the control
+plane's schema says `array`. The two disagree exactly when a list is empty,
+which is the ordinary case and not the odd one — and the control plane's
+answer to a frame it cannot read is to close the connection. Making that
+impossible in the type is cheaper than remembering it at every place a
+result is built, which is a thing nobody reliably does.
+*/
+type List[T any] []T
+
+// MarshalJSON writes an empty list rather than null.
+func (l List[T]) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("[]"), nil
+	}
+	encoded, err := json.Marshal([]T(l))
+	if err != nil {
+		return nil, fmt.Errorf("encode list: %w", err)
+	}
+	return encoded, nil
+}

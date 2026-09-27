@@ -31,6 +31,7 @@ import (
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 )
 
 // MaxEntries is how many entries one folder answers with. Past this nobody
@@ -74,10 +75,10 @@ type Entry struct {
 
 // Result is what one listing answers with.
 type Result struct {
-	RequestID string  `json:"requestId"`
-	Entries   []Entry `json:"entries"`
-	Truncated bool    `json:"truncated"`
-	Error     string  `json:"error,omitempty"`
+	RequestID string               `json:"requestId"`
+	Entries   protocol.List[Entry] `json:"entries"`
+	Truncated bool                 `json:"truncated"`
+	Error     string               `json:"error,omitempty"`
 }
 
 // Reader looks inside a project's permanent folders.

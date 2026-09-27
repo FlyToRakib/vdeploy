@@ -28,6 +28,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 )
 
 // Report is what the server's firewall lets through.
@@ -38,7 +40,7 @@ type Report struct {
 	// Active is whether it is switched on at all.
 	Active bool `json:"active"`
 	// OpenPorts are the TCP ports it lets in, lowest first.
-	OpenPorts []int `json:"openPorts"`
+	OpenPorts protocol.List[int] `json:"openPorts"`
 	// Readable is false when a firewall is present but its rules could not
 	// be read, so "no open ports" is never mistaken for "everything closed".
 	Readable bool `json:"readable"`
@@ -60,7 +62,9 @@ func (r *Reader) Read() Report {
 	if report, found := r.firewalld(); found {
 		return report
 	}
-	return Report{}
+	// A list, not nothing: a nil slice encodes as null, and the control
+	// plane's schema says array — a difference that costs a connection.
+	return Report{OpenPorts: []int{}}
 }
 
 // ufw reads ufw's own files: whether it is enabled, and the rules it holds.

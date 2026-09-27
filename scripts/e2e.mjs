@@ -55,6 +55,11 @@ function log(message) {
   console.log(`[e2e] ${message}`);
 }
 
+/** The session, for the checks that use a real fetch rather than call(). */
+function cookieHeader() {
+  return [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
 /** Runs a shell command on the testbed host: the local machine or the VPS. */
 function onHost(command, input) {
   const [bin, args] = vps
@@ -441,11 +446,16 @@ async function run() {
   await instantUrl();
   await secrets(hello.id);
   await releaseCommand(hello.id);
-  await buildFromSource(server.serverId);
+  const uploadsProject = await buildFromSource(server.serverId);
   await fromGithub(server.serverId);
   await explainsFailure(server.serverId);
   await logsAndHistory(hello.id);
   await managedDatabase(server.serverId, hello.id);
+  await filesAndFolders(uploadsProject);
+  await healthAndReclaim(server.serverId);
+  await fromTemplate(server.serverId);
+  await composeRead();
+  await statusPage(uploadsProject);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
@@ -715,6 +725,163 @@ async function keepUploads(projectId) {
   const after = firstFile(replica());
   if (after !== before) throw new Error(`the file changed: ${before} → ${after}`);
   pass('made permanent in place: the same file kept', before);
+}
+
+/**
+ * Looking at what an app wrote, and taking a file away (M4 4.3e) — and the
+ * copy of those folders every destructive change depends on (4.3a).
+ * Between them, these are most of "nothing essential requires SSH".
+ */
+async function filesAndFolders(projectId) {
+  const { result: listing } = await op('files.list', { projectId, folder: 'uploads', path: '' });
+  const file = listing.entries.find((e) => e.name === 'first.txt');
+  if (!file || file.kind !== 'file' || file.sizeBytes === 0) {
+    throw new Error('the folder does not hold the file the app wrote: ' + JSON.stringify(listing));
+  }
+  pass('browsed an app’s permanent folder', listing.mountPath + '/first.txt');
+
+  const download = await fetch(
+    API + '/api/v1/projects/' + projectId + '/files/download?folder=uploads&path=first.txt',
+    { headers: { cookie: cookieHeader(), origin: API } },
+  );
+  const body = await download.text();
+  if (!download.ok || body.length !== file.sizeBytes) {
+    throw new Error('the file did not come back whole: ' + String(download.status));
+  }
+  pass('took a file off the server as a plain file', String(body.length) + ' bytes');
+
+  // A snapshot mounts the volume behind a folder, not the folder's name:
+  // getting that wrong copies an empty volume it just made.
+  const snap = await op('volume.snapshot', { projectId });
+  const done = await settled(snap.plan.id, 600_000);
+  if (done.status !== 'applied') throw new Error(JSON.stringify(done));
+  let kept;
+  await until('the snapshot is in the store', async () => {
+    const { result: backups } = await op('backup.list', {});
+    kept = backups.find((b) => b.projectId === projectId && b.kind === 'volumes');
+    return kept?.status === 'done' && kept.verified && kept.sizeBytes > 0;
+  });
+  pass('kept a copy of the permanent folders, with something in it', String(kept.sizeBytes) + ' bytes');
+}
+
+/**
+ * What the server is made of, and freeing what nothing needs (M4 4.3f–g).
+ * Everything running must still be running afterwards: that is the point.
+ */
+async function healthAndReclaim(serverId) {
+  await until(
+    'the server said what its disk holds',
+    async () => {
+      const { result } = await op('server.status', { serverId });
+      return Boolean(result.health?.docker) && result.health.load.cpus > 0;
+    },
+    900_000,
+  );
+  const { result: before } = await op('server.status', { serverId });
+  pass(
+    'the server says what its disk is made of',
+    'images ' + String(before.health.docker.imagesBytes >> 20) + ' MB',
+  );
+
+  const running = managedContainers().length;
+  await op('server.reclaim_safe', { serverId });
+  await until(
+    'disk freed',
+    async () => {
+      const { result } = await op('server.status', { serverId });
+      return result.lastReclaim?.ok === true;
+    },
+    600_000,
+  );
+  const { result: after } = await op('server.status', { serverId });
+  if (managedContainers().length !== running) {
+    throw new Error('freeing disk stopped something that was running');
+  }
+  pass(
+    'freed what nothing needs, keeping every rollback target',
+    String(after.lastReclaim.imagesRemoved) + ' removed, ' + String(after.lastReclaim.imagesKept) + ' kept',
+  );
+}
+
+/**
+ * An app from the catalog (M4 4.3i): a person picks it by name and gets a
+ * working install, with its folders already permanent.
+ */
+async function fromTemplate(serverId) {
+  const create = await op('project.create', {
+    serverId,
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'watch' },
+      source: { type: 'template', template: 'uptime-kuma' },
+      build: { strategy: 'image' },
+    },
+  });
+  const done = await settled(create.plan.id, 900_000);
+  if (done.status !== 'applied') throw new Error(JSON.stringify(done));
+  const { result: made } = await op('project.get', { projectId: done.projectId });
+  if (made.spec.source.type !== 'image' || made.spec.network.containerPort !== 3001) {
+    throw new Error('the template did not expand: ' + JSON.stringify(made.spec.source));
+  }
+  if (!made.spec.runtime.volumes.some((v) => v.mountPath === '/app/data')) {
+    throw new Error('the template’s folder was not made permanent');
+  }
+  await until(
+    'the app from the catalog is serving',
+    async () => {
+      const { result: list } = await op('project.list', {});
+      return list.find((x) => x.id === done.projectId)?.state === 'live';
+    },
+    900_000,
+  );
+  pass('an app from the catalog, set up properly', 'uptime-kuma on 3001, /app/data kept');
+}
+
+/** Reading a compose file (M4 4.3j): what comes over, and what will not. */
+async function composeRead() {
+  const file = [
+    'services:',
+    '  site:',
+    '    image: nginx:1.27',
+    '    ports: ["8080:80"]',
+    '    privileged: true',
+    '    volumes:',
+    '      - /etc/nginx:/etc/nginx',
+    '      - site:/usr/share/nginx/html',
+    '  db:',
+    '    image: postgres:17',
+    '',
+  ].join('\n');
+  const { result } = await op('compose.read', { file });
+  const refused = result.refused.map((n) => n.what);
+  if (!refused.includes('privileged') || !refused.some((w) => w.includes('/etc/nginx'))) {
+    throw new Error('a compose file’s privileges were not refused: ' + JSON.stringify(refused));
+  }
+  if (result.databases[0]?.engine !== 'postgres' || result.apps[0]?.name !== 'site') {
+    throw new Error('the compose file did not map: ' + JSON.stringify(result));
+  }
+  pass('a compose file read, with what it cannot have named', refused.join('; '));
+}
+
+/** The page you hand to strangers (M4 4.3k): readable without signing in. */
+async function statusPage(projectId) {
+  await op('status.configure', {
+    slug: 'e2e',
+    title: 'E2E status',
+    enabled: true,
+    apps: [{ projectId, label: 'The shop' }],
+  });
+  const page = await fetch(API + '/status/e2e');
+  const html = await page.text();
+  if (!page.ok || !html.includes('The shop') || !html.includes('E2E status')) {
+    throw new Error('the status page did not answer: ' + String(page.status));
+  }
+  if (html.includes(projectId)) throw new Error('the status page leaked a project id');
+  // A page nobody set up answers the same as one that is switched off.
+  const missing = await fetch(API + '/status/nobody-has-this');
+  if (missing.status !== 404) throw new Error('an unknown status page did not 404');
+  pass('a public status page, showing only what was put on it');
 }
 
 /**
@@ -1075,6 +1242,7 @@ async function buildFromSource(serverId) {
   if (uploads?.status !== 'unprotected') throw new Error(JSON.stringify(storage));
   pass('build flagged a folder whose files a deploy would delete', uploads.path);
   await keepUploads(nodeApp.id);
+  return nodeApp.id;
 }
 
 const INSTANT_HOST = 'hello.apps.vdeploy.test';

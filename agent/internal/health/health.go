@@ -27,6 +27,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/firewall"
+	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 )
 
 // Every is how often the server's make-up is measured.
@@ -70,14 +71,14 @@ type Orphan struct {
 
 // Report is one look at what the server is made of.
 type Report struct {
-	At             string   `json:"at"`
-	Load           Load     `json:"load"`
-	SwapUsedBytes  int64    `json:"swapUsedBytes"`
-	SwapTotalBytes int64    `json:"swapTotalBytes"`
-	InodesUsed     int64    `json:"inodesUsed"`
-	InodesTotal    int64    `json:"inodesTotal"`
-	Docker         Docker   `json:"docker"`
-	Orphans        []Orphan `json:"orphans"`
+	At             string                `json:"at"`
+	Load           Load                  `json:"load"`
+	SwapUsedBytes  int64                 `json:"swapUsedBytes"`
+	SwapTotalBytes int64                 `json:"swapTotalBytes"`
+	InodesUsed     int64                 `json:"inodesUsed"`
+	InodesTotal    int64                 `json:"inodesTotal"`
+	Docker         Docker                `json:"docker"`
+	Orphans        protocol.List[Orphan] `json:"orphans"`
 	// Firewall is what this server's own firewall lets in (§20 Servers).
 	Firewall firewall.Report `json:"firewall"`
 }

@@ -21,6 +21,7 @@ import (
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 )
 
 // Every is how often a reading is taken. Often enough to see a spike that
@@ -52,9 +53,9 @@ type Server struct {
 
 // Usage is one reading of the whole server.
 type Usage struct {
-	Server   Server    `json:"server"`
-	Projects []Project `json:"projects"`
-	At       time.Time `json:"-"`
+	Server   Server                 `json:"server"`
+	Projects protocol.List[Project] `json:"projects"`
+	At       time.Time              `json:"-"`
 }
 
 // Engine is what a reading needs from Docker.
@@ -81,7 +82,9 @@ a handful of apps costs a handful of cheap calls, and a server with many is
 paced by the same loop rather than by a burst.
 */
 func (r *Reader) Read(ctx context.Context, containers []docker.Container, now time.Time) Usage {
-	usage := Usage{At: now, Server: r.server()}
+	// A list, never nil: a nil slice encodes as null, and the control
+	// plane's schema says array.
+	usage := Usage{At: now, Server: r.server(), Projects: []Project{}}
 	byProject := map[string]*Project{}
 	for _, container := range containers {
 		projectID := container.Labels[compose.ProjectLabel]

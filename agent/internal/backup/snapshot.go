@@ -14,6 +14,7 @@ import (
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
 )
 
 /*
@@ -63,23 +64,30 @@ type SnapshotRequest struct {
 
 // SnapshotResult is what is actually on disk afterwards.
 type SnapshotResult struct {
-	SnapshotID string   `json:"snapshotId"`
-	OK         bool     `json:"ok"`
-	SizeBytes  int64    `json:"sizeBytes"`
-	SHA256     string   `json:"sha256,omitempty"`
-	Verified   bool     `json:"verified"`
-	Error      string   `json:"error,omitempty"`
-	Removed    []string `json:"removed"`
+	SnapshotID string                `json:"snapshotId"`
+	OK         bool                  `json:"ok"`
+	SizeBytes  int64                 `json:"sizeBytes"`
+	SHA256     string                `json:"sha256,omitempty"`
+	Verified   bool                  `json:"verified"`
+	Error      string                `json:"error,omitempty"`
+	Removed    protocol.List[string] `json:"removed"`
 	// DeletedVolumes are the folders that are now gone.
-	DeletedVolumes []string        `json:"deletedVolumes"`
-	Offsite        *OffsiteOutcome `json:"offsite,omitempty"`
-	Log            string          `json:"log"`
+	DeletedVolumes protocol.List[string] `json:"deletedVolumes"`
+	Offsite        *OffsiteOutcome       `json:"offsite,omitempty"`
+	Log            string                `json:"log"`
 }
 
 // Snapshot takes one snapshot, or puts one back.
 func (r *Runner) Snapshot(ctx context.Context, req SnapshotRequest) SnapshotResult {
 	fail := func(reason string) SnapshotResult {
-		return SnapshotResult{SnapshotID: req.SnapshotID, Error: reason}
+		return SnapshotResult{
+			SnapshotID: req.SnapshotID,
+			Error:      reason,
+			// Lists, never nil: a nil slice encodes as null, and the
+			// control plane's schema says array.
+			Removed:        []string{},
+			DeletedVolumes: []string{},
+		}
 	}
 	if !safeName.MatchString(req.FileName) {
 		return fail("the snapshot file name is not allowed")
@@ -114,10 +122,12 @@ func (r *Runner) Snapshot(ctx context.Context, req SnapshotRequest) SnapshotResu
 			return fail(err.Error())
 		}
 		return SnapshotResult{
-			SnapshotID: req.SnapshotID,
-			OK:         true,
-			Verified:   true,
-			Log:        fmt.Sprintf("%d folders put back", len(mounts)),
+			SnapshotID:     req.SnapshotID,
+			OK:             true,
+			Verified:       true,
+			Removed:        []string{},
+			DeletedVolumes: []string{},
+			Log:            fmt.Sprintf("%d folders put back", len(mounts)),
 		}
 	}
 	return r.take(runCtx, ctx, req, mounts)
@@ -180,10 +190,12 @@ func (r *Runner) take(
 	}
 
 	result := SnapshotResult{
-		SnapshotID: req.SnapshotID,
-		OK:         true,
-		SizeBytes:  counter.n,
-		SHA256:     hex.EncodeToString(sum.Sum(nil)),
+		SnapshotID:     req.SnapshotID,
+		OK:             true,
+		Removed:        []string{},
+		DeletedVolumes: []string{},
+		SizeBytes:      counter.n,
+		SHA256:         hex.EncodeToString(sum.Sum(nil)),
 		// Written here and measured here: what is in the store is what came
 		// out of those folders, and it is not empty.
 		Verified: true,
