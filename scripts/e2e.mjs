@@ -182,9 +182,13 @@ function startApiAndWorker() {
   );
 }
 
-// The one origin: /api/* to the API (websockets and streams included), the rest to the dashboard.
+// The one origin: /api/* and the public status page to the API (websockets
+// and streams included), the rest to the dashboard.
 const CADDYFILE = `:8080 {
   handle /api/* {
+    reverse_proxy cp-api:8080
+  }
+  handle /status/* {
     reverse_proxy cp-api:8080
   }
   handle {

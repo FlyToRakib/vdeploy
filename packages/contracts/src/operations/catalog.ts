@@ -118,6 +118,31 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'project.uptime',
+    'project',
+    'metrics',
+    'Show how much of the last days an app spent serving, and every outage',
+    obj({ ...P, days: z.number().int().min(1).max(90).default(30) }),
+  ),
+  query('status.get', 'org', 'config', 'Show the public status page settings', obj({})),
+  operation(
+    'status.configure',
+    'sensitive',
+    'org',
+    'Set up the public status page: its address, its title and the apps on it',
+    obj({
+      slug: z
+        .string()
+        .regex(/^[a-z]([a-z0-9-]{1,61}[a-z0-9])?$/, 'lowercase letters, digits and hyphens'),
+      title: z.string().min(1).max(120),
+      enabled: z.boolean(),
+      apps: z
+        .array(z.strictObject({ projectId: idSchema('project'), label: z.string().min(1).max(80) }))
+        .max(50),
+    }),
+    { minRole: 'admin' },
+  ),
+  query(
     'compose.read',
     'org',
     'config',

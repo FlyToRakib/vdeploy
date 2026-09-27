@@ -60,6 +60,7 @@ import {
   readSecret,
   recordEvents,
   recordUsage,
+  recordUptime,
   notifyBackupResult,
   notifyRestoreCheck,
   notifyFromReport,
@@ -1188,6 +1189,8 @@ export class Gateway
       await recordEvents(db, serverId, frame.report.events ?? [], now());
       // What the server and its apps are actually using (§27).
       await recordUsage(db, serverId, frame.report, now());
+      // And when each one began or stopped serving (§18) — only the changes.
+      await recordUptime(db, serverId, frame.report, now());
       await notifyFromReport(db, serverId, frame.report, now());
     } else if (frame.type === 'build_result') {
       await finishBuild(db, serverId, frame.result, now());

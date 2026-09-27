@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bell,
   Database,
   ClipboardCheck,
@@ -47,6 +48,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Backups',
     icon: HardDriveDownload,
     keywords: ['offsite', 'restic', 's3', 'copies', 'restore', 'storage'],
+  },
+  {
+    href: '/settings/status',
+    label: 'Status page',
+    icon: Activity,
+    keywords: ['uptime', 'public', 'incidents', 'outage', 'visitors'],
   },
   {
     href: '/settings/notifications',

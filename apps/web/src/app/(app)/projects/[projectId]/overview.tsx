@@ -44,10 +44,17 @@ export function ProjectOverview() {
   const [releases, setReleases] = useState<Release[]>([]);
   const [lastFailure, setLastFailure] = useState<string | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [uptime, setUptime] = useState<Uptime | null>(null);
   const troubled = summary?.state === 'down' || summary?.state === 'failing';
 
   useEffect(() => {
     const live = { current: true };
+    void query<Uptime>('project.uptime', { projectId, days: 30 }).then(
+      (history) => {
+        if (live.current) setUptime(history);
+      },
+      () => undefined,
+    );
     void query<Usage>('project.metrics', { projectId }).then(
       (read) => {
         if (live.current) setUsage(read);
@@ -141,6 +148,16 @@ export function ProjectOverview() {
           <dd>{current ? `v${current.version}, ${ago(current.createdAt)}` : 'Not deployed yet'}</dd>
           <dt className="text-muted-foreground">Code from</dt>
           <dd className="break-all">{source}</dd>
+          {uptime && (
+            <>
+              <dt className="text-muted-foreground">Serving</dt>
+              <dd>
+                {`${uptime.percent.toFixed(1)}% of the last 30 days`}
+                {uptime.outages.length > 0 &&
+                  `, ${String(uptime.outages.length)} ${uptime.outages.length === 1 ? 'outage' : 'outages'}`}
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Port</dt>
           <dd>{row.spec.network?.containerPort ?? 'None: not reachable from the web'}</dd>
         </dl>
@@ -175,6 +192,22 @@ export function ProjectOverview() {
           </ol>
         )}
       </section>
+
+      {uptime && uptime.outages.length > 0 && (
+        <section className="grid gap-3">
+          <h2 className="font-medium">When it was not working</h2>
+          <ul className="grid gap-1 text-sm">
+            {uptime.outages.slice(0, 5).map((outage) => (
+              <li key={outage.from} className="flex flex-wrap gap-3">
+                <span title={outage.from}>{ago(outage.from)}</span>
+                <span className="text-muted-foreground">
+                  {outage.to === null ? 'still down' : `for ${minutes(outage.seconds)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {usage && usage.series.length > 1 && (
         <section className="grid gap-3">
@@ -219,10 +252,25 @@ export function ProjectOverview() {
   );
 }
 
+/** What `project.uptime` answers with (§18). */
+interface Uptime {
+  percent: number;
+  up: boolean;
+  outages: { from: string; to: string | null; seconds: number }[];
+}
+
 /** What `project.metrics` answers with. */
 interface Usage {
   now: Reading | null;
   series: Reading[];
+}
+
+/** "12 minutes", "3 hours": how long it was out, in the unit that fits. */
+function minutes(seconds: number): string {
+  if (seconds < 90) return `${String(seconds)} seconds`;
+  if (seconds < 90 * 60) return `${String(Math.round(seconds / 60))} minutes`;
+  if (seconds < 48 * 3600) return `${String(Math.round(seconds / 3600))} hours`;
+  return `${String(Math.round(seconds / 86_400))} days`;
 }
 
 /** "300 MB of 512 MB" — the number people compare against. */

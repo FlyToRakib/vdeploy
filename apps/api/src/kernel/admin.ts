@@ -29,6 +29,7 @@ import { NOTIFICATION_ADMIN } from './notifications.js';
 import { OFFSITE_ADMIN } from './offsite.js';
 import { FILE_ADMIN } from './files.js';
 import { RECLAIM_ADMIN } from './reclaim.js';
+import { STATUS_ADMIN } from './status.js';
 import type { Handler, HandlerContext } from './context.js';
 
 /** Enrollment tokens work once, within an hour (§25). */
@@ -87,6 +88,7 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
   ...OFFSITE_ADMIN,
   ...FILE_ADMIN,
   ...RECLAIM_ADMIN,
+  ...STATUS_ADMIN,
   ...AI_ADMIN,
   ...GITHUB_ADMIN,
   'user.invite': async ({ deps, actor, args }) => {

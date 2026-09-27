@@ -22,6 +22,7 @@ import { healthRoutes } from './routes/health.js';
 import { operationRoutes } from './routes/operations.js';
 import { backupDownloadRoutes } from './routes/backup-download.js';
 import { fileDownloadRoutes } from './routes/files-download.js';
+import { statusPageRoutes } from './routes/status-page.js';
 import { dumpRoutes } from './routes/dumps.js';
 import { logRoutes } from './routes/logs.js';
 import { terminalRoutes } from './routes/terminal.js';
@@ -162,6 +163,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(logRoutes(kernel));
   await app.register(backupDownloadRoutes(kernel));
   await app.register(fileDownloadRoutes(kernel));
+  await app.register(statusPageRoutes(kernel));
   await app.register(terminalRoutes(kernel));
   await app.register(uploadRoutes(kernel));
   await app.register(dumpRoutes(kernel));

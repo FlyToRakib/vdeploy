@@ -7,6 +7,7 @@ import {
   notifyOfflineServers,
   pruneEvents,
   pruneMetrics,
+  pruneUptime,
   queueConnection,
   type ApplyJob,
 } from '@vdeploy/db';
@@ -194,6 +195,9 @@ const pruneTimer = setInterval(() => {
   });
   pruneMetrics(db, new Date()).catch((err: unknown) => {
     log.error({ err }, 'could not prune old readings');
+  });
+  pruneUptime(db, new Date()).catch((err: unknown) => {
+    log.error({ err }, 'could not prune old uptime history');
   });
 }, 60 * 60_000);
 

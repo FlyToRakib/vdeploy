@@ -15,7 +15,9 @@ import {
   eventsFor,
   getBuild,
   listBuilds,
+  statusPageOf,
   storageStatus,
+  uptimeOf,
   domainChecksFor,
   listSecrets,
   projectSummaries,
@@ -168,6 +170,25 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
    * is the part worth reading.
    */
   'compose.read': ({ args }) => Promise.resolve(readCompose(String(args.file))),
+  /**
+   * How much of the last days an app spent serving, and what the outages
+   * were (§18). "Serving" is the same judgement the project screen makes,
+   * so the two can never disagree.
+   */
+  'project.uptime': async ({ deps, args }) => {
+    const projectId = id(args, 'projectId');
+    const days = typeof args.days === 'number' ? args.days : 30;
+    const [row] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    return uptimeOf(deps.db, projectId, days, deps.now());
+  },
+  'status.get': async ({ deps, actor }) => {
+    const page = await statusPageOf(deps.db, actor.orgId);
+    return {
+      page,
+      publicUrl: page ? `${deps.publicUrl.replace(/\/$/, '')}/status/${page.slug}` : null,
+    };
+  },
   'server.status': async ({ deps, args }) => {
     const [row] = await deps.db
       .select({

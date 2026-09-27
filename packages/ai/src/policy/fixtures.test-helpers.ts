@@ -138,6 +138,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'registry.add': { host: 'ghcr.io' },
   'git.connect': { provider: 'github', installationId: '12345' },
   'volume.delete': { volume: 'uploads' },
+  'status.configure': { slug: 'acme', title: 'Acme status', enabled: true, apps: [] },
   'compose.read': { file: 'services:\n  web:\n    image: nginx:1.27\n' },
   'files.list': { folder: 'uploads', path: '' },
   'files.download': { folder: 'uploads', path: 'invoice.pdf' },
