@@ -15,6 +15,7 @@ import { formText } from '@/lib/forms';
 import { OperationError, query, runOperation } from '@/lib/operations';
 import { ago, serverHealth, splitCommand } from '@/lib/servers';
 import {
+  FirewallNote,
   HealthPanel,
   type LastReclaim,
   type ServerHealth,
@@ -275,6 +276,11 @@ export function ServerDetail({ serverId }: { serverId: string }) {
                 );
               })}
             </ol>
+          )}
+          {server.health?.firewall && (
+            <div className="border-t border-border pt-3">
+              <FirewallNote firewall={server.health.firewall} />
+            </div>
           )}
           {reach && (
             <p className="text-xs text-muted-foreground" title={reach.checkedAt}>

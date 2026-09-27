@@ -75,6 +75,23 @@ export const ReclaimResult = z.strictObject({
 });
 export type ReclaimResult = z.infer<typeof ReclaimResult>;
 
+/**
+ * What the server's own firewall lets through (§20 Servers, §30).
+ *
+ * Supporting detail, never the verdict: the check that matters is the one
+ * from outside (§30 ③). This says *why* — a port open here and still
+ * unreachable means the provider's firewall, not this server's.
+ */
+export const FirewallReport = z.strictObject({
+  /** "ufw", "firewalld", or empty when VDeploy cannot tell. */
+  tool: z.string().max(32),
+  active: z.boolean(),
+  openPorts: z.array(z.number().int().min(1).max(65535)).max(64),
+  /** False when a firewall is there but its rules could not be read. */
+  readable: z.boolean(),
+});
+export type FirewallReport = z.infer<typeof FirewallReport>;
+
 export const ServerHealth = z.strictObject({
   at: z.iso.datetime({ offset: true }),
   load: LoadAverage,
@@ -92,5 +109,7 @@ export const ServerHealth = z.strictObject({
   inodesTotal: z.number().int().min(0),
   docker: DockerDisk,
   orphans: z.array(OrphanVolume).max(100),
+  /** What the server's own firewall lets in; absent from older agents. */
+  firewall: FirewallReport.optional(),
 });
 export type ServerHealth = z.infer<typeof ServerHealth>;

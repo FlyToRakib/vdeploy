@@ -26,6 +26,7 @@ import (
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+	"github.com/FlyToRakib/vdeploy/agent/internal/firewall"
 )
 
 // Every is how often the server's make-up is measured.
@@ -77,6 +78,8 @@ type Report struct {
 	InodesTotal    int64    `json:"inodesTotal"`
 	Docker         Docker   `json:"docker"`
 	Orphans        []Orphan `json:"orphans"`
+	// Firewall is what this server's own firewall lets in (§20 Servers).
+	Firewall firewall.Report `json:"firewall"`
 }
 
 // Engine is what a look needs from Docker.
@@ -92,6 +95,8 @@ type Reader struct {
 	// ProcLoadavg and ProcMeminfo are overridable for tests.
 	ProcLoadavg string
 	ProcMeminfo string
+	// FirewallRoot is prefixed to the firewall's own config paths, for tests.
+	FirewallRoot string
 }
 
 // Read takes one look. `wanted` is every volume the desired state still
@@ -104,6 +109,7 @@ func (r *Reader) Read(ctx context.Context, wanted map[string]bool, now time.Time
 		Load:    r.load(),
 		Orphans: []Orphan{},
 	}
+	report.Firewall = (&firewall.Reader{Root: r.FirewallRoot}).Read()
 	report.SwapUsedBytes, report.SwapTotalBytes = r.swap()
 	report.InodesUsed, report.InodesTotal = r.inodes()
 	usage, err := r.Engine.SystemDF(ctx)

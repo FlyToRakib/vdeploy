@@ -24,6 +24,77 @@ export interface ServerHealth {
     otherBytes: number;
   };
   orphans: { volume: string; projectId: string; sizeBytes: number; createdAt: string }[];
+  firewall?: { tool: string; active: boolean; openPorts: number[]; readable: boolean };
+}
+
+/**
+ * What the server's own firewall says, beside the check from outside.
+ *
+ * Never the verdict — the check from outside is that (§30 ③). This is the
+ * *why*: a port open here and still unreachable means the provider's
+ * firewall, and that is the difference between an hour of confusion and one
+ * click in a hosting panel. VDeploy reads it and says what to type; it does
+ * not reach in and change the one thing that can lock somebody out.
+ */
+export function FirewallNote({
+  firewall,
+}: {
+  firewall: NonNullable<ServerHealth['firewall']>;
+}) {
+  if (firewall.tool === '') {
+    return (
+      <p className="text-sm text-muted-foreground">
+        VDeploy could not find a firewall it knows how to read on this server. The check above,
+        from outside, is what decides.
+      </p>
+    );
+  }
+  if (!firewall.active) {
+    return (
+      <p className="text-sm">
+        Its <span className="font-mono">{firewall.tool}</span> firewall is switched off, so it is
+        not blocking anything. Anything still unreachable is your hosting provider&apos;s firewall.
+      </p>
+    );
+  }
+  if (!firewall.readable) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Its <span className="font-mono">{firewall.tool}</span> firewall is on, but VDeploy could
+        not read its rules.
+      </p>
+    );
+  }
+  const web = [80, 443].filter((port) => !firewall.openPorts.includes(port));
+  return (
+    <div className="grid gap-2 text-sm">
+      <p>
+        Its <span className="font-mono">{firewall.tool}</span> firewall is on and lets in{' '}
+        {firewall.openPorts.length === 0
+          ? 'nothing'
+          : firewall.openPorts.map((p) => String(p)).join(', ')}
+        .
+      </p>
+      {web.length > 0 ? (
+        <>
+          <p>
+            {web.length === 2 ? 'Ports 80 and 443 are' : `Port ${String(web[0])} is`} closed here,
+            so visitors cannot reach your sites. On the server, as root:
+          </p>
+          <code className="rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs break-all">
+            {firewall.tool === 'ufw'
+              ? `ufw allow ${web.join('/tcp && ufw allow ')}/tcp`
+              : `firewall-cmd --permanent ${web.map((p) => (p === 80 ? '--add-service=http' : '--add-service=https')).join(' ')} && firewall-cmd --reload`}
+          </code>
+        </>
+      ) : (
+        <p className="text-muted-foreground">
+          Ports 80 and 443 are open here. If visitors still cannot reach you, it is your hosting
+          provider&apos;s firewall, not this server&apos;s.
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** What freeing disk last freed here. */
