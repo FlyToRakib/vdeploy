@@ -50,10 +50,7 @@ export const RECLAIM_ADMIN: Partial<Record<OperationName, Handler>> = {
  * last few releases of each, and every managed database's engine. The agent
  * adds what it can see for itself — nothing here is trusted as complete.
  */
-async function rollbackTargets(
-  deps: Pick<KernelDeps, 'db'>,
-  serverId: string,
-): Promise<string[]> {
+async function rollbackTargets(deps: Pick<KernelDeps, 'db'>, serverId: string): Promise<string[]> {
   const keep = new Set<string>();
   const here = await deps.db
     .select({ id: projects.id })

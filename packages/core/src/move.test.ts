@@ -86,11 +86,7 @@ describe('moving an app to another server (§17.6)', () => {
 
   it('refuses a move to where it already is', () => {
     expect(() =>
-      buildPlan(
-        'project.move',
-        { projectId: project.id, serverId: from },
-        { project, server },
-      ),
+      buildPlan('project.move', { projectId: project.id, serverId: from }, { project, server }),
     ).toThrow(/already on that server/);
   });
 

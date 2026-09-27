@@ -46,7 +46,9 @@ export function TemplateSource({ onReady }: { onReady: (ready: ReadySource) => v
 
   if (templates === null) return <Skeleton className="mt-4 h-48" />;
   if (templates.length === 0) {
-    return <p className="mt-4 text-sm text-muted-foreground">No apps are set up on this VDeploy.</p>;
+    return (
+      <p className="mt-4 text-sm text-muted-foreground">No apps are set up on this VDeploy.</p>
+    );
   }
 
   return (

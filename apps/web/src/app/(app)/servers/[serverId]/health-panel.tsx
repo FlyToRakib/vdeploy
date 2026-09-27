@@ -36,16 +36,12 @@ export interface ServerHealth {
  * click in a hosting panel. VDeploy reads it and says what to type; it does
  * not reach in and change the one thing that can lock somebody out.
  */
-export function FirewallNote({
-  firewall,
-}: {
-  firewall: NonNullable<ServerHealth['firewall']>;
-}) {
+export function FirewallNote({ firewall }: { firewall: NonNullable<ServerHealth['firewall']> }) {
   if (firewall.tool === '') {
     return (
       <p className="text-sm text-muted-foreground">
-        VDeploy could not find a firewall it knows how to read on this server. The check above,
-        from outside, is what decides.
+        VDeploy could not find a firewall it knows how to read on this server. The check above, from
+        outside, is what decides.
       </p>
     );
   }
@@ -60,8 +56,8 @@ export function FirewallNote({
   if (!firewall.readable) {
     return (
       <p className="text-sm text-muted-foreground">
-        Its <span className="font-mono">{firewall.tool}</span> firewall is on, but VDeploy could
-        not read its rules.
+        Its <span className="font-mono">{firewall.tool}</span> firewall is on, but VDeploy could not
+        read its rules.
       </p>
     );
   }

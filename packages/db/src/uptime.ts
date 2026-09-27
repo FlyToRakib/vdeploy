@@ -172,7 +172,12 @@ export async function statusPageOf(
 export async function saveStatusPage(
   tx: Executor,
   orgId: string,
-  input: { slug: string; title: string; enabled: boolean; entries: { projectId: string; label: string }[] },
+  input: {
+    slug: string;
+    title: string;
+    enabled: boolean;
+    entries: { projectId: string; label: string }[];
+  },
 ): Promise<void> {
   const [taken] = await tx.select().from(statusPages).where(eq(statusPages.slug, input.slug));
   if (taken && taken.orgId !== orgId) {

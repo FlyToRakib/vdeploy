@@ -1,7 +1,13 @@
 import { ApplicationSpec } from '@vdeploy/contracts';
 import { describe, expect, it } from 'vitest';
 import { buildPlan } from './plan.js';
-import { findTemplate, TEMPLATES, templateLink, templateSecrets, templateSpec } from './templates.js';
+import {
+  findTemplate,
+  TEMPLATES,
+  templateLink,
+  templateSecrets,
+  templateSpec,
+} from './templates.js';
 
 /** What a person actually sends: a name and the app they picked. */
 const asked = (name: string, template: string) => ({
@@ -15,7 +21,7 @@ const asked = (name: string, template: string) => ({
 });
 
 const server = {
-  name: "server-01",
+  name: 'server-01',
   capacity: { memoryBytes: 8 * 1024 * 1024 * 1024, cpus: 4 },
   committed: { memoryBytes: 0, cpu: 0 },
 };

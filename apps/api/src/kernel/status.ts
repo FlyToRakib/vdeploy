@@ -21,7 +21,11 @@ export const STATUS_ADMIN: Partial<Record<OperationName, Handler>> = {
         .select({ id: projects.id })
         .from(projects)
         .where(
-          and(eq(projects.orgId, actor.orgId), inArray(projects.id, ids), isNull(projects.deletedAt)),
+          and(
+            eq(projects.orgId, actor.orgId),
+            inArray(projects.id, ids),
+            isNull(projects.deletedAt),
+          ),
         );
       if (rows.length !== new Set(ids).size) {
         throw new VDeployError('not_found', 'One of those apps is not in this organization');

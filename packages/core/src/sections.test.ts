@@ -72,13 +72,9 @@ describe('operations that change one part of the spec (§24)', () => {
   it('will not put a domain on an app nothing can reach', () => {
     // No port means no network section: a domain there would point at nothing.
     const headless = ApplicationSpec.parse({ ...spec, network: undefined });
-    expect(() =>
-      specAfter(
-        'domain.add',
-        { host: 'x.example.com' },
-        headless,
-      ),
-    ).toThrow(/not reachable from the web/);
+    expect(() => specAfter('domain.add', { host: 'x.example.com' }, headless)).toThrow(
+      /not reachable from the web/,
+    );
   });
 
   it('adds a permanent folder, and refuses one that is already kept', () => {
@@ -87,11 +83,7 @@ describe('operations that change one part of the spec (§24)', () => {
     });
     expect(added.runtime.volumes).toEqual([{ name: 'uploads', mountPath: '/app/uploads' }]);
     expect(() =>
-      specAfter(
-        'volume.create',
-        { volume: { name: 'other', mountPath: '/app/uploads' } },
-        added,
-      ),
+      specAfter('volume.create', { volume: { name: 'other', mountPath: '/app/uploads' } }, added),
     ).toThrow(/already keeps/);
   });
 

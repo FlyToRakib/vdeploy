@@ -80,9 +80,7 @@ describe('uptime history (§18)', () => {
   it('counts an outage that started before the window', async () => {
     // The most misleading number this platform could produce: an app that
     // went down a week ago has no change inside a one-day window.
-    await t.db
-      .insert(uptimeChanges)
-      .values({ projectId, orgId, at: ago(7 * DAY), up: false });
+    await t.db.insert(uptimeChanges).values({ projectId, orgId, at: ago(7 * DAY), up: false });
 
     const history = await uptimeOf(t.db, projectId, 1, now);
     expect(history.up).toBe(false);

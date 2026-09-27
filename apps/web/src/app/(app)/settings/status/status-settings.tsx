@@ -41,7 +41,9 @@ export function StatusSettings() {
         setPage(answer.page);
         setUrl(answer.publicUrl);
         setEnabled(answer.page?.enabled ?? false);
-        setChosen(Object.fromEntries((answer.page?.entries ?? []).map((e) => [e.projectId, e.label])));
+        setChosen(
+          Object.fromEntries((answer.page?.entries ?? []).map((e) => [e.projectId, e.label])),
+        );
       },
       () => {
         if (live) setPage(null);

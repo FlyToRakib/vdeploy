@@ -50,8 +50,7 @@ const MISSING = `<!doctype html><meta charset="utf-8"><title>Not found</title>
 function escape(text: string): string {
   return text.replace(
     /[&<>"']/g,
-    (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
   );
 }
 

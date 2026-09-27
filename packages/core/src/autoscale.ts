@@ -132,7 +132,8 @@ function words(rule: {
       : rule.metric === 'memory'
         ? 'memory use'
         : 'requests a second';
-  const how = rule.above !== undefined ? `above ${String(rule.above)}` : `below ${String(rule.below)}`;
+  const how =
+    rule.above !== undefined ? `above ${String(rule.above)}` : `below ${String(rule.below)}`;
   return `${what} stayed ${how} for ${rule.forDuration}`;
 }
 

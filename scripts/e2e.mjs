@@ -761,7 +761,10 @@ async function filesAndFolders(projectId) {
     kept = backups.find((b) => b.projectId === projectId && b.kind === 'volumes');
     return kept?.status === 'done' && kept.verified && kept.sizeBytes > 0;
   });
-  pass('kept a copy of the permanent folders, with something in it', String(kept.sizeBytes) + ' bytes');
+  pass(
+    'kept a copy of the permanent folders, with something in it',
+    String(kept.sizeBytes) + ' bytes',
+  );
 }
 
 /**
@@ -800,7 +803,10 @@ async function healthAndReclaim(serverId) {
   }
   pass(
     'freed what nothing needs, keeping every rollback target',
-    String(after.lastReclaim.imagesRemoved) + ' removed, ' + String(after.lastReclaim.imagesKept) + ' kept',
+    String(after.lastReclaim.imagesRemoved) +
+      ' removed, ' +
+      String(after.lastReclaim.imagesKept) +
+      ' kept',
   );
 }
 

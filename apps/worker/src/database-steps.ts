@@ -152,7 +152,9 @@ export async function linkDatabaseStep(
   // can reach from outside is not worth hiding.
   const parts =
     state.args.parts && typeof state.args.parts === 'object'
-      ? (state.args.parts as Partial<Record<'host' | 'port' | 'user' | 'password' | 'name', string>>)
+      ? (state.args.parts as Partial<
+          Record<'host' | 'port' | 'user' | 'password' | 'name', string>
+        >)
       : null;
   await deps.db.transaction(async (tx) => {
     const url = connectionUrl({
@@ -590,7 +592,6 @@ export function snapshotFileName(project: string, taken: Date): string {
   return `${project}-folders-${stamp}.tar.gz`;
 }
 
-
 /**
  * Points a project at a different server (§17.6).
  *
@@ -615,7 +616,10 @@ export async function moveToServerStep(
     .from(servers)
     .where(and(eq(servers.id, serverId), eq(servers.orgId, state.orgId)));
   if (!target?.agentPublicKey) {
-    throw new VDeployError('conflict', 'That server is not connected, so nothing can be moved to it');
+    throw new VDeployError(
+      'conflict',
+      'That server is not connected, so nothing can be moved to it',
+    );
   }
   const from = project.serverId;
   const spec = readSpec(project.spec);
@@ -773,7 +777,8 @@ export async function deleteVolumeStep(
 ): Promise<void> {
   // A server-scoped plan: the server it acts on is the one it named.
   const serverId = typeof state.args.serverId === 'string' ? state.args.serverId : '';
-  if (!serverId) throw new VDeployError('not_found', 'That folder is not on a server VDeploy knows');
+  if (!serverId)
+    throw new VDeployError('not_found', 'That folder is not on a server VDeploy knows');
   const owner = await folderOwner(deps.db, serverId, volume);
   if (!owner) {
     throw new VDeployError(
@@ -810,7 +815,10 @@ export async function deleteVolumeStep(
       );
     }
     if (Date.now() > deadline) {
-      throw new VDeployError('unavailable', 'The copy did not finish in time, so nothing was deleted');
+      throw new VDeployError(
+        'unavailable',
+        'The copy did not finish in time, so nothing was deleted',
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
   }

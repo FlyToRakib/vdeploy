@@ -14,11 +14,7 @@ const spec = (memory = '512Mi') =>
     runtime: { resources: { memory: { request: memory, limit: memory } } },
   });
 
-const server = (
-  name: string,
-  freeGb: number,
-  over: Partial<Candidate> = {},
-): Candidate => ({
+const server = (name: string, freeGb: number, over: Partial<Candidate> = {}): Candidate => ({
   id: `srv_${name}`,
   connected: true,
   budget: {
@@ -45,10 +41,7 @@ describe('choosing a server when nobody said (§14)', () => {
   });
 
   it('will not place on a server no agent has ever reached', () => {
-    const placed = place(spec(), [
-      server('big', 4, { connected: false }),
-      server('small', 1),
-    ]);
+    const placed = place(spec(), [server('big', 4, { connected: false }), server('small', 1)]);
     expect(placed.serverId).toBe('srv_small');
     expect(placed.because).toContain('only server with room');
   });
