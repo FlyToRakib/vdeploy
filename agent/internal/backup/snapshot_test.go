@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"slices"
 	"strings"
@@ -35,13 +36,18 @@ func TestEveryPermanentFolderGoesIntoOneSnapshot(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 	// Each folder is mounted under its own name, so one archive holds them
-	// all and each one comes back where it belongs.
+	// all and each one comes back where it belongs — but what is mounted is
+	// the project's real volume, which the agent works out itself.
 	if len(engine.snapped) != 1 {
 		t.Fatalf("snapped = %+v", engine.snapped)
 	}
-	if engine.snapped[0]["uploads"] != "/snap/uploads" ||
-		engine.snapped[0]["sqlite"] != "/snap/sqlite" {
+	key := compose.VolumeName(req.ProjectID, "uploads")
+	if engine.snapped[0][key] != "/snap/uploads" ||
+		engine.snapped[0][compose.VolumeName(req.ProjectID, "sqlite")] != "/snap/sqlite" {
 		t.Fatalf("folders were mounted wrongly: %+v", engine.snapped[0])
+	}
+	if _, bare := engine.snapped[0]["uploads"]; bare {
+		t.Fatalf("a folder name was mounted as if it were a volume: %+v", engine.snapped[0])
 	}
 	// What landed in the store is a gzip archive, and it is smaller than
 	// what came out of the folders.
@@ -66,6 +72,21 @@ func TestASnapshotOfNothingIsAFailureNotASuccess(t *testing.T) {
 	}
 	if len(engine.stored) != 0 {
 		t.Fatalf("an empty snapshot was stored anyway: %+v", engine.stored)
+	}
+}
+
+func TestASnapshotWithoutAProjectIsRefusedRatherThanGuessedAt(t *testing.T) {
+	engine := &fakeEngine{folders: "data"}
+	runner := &Runner{Engine: engine, Open: opener(), TempDir: t.TempDir()}
+	for _, bad := range []string{"", "prj_nope", "../../etc"} {
+		req := snapshotRequest()
+		req.ProjectID = bad
+		if result := runner.Snapshot(context.Background(), req); result.OK {
+			t.Fatalf("%q was accepted", bad)
+		}
+		if len(engine.snapped) != 0 {
+			t.Fatalf("%q reached a mount: %+v", bad, engine.snapped)
+		}
 	}
 }
 
@@ -99,7 +120,8 @@ func TestASnapshotGoesBackOverTheFoldersItCameFrom(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(engine.restoredInto) != 1 || engine.restoredInto[0]["uploads"] != "/snap/uploads" {
+	if len(engine.restoredInto) != 1 ||
+		engine.restoredInto[0][compose.VolumeName(req.ProjectID, "uploads")] != "/snap/uploads" {
 		t.Fatalf("the folders were not written back: %+v", engine.restoredInto)
 	}
 	if engine.putBack != archive.String() {

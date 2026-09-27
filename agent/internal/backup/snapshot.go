@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 )
 
@@ -31,8 +32,12 @@ one artifact rather than three.
 // snapPath is where the folders are mounted while they are copied.
 const snapPath = "/snap"
 
-// volumeName is what the control plane may name: a volume, never a path.
-var volumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+// volumeName is what the control plane may name: a permanent folder of the
+// project, never a path and never a volume of its own choosing.
+var volumeName = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// projectKey is checked before a project id becomes part of a volume name.
+var projectKey = regexp.MustCompile(`^prj_[0-9A-HJKMNP-TV-Z]{26}$`)
 
 // SnapshotRequest is one snapshot to take, or one to put back.
 type SnapshotRequest struct {
@@ -75,12 +80,20 @@ func (r *Runner) Snapshot(ctx context.Context, req SnapshotRequest) SnapshotResu
 	if len(req.Volumes) == 0 {
 		return fail("there are no permanent folders to snapshot")
 	}
+	if !projectKey.MatchString(req.ProjectID) {
+		return fail("the project these folders belong to is not named properly")
+	}
+	// The control plane names a permanent folder — "uploads" — and the agent
+	// turns it into the volume behind it, exactly as it does when it creates
+	// a replica. Mounting the name as it arrives would mount a volume that
+	// does not exist, and Docker would make one on the spot: a snapshot of a
+	// folder that was never anybody's, taken instead of the one that was.
 	mounts := map[string]string{}
 	for _, volume := range req.Volumes {
 		if !volumeName.MatchString(volume) {
 			return fail("a folder name is not allowed")
 		}
-		mounts[volume] = snapPath + "/" + volume
+		mounts[compose.VolumeName(req.ProjectID, volume)] = snapPath + "/" + volume
 	}
 	timeout := time.Duration(req.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
