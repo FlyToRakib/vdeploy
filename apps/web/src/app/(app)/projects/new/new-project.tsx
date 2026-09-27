@@ -132,7 +132,9 @@ export function NewProject() {
       (list) => {
         const connected = list.filter((s) => s.status !== 'pending');
         setServers(connected);
-        setServerId(connected[0]?.id ?? '');
+        // One server means there is no question; several means the best
+        // answer is "wherever there is room", which is the empty one.
+        setServerId(connected.length === 1 ? (connected[0]?.id ?? '') : '');
       },
       () => {
         setServers([]);
@@ -194,7 +196,9 @@ export function NewProject() {
           ...(template ? {} : { network: { containerPort: Number(formText(form, 'port')) } }),
         };
     try {
-      const outcome = await stepUp(() => runOperation('project.create', { spec, serverId }));
+      const outcome = await stepUp(() =>
+        runOperation('project.create', serverId ? { spec, serverId } : { spec }),
+      );
       if (outcome.status === 'done') return;
       const last = await followPlan(outcome.plan.id, setPlan);
       if (last?.status !== 'applied') return;
@@ -234,20 +238,31 @@ export function NewProject() {
             On <strong>{servers[0]?.name}</strong>.
           </p>
         ) : (
-          <select
-            aria-label="Server"
-            value={serverId}
-            onChange={(e) => {
-              setServerId(e.target.value);
-            }}
-            className="h-10 max-w-sm rounded-md border border-border bg-surface-raised px-3 text-sm"
-          >
-            {servers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <div className="grid gap-1.5">
+            <select
+              aria-label="Server"
+              value={serverId}
+              onChange={(e) => {
+                setServerId(e.target.value);
+              }}
+              className="h-10 max-w-sm rounded-md border border-border bg-surface-raised px-3 text-sm"
+            >
+              {/* With several servers, not choosing is the sensible default:
+                  the one with the most room is almost always the right
+                  answer, and it is the one nobody has to think about. */}
+              <option value="">Wherever there is room</option>
+              {servers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            {serverId === '' && (
+              <p className="text-sm text-muted-foreground">
+                VDeploy puts it on the server with the most room left, and tells you which.
+              </p>
+            )}
+          </div>
         )}
       </Step>
 

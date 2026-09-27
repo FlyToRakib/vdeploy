@@ -25,7 +25,13 @@ describe('buildPlan', () => {
 
   it('plans a new project as spec → release → deploy', () => {
     const spec = makeSpec();
-    const plan = buildPlan('project.create', { spec }, { project: null });
+    // A create names its server, or the planner picks one: a plan with
+    // neither is a plan with nowhere to run, which is now refused.
+    const plan = buildPlan(
+      'project.create',
+      { spec, serverId: 'srv_01J9Z3Q8S7M2K4X6V1B5N0C9D8' },
+      { project: null },
+    );
     expect(plan.steps.map((s) => s.kind)).toEqual(['update_spec', 'create_release', 'deploy']);
     expect(plan.tier).toBe('sensitive');
     expect(plan.projectId).toBeNull();

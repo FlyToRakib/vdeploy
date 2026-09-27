@@ -218,6 +218,14 @@ describe('administrative operations', () => {
 
 describe('planned changes', () => {
   it('queues a sensitive change by a person without asking again', async () => {
+    const serverId = newId('server');
+    await t.database.db.insert(servers).values({
+      id: serverId,
+      orgId,
+      name: 'box',
+      capacity: { cpus: 2, memoryBytes: 2 * 1024 ** 3, diskBytes: 0 },
+      agentPublicKey: 'x'.repeat(43),
+    });
     const res = await op(owner, 'project.create', {
       spec: { ...spec, metadata: { name: 'shop', labels: {} } },
     });

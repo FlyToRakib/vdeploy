@@ -124,6 +124,8 @@ async function converge(deps: StepDeps, spec: ApplicationSpec, expected: Expecta
 }
 
 async function chooseServer(deps: StepDeps, state: ApplyState, spec: ApplicationSpec) {
+  // The planner already chose when nobody named one, and wrote it into
+  // the spec, so by here there is always an answer (§14).
   const requested = state.args.serverId ?? spec.placement.server;
   if (typeof requested !== 'string') {
     throw new VDeployError('invalid_input', 'Choose which server this project should run on');

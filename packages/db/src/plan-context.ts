@@ -1,5 +1,11 @@
 import { readSpec, type ApplicationSpec, type Id } from '@vdeploy/contracts';
-import { footprint, NO_FOOTPRINT, type DatabaseState, type ServerBudget } from '@vdeploy/core';
+import {
+  footprint,
+  NO_FOOTPRINT,
+  type Candidate,
+  type DatabaseState,
+  type ServerBudget,
+} from '@vdeploy/core';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
 import { getBackup, getDatabase, linksOf } from './databases.js';
@@ -26,6 +32,8 @@ export interface PlanWorld {
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   /** The backup an operation named, and which kind it is (§17.5). */
   targetBackup?: { id: Id<'backup'>; kind: 'dump' | 'volumes'; databaseId: Id<'database'> | null };
+  /** Every server a new app could go on, when nobody named one. */
+  candidates?: Candidate[];
   server?: ServerBudget | null;
   unsaved?: string[];
 }
@@ -139,13 +147,25 @@ export async function loadPlanWorld(
   db: Database,
   projectId: string | null,
   args: Record<string, unknown>,
+  orgId?: string,
 ): Promise<PlanWorld> {
   const database = await requestedDatabase(db, args);
   if (projectId === null) {
     const serverId = requestedServer(args) ?? database?.serverId;
+    if (serverId) {
+      return {
+        project: null,
+        server: await serverBudget(db, serverId, null),
+        ...(database ? { database: database.state } : {}),
+      };
+    }
+    // Nobody named a server, so the planner picks one — and needs to see
+    // what every server has left to pick well (§14).
+    const candidates = orgId ? await placementCandidates(db, orgId) : [];
     return {
       project: null,
-      server: serverId ? await serverBudget(db, serverId, null) : null,
+      server: null,
+      candidates,
       ...(database ? { database: database.state } : {}),
     };
   }
@@ -185,4 +205,21 @@ export async function loadPlanWorld(
     }
   }
   return world;
+}
+
+/**
+ * Every server an organization could put a new app on, with what each has
+ * left. A server whose agent has never connected is listed but marked, so
+ * "nowhere to put this" and "nothing has connected yet" are different
+ * sentences to whoever is reading them.
+ */
+export async function placementCandidates(db: Database, orgId: string): Promise<Candidate[]> {
+  const rows = await db.select().from(servers).where(eq(servers.orgId, orgId));
+  const out: Candidate[] = [];
+  for (const server of rows) {
+    const budget = await serverBudget(db, server.id, null);
+    if (!budget) continue;
+    out.push({ id: server.id, budget, connected: server.agentPublicKey !== null });
+  }
+  return out;
 }

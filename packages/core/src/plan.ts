@@ -19,6 +19,7 @@ import { diffSpecs, removedVolumes } from './diff.js';
 import { describeCron } from './cron.js';
 import { defaultEnvKey, engineProfile } from './databases.js';
 import type { SectionEdit } from './spec-edit.js';
+import { place, type Candidate } from './placement.js';
 import { templateSecrets } from './templates.js';
 import { checkFits, footprint, type ServerBudget } from './governor.js';
 import { maxTier } from './risk.js';
@@ -57,6 +58,13 @@ export interface PlanContext {
   targetBackup?: { id: Id<'backup'>; kind: 'dump' | 'volumes'; databaseId: Id<'database'> | null };
   /** The server the project runs (or will run) on, for the governor (§14). */
   server?: ServerBudget | null;
+  /**
+   * Every server this organization could place a new app on, loaded only
+   * when nobody named one. Placement happens in the planner, not later, so
+   * the plan records where the app is going and the governor checks that
+   * server rather than no server at all.
+   */
+  candidates?: Candidate[];
   /**
    * Folders where the running app wrote files outside its permanent folders,
    * as its agent last reported (§17.2), minus those marked only temporary.
@@ -260,7 +268,15 @@ const restoreVolumes: Planner<'volume.restore'> = (args, context) => {
 const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'project.create': (args, context) => {
     if (context.project) throw new VDeployError('conflict', 'Project already exists');
-    const draft = specChange(null, specAfter('project.create', args, null), 'sensitive', context);
+    const asDrafted = specAfter('project.create', args, null);
+    // Nobody said where it goes, so the planner decides and writes it into
+    // the spec: what is approved names the server, and the governor checks
+    // that one (§14).
+    // A server was named, or the caller already resolved one: place only
+    // when there is genuinely no answer yet.
+    const named = args.serverId ?? asDrafted.placement.server ?? context.server;
+    const spec = named ? asDrafted : withServer(asDrafted, place(asDrafted, context.candidates ?? []));
+    const draft = specChange(null, spec, 'sensitive', context);
     // A template may need settings only the server should ever know. They
     // are made once the project exists — between writing the spec and
     // pinning the release, so the first version already has them.
@@ -928,6 +944,11 @@ function sectionEdit<N extends SectionEdit>(name: N): Planner<N> {
     const asked = args as Record<string, unknown>;
     return specChange(project, specAfter(name, asked, project.spec), 'sensitive', context);
   };
+}
+
+/** The spec, with the server it was placed on written into it. */
+function withServer(spec: ApplicationSpec, placed: { serverId: string }): ApplicationSpec {
+  return { ...spec, placement: { ...spec.placement, server: placed.serverId as Id<'server'> } };
 }
 
 /** Whether an operation changes what runs, and so goes through planning and approval. */

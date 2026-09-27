@@ -87,5 +87,6 @@ export function loadPlanContext(
   args: Record<string, unknown>,
 ): Promise<PlanContext> {
   const projectId = target.kind === 'project' ? target.id : null;
-  return loadPlanWorld(db, projectId, args);
+  // The org is needed to pick a server when nobody named one (§14).
+  return loadPlanWorld(db, projectId, args, target.orgId);
 }

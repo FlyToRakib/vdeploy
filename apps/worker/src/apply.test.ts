@@ -379,11 +379,13 @@ describe('applyPlan', () => {
     expect(await applyPlan(deps, restart.id)).toBe('skipped');
   });
 
-  it('fails in plain words when a project has no server', async () => {
-    const row = await plan('project.create', { spec: spec({ metadata: { name: 'homeless' } }) });
-    expect(await applyPlan(deps, row.id)).toBe('failed');
-    const [failed] = await t.db.select().from(plans).where(eq(plans.id, row.id));
-    expect(failed?.error?.message).toBe('Choose which server this project should run on');
+  it('refuses a project with nowhere to go before there is a plan at all', async () => {
+    // It used to be caught at the last step of the apply, after the plan
+    // existed and somebody had approved it. Placement moved it to the
+    // moment it is asked for, where the answer is also more useful.
+    await expect(
+      plan('project.create', { spec: spec({ metadata: { name: 'homeless' } }) }),
+    ).rejects.toThrow(/no servers yet/);
   });
 });
 
