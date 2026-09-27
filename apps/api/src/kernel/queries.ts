@@ -203,6 +203,35 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
     const build = latest?.status === 'failed' ? diagnoseBuild(latest.log) : null;
     return { diagnoses: build ? [build, ...running] : running };
   },
+  /**
+   * What is in one of an app's permanent folders (§20 Runtime) — the answer
+   * to "did my upload actually arrive?", which until now needed a shell.
+   * The folder is named the way the dashboard names it; the server's own
+   * paths never come back.
+   */
+  'files.list': async ({ deps, args }) => {
+    const projectId = id(args, 'projectId');
+    const [row] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    const folder = String(args.folder);
+    const spec = readSpec(row.spec);
+    const mount = spec.runtime.volumes.find((v) => v.name === folder);
+    if (!mount) throw new VDeployError('not_found', 'This app has no permanent folder by that name');
+    if (!row.serverId || !deps.files) {
+      throw new VDeployError('unavailable', 'This app is not running anywhere yet');
+    }
+    const path = typeof args.path === 'string' ? args.path : '';
+    const answer = await deps.files.files(row.serverId, { projectId, folder, path });
+    if (answer.error) throw new VDeployError('unavailable', answer.error);
+    return {
+      projectId,
+      folder,
+      mountPath: mount.mountPath,
+      path,
+      entries: answer.entries,
+      truncated: answer.truncated,
+    };
+  },
   'storage.status': async ({ deps, args }) => {
     const [row] = await deps.db
       .select()

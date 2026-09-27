@@ -138,6 +138,8 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'registry.add': { host: 'ghcr.io' },
   'git.connect': { provider: 'github', installationId: '12345' },
   'volume.delete': { volume: 'uploads' },
+  'files.list': { folder: 'uploads', path: '' },
+  'files.download': { folder: 'uploads', path: 'invoice.pdf' },
   'volume.restore': { snapshotId: newId('backup') },
   'cron.delete': { name: 'nightly-report' },
   'secret.rotate': { secretId: newId('secret') },

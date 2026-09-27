@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.3e — file browser, templates, compose import, status page, server health
+**Task:** 4.3f — putting files back, reclaim, templates, compose import, status page
 **Status:** in progress
-**Updated:** 2026-09-27 08:10 UTC
+**Updated:** 2026-09-27 09:40 UTC
 
 ## M2 exit — met 2026-09-21
 
@@ -147,10 +147,11 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 - [x] 4.3d metrics and graphs (§27, §20.1): what a server and its apps are actually using, as opposed to what they were promised — which the resource governor already knew. The agent takes a reading every thirty seconds: each app's processor and memory summed across its copies, against what those copies are allowed together, and the machine's own processor, memory and disk read from the kernel. Page cache is subtracted from an app's memory, because a graph that counts it frightens people for no reason; the first reading after a start reports no processor figure rather than one averaged over the machine's whole uptime; and one container that will not answer is not a failed reading. Readings are kept two days and pruned hourly, and a series is thinned to something a graph can draw by keeping the **peak** in each slot — averaging away a spike hides the thing somebody opened the graph to find. The project screen draws the last day with a dotted line at the limit, so "busy" is visible without reading an axis
 - [x] 4.3d-fix a snapshot of a folder that was never anybody’s (found while reading for 4.3e): the control plane names a permanent folder — “uploads” — and the agent mounted that name as if it were the volume. Docker makes a volume that does not exist on the spot, so every pre-destructive snapshot copied a brand-new empty one, found nothing in it, and failed — and a failing copy stops the plan, which means **every destructive change to an app with permanent folders was blocked**, and each attempt left a stray volume behind. The agent now derives the volume from the project and the folder name exactly as it does when it creates a replica, and refuses a request whose project id is not one. Snapshots and putting them back were the only place this reached
+- [x] 4.3e the file browser (§20 Runtime, ADR 0015): the answer to “did my upload actually arrive?”, which until now meant opening a shell. A permanent folder is listed one level at a time — folders first, then by name, with sizes and when each was last written — and one file can be taken away as a plain file. **Nothing runs to do it**: the agent reads the folder on the host, as it already reads /proc for metrics and diagnosis, with the folder opened as an os.Root so the kernel itself refuses anything outside it. A shortcut is shown as what it is and never followed; an absolute path and a `..` do not resolve; the control plane names a project and a folder as the dashboard writes them, never a path, and the agent refuses a volume that does not carry its own label for that project. Downloading reuses the credit-paced channel the backups use, last chunk held back until the whole file hashes to what was read. Reading an app’s files is the one read grant off by default for the assistant, and taking a file off the server is Tier 4, as a backup download is
 
 ## Doing
 
-- [ ] 4.3e the rest of M4: file/volume browser, template catalog, compose import, status page, server health and reclaim, firewall management
+- [ ] 4.3f the rest of M4: writing into a folder, orphan volumes and reclaim, template catalog, compose import, status page, server health, firewall management
 
 ## Next
 
@@ -173,6 +174,7 @@ image, an upload or GitHub already works, and the AI can do all three.
 
 ## Decisions made
 
+- 2026-09-27 The file browser reads the folder on the host, confined by the kernel rather than by a check — docs/adr/0015-file-browser.md
 - 2026-09-24 A managed database is not a project, and its backups are read back — docs/adr/0011-databases-and-backups.md
 - 2026-09-19 Spec identity lives on the envelope — docs/adr/0001-spec-identity-on-envelope.md
 - 2026-09-19 TypeScript 6.0 (not 7.x): typescript-eslint supports `<6.1`.

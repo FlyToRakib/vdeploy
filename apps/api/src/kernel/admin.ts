@@ -27,6 +27,7 @@ import { GITHUB_ADMIN } from './github.js';
 import { AI_ADMIN } from './ai-settings.js';
 import { NOTIFICATION_ADMIN } from './notifications.js';
 import { OFFSITE_ADMIN } from './offsite.js';
+import { FILE_ADMIN } from './files.js';
 import type { Handler, HandlerContext } from './context.js';
 
 /** Enrollment tokens work once, within an hour (§25). */
@@ -83,6 +84,7 @@ async function storeUpload({ deps, actor, args }: HandlerContext) {
 export const ADMIN: Partial<Record<OperationName, Handler>> = {
   ...NOTIFICATION_ADMIN,
   ...OFFSITE_ADMIN,
+  ...FILE_ADMIN,
   ...AI_ADMIN,
   ...GITHUB_ADMIN,
   'user.invite': async ({ deps, actor, args }) => {

@@ -22,6 +22,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/build"
 	"github.com/FlyToRakib/vdeploy/agent/internal/config"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+	"github.com/FlyToRakib/vdeploy/agent/internal/files"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
@@ -268,6 +269,9 @@ func serve(configPath string, log *slog.Logger) error {
 				Projects: reconciler.Project,
 				Log:      log,
 			},
+			// Looking at what an app has written (§20 Runtime), confined to
+			// the folder asked for by the kernel rather than by a check.
+			Files: &files.Reader{Engine: engine, Log: log},
 			Tasks: &task.Runner{
 				Engine:   engine,
 				Projects: reconciler.Project,

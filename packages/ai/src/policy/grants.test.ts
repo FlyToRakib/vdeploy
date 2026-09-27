@@ -29,10 +29,14 @@ describe('L1 grants — defaults (§8)', () => {
     expect(DEFAULT_AI_GRANTS.autoApply).toEqual({ safe: true, sensitive: false });
   });
 
-  it('allows every non-human operation on an in-scope project', () => {
+  it('allows every non-human operation on an in-scope project, except reading its files', () => {
     const target = projectTarget();
     for (const op of OPERATIONS.filter((o) => o.scope === 'project')) {
-      expect(checkGrants(op, target, DEFAULT_AI_GRANTS)).toBeNull();
+      const decision = checkGrants(op, target, DEFAULT_AI_GRANTS);
+      // sourceFiles is the one read category off by default (§8): what an
+      // app has written is the customer's, not the assistant's.
+      if (op.reads === 'sourceFiles') expect(decision).toMatchObject({ layer: 'L1' });
+      else expect(decision).toBeNull();
     }
   });
 });

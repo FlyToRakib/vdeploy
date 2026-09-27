@@ -2,7 +2,12 @@ import type { Actor, ModelClient } from '@vdeploy/ai';
 import type { GithubAppConfig, GithubOAuthConfig } from '@vdeploy/core';
 import type { Database } from '@vdeploy/db';
 import type { Auth } from '../auth/auth.js';
-import type { ArtifactSource, LogSource, TerminalSource } from '../agents/gateway.js';
+import type {
+  ArtifactSource,
+  FileSource,
+  LogSource,
+  TerminalSource,
+} from '../agents/gateway.js';
 import type { PortProbe } from '../agents/reachability.js';
 import type { Mailer } from '../auth/mailer.js';
 
@@ -26,8 +31,10 @@ export interface KernelDeps {
   logs?: LogSource;
   /** Opens a shell in a project's container (§19); absent in tests. */
   terminals?: TerminalSource;
-  /** Hands a backup file back from the server holding it (§17.5). */
+  /** Hands a backup or one of an app’s own files back from the server holding it. */
   artifacts?: ArtifactSource;
+  /** Lists what is in an app’s permanent folders (§20 Runtime); absent in tests. */
+  files?: FileSource;
   /** Whether a server's agent is on this connection right now; absent in tests. */
   connected?: (serverId: string) => boolean;
   /** Connects to a server's web ports from here; tests replace it. */

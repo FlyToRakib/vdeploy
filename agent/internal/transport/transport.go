@@ -24,6 +24,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/backup"
 	"github.com/FlyToRakib/vdeploy/agent/internal/build"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
+	"github.com/FlyToRakib/vdeploy/agent/internal/files"
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
@@ -66,6 +67,8 @@ type Client struct {
 	Tasks TaskRunner
 	// Terminals opens a shell in a container; nil refuses terminal requests.
 	Terminals TerminalOpener
+	// Files looks inside a project's permanent folders; nil refuses to look.
+	Files FileReader
 	// Logs streams a project's container output; nil refuses log requests.
 	Logs func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error
 
@@ -102,6 +105,12 @@ type BackupTaker interface {
 	Send(ctx context.Context, req backup.ArtifactRequest, each func([]byte) error) (int64, string, error)
 	Verify(ctx context.Context, req backup.VerifyRequest) backup.VerifyResult
 	Snapshot(ctx context.Context, req backup.SnapshotRequest) backup.SnapshotResult
+}
+
+// FileReader looks inside a project's permanent folders (§20 Runtime).
+type FileReader interface {
+	List(ctx context.Context, req files.Request) files.Result
+	Send(ctx context.Context, req files.Request, each func([]byte) error) (int64, string, error)
 }
 
 // TerminalOpener opens an interactive shell in one of a project's containers.
@@ -386,6 +395,26 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 		return nil
 	}
 	switch head.Type {
+	case protocol.TypeFiles:
+		var frame filesFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		go c.listFiles(ctx, k, frame.Files)
+		return nil
+	case protocol.TypeFileRead:
+		var frame filesFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		c.sendFile(ctx, k, frame.Files)
+		return nil
 	case protocol.TypeArtifact:
 		var frame artifactFrame
 		if err := strictDecode(body, &frame); err != nil {
@@ -394,7 +423,18 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 		if err := k.session.Check(frame.Header); err != nil {
 			return err
 		}
-		c.startArtifact(ctx, k, frame.Artifact)
+		req := frame.Artifact
+		if c.Backups == nil {
+			c.sendArtifactEnd(ctx, k, artifactEndFrame{
+				RequestID: req.RequestID,
+				Error:     "this server does not keep backups",
+			})
+			return nil
+		}
+		c.startArtifact(ctx, k, req.RequestID, "backup",
+			func(sendCtx context.Context, each func([]byte) error) (int64, string, error) {
+				return c.Backups.Send(sendCtx, req, each)
+			})
 		return nil
 	case protocol.TypeArtifactAck, protocol.TypeArtifactStop:
 		var frame artifactControlFrame
@@ -891,6 +931,49 @@ type artifactFrame struct {
 	Artifact backup.ArtifactRequest `json:"artifact"`
 }
 
+type filesFrame struct {
+	protocol.Header
+	Files files.Request `json:"files"`
+}
+
+type filesResultFrame struct {
+	protocol.Header
+	Result files.Result `json:"result"`
+}
+
+// listFiles answers with what is in one of a project's permanent folders. A
+// listing is a question, not a change, so it is answered and forgotten: the
+// agent keeps nothing about who looked at what.
+func (c *Client) listFiles(ctx context.Context, k *conn, req files.Request) {
+	result := files.Result{RequestID: req.RequestID, Entries: []files.Entry{}}
+	if c.Files == nil {
+		result.Error = "this agent cannot show you the files on this server"
+	} else {
+		result = c.Files.List(ctx, req)
+	}
+	if err := k.send(ctx, protocol.TypeFilesResult, func(h protocol.Header) any {
+		return filesResultFrame{Header: h, Result: result}
+	}); err != nil {
+		c.Log.Warn("a folder listing could not be sent", "request", req.RequestID, "error", err)
+	}
+}
+
+// sendFile hands one file out of a permanent folder back, on the same paced
+// channel a backup uses.
+func (c *Client) sendFile(ctx context.Context, k *conn, req files.Request) {
+	if c.Files == nil {
+		c.sendArtifactEnd(ctx, k, artifactEndFrame{
+			RequestID: req.RequestID,
+			Error:     "this agent cannot read the files on this server",
+		})
+		return
+	}
+	c.startArtifact(ctx, k, req.RequestID, "file",
+		func(sendCtx context.Context, each func([]byte) error) (int64, string, error) {
+			return c.Files.Send(sendCtx, req, each)
+		})
+}
+
 type artifactControlFrame struct {
 	protocol.Header
 	RequestID string `json:"requestId"`
@@ -917,24 +1000,27 @@ type artifactSend struct {
 	stop    context.CancelFunc
 }
 
-// startArtifact sends one backup back, paced by the control plane. A chunk
+// startArtifact sends one file back, paced by the control plane. A chunk
 // leaves only against a credit, so a slow download cannot make this agent
 // push a database's worth of bytes into a socket nobody is reading.
-func (c *Client) startArtifact(ctx context.Context, k *conn, req backup.ArtifactRequest) {
+//
+// What is being sent — a backup out of the store, or a file out of an app's
+// permanent folder — is the `read` it is given; the pacing is the same, and
+// so is the promise that the last chunk is held until the whole thing hashes
+// to what the agent read.
+func (c *Client) startArtifact(
+	ctx context.Context,
+	k *conn,
+	requestID string,
+	what string,
+	read func(ctx context.Context, each func([]byte) error) (int64, string, error),
+) {
 	c.artifactMu.Lock()
 	if c.artifacts == nil {
 		c.artifacts = map[string]*artifactSend{}
 	}
-	if _, busy := c.artifacts[req.RequestID]; busy {
+	if _, busy := c.artifacts[requestID]; busy {
 		c.artifactMu.Unlock()
-		return
-	}
-	if c.Backups == nil {
-		c.artifactMu.Unlock()
-		c.sendArtifactEnd(ctx, k, artifactEndFrame{
-			RequestID: req.RequestID,
-			Error:     "this server does not keep backups",
-		})
 		return
 	}
 	sendCtx, cancel := context.WithCancel(ctx)
@@ -942,24 +1028,24 @@ func (c *Client) startArtifact(ctx context.Context, k *conn, req backup.Artifact
 	for range initialArtifactWindow {
 		send.credits <- struct{}{}
 	}
-	c.artifacts[req.RequestID] = send
+	c.artifacts[requestID] = send
 	c.artifactMu.Unlock()
 
 	go func() {
 		defer cancel()
 		defer func() {
 			c.artifactMu.Lock()
-			delete(c.artifacts, req.RequestID)
+			delete(c.artifacts, requestID)
 			c.artifactMu.Unlock()
 		}()
-		size, sum, err := c.Backups.Send(sendCtx, req, func(chunk []byte) error {
+		size, sum, err := read(sendCtx, func(chunk []byte) error {
 			select {
 			case <-send.credits:
 			case <-sendCtx.Done():
 				return sendCtx.Err() //nolint:wrapcheck // the reason is the context's own
 			}
 			frame := artifactChunkFrame{
-				RequestID: req.RequestID,
+				RequestID: requestID,
 				Data:      base64.StdEncoding.EncodeToString(chunk),
 			}
 			// The write itself uses the connection's context, never this
@@ -970,24 +1056,26 @@ func (c *Client) startArtifact(ctx context.Context, k *conn, req backup.Artifact
 				return frame
 			})
 		})
-		end := artifactEndFrame{RequestID: req.RequestID, SizeBytes: size, SHA256: sum}
+		end := artifactEndFrame{RequestID: requestID, SizeBytes: size, SHA256: sum}
 		if err != nil {
 			end.SHA256 = ""
-			end.Error = artifactReason(err)
+			end.Error = artifactReason(err, what)
 		}
 		c.sendArtifactEnd(ctx, k, end)
 	}()
 }
 
 // artifactReason keeps the words a person reads free of Go's plumbing.
-func artifactReason(err error) string {
-	if errors.Is(err, context.Canceled) {
+func artifactReason(err error, what string) string {
+	switch {
+	case errors.Is(err, context.Canceled):
 		return "the download was stopped"
-	}
-	if errors.Is(err, docker.ErrNoArtifact) {
+	case errors.Is(err, docker.ErrNoArtifact):
 		return docker.ErrNoArtifact.Error()
+	case errors.Is(err, files.ErrNoFile):
+		return files.ErrNoFile.Error()
 	}
-	return "the backup could not be read from this server"
+	return "the " + what + " could not be read from this server"
 }
 
 func (c *Client) sendArtifactEnd(ctx context.Context, k *conn, end artifactEndFrame) {

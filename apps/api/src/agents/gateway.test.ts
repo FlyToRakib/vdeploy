@@ -178,6 +178,28 @@ async function seedBackup(orgId: string, serverId: string, body: Buffer): Promis
   return id;
 }
 
+/** A project with one permanent folder, for the file browser. */
+async function seedProjectWithFolder(orgId: string, serverId: string): Promise<string> {
+  const spec = ApplicationSpec.parse({
+    apiVersion: 'vdeploy/v1',
+    kind: 'Application',
+    metadata: { name: `shop-${String((seeded += 1))}` },
+    source: { type: 'image', image: 'nginx:1.27' },
+    build: { strategy: 'image' },
+    runtime: { volumes: [{ name: 'uploads', mountPath: '/app/uploads' }] },
+  });
+  const projectId = newId('project');
+  await t.database.db.insert(projects).values({
+    id: projectId,
+    orgId,
+    serverId,
+    name: spec.metadata.name,
+    spec,
+    specHash: hashOf(spec),
+  });
+  return projectId;
+}
+
 /**
  * A real HTTP download, because the answer is streamed rather than returned:
  * the bytes arrive as the server sends them, over a socket, like a browser's.
@@ -583,6 +605,84 @@ describe('agent channel', () => {
     const res = await download.catch(() => null);
     expect(res?.body.length ?? 0).toBeLessThan(wrong.length);
     fake.inbox.length = 0;
+  });
+
+  it('shows what an app has written, and hands one file back', async () => {
+    const { agent, fake, orgId } = await downloadServer();
+    const projectId = await seedProjectWithFolder(orgId, agent.serverId);
+
+    // Looking: the control plane names the app and the folder as the
+    // dashboard does, and never a path on the server.
+    const listing = owner.request('POST', '/api/v1/operations/files.list', {
+      input: { projectId, folder: 'uploads', path: '2024' },
+    });
+    const asked = await fake.next();
+    expect(asked).toMatchObject({
+      type: 'files',
+      files: { projectId, folder: 'uploads', path: '2024' },
+    });
+    const { requestId } = asked.files as { requestId: string };
+    fake.send({
+      ...fake.session.next('files_result'),
+      result: {
+        requestId,
+        truncated: false,
+        entries: [
+          {
+            name: 'invoice.pdf',
+            kind: 'file',
+            sizeBytes: 9,
+            modifiedAt: '2026-09-25T10:00:00Z',
+            linkTo: null,
+          },
+        ],
+      },
+    });
+    const shown = (await listing).json<{
+      result: { mountPath: string; entries: { name: string }[] };
+    }>().result;
+    expect(shown.mountPath).toBe('/app/uploads');
+    expect(shown.entries.map((e) => e.name)).toEqual(['invoice.pdf']);
+
+    // Taking one away: the same paced channel a backup uses.
+    const body = Buffer.from('invoice bytes'.repeat(500));
+    const download = fetch(
+      `${base}/api/v1/projects/${projectId}/files/download?folder=uploads&path=2024%2Finvoice.pdf`,
+      { headers: { cookie: owner.cookieHeader(), origin: new URL(base).origin } },
+    );
+    const read = await fake.next();
+    expect(read).toMatchObject({
+      type: 'file_read',
+      files: { projectId, folder: 'uploads', path: '2024/invoice.pdf' },
+    });
+    const transfer = (read.files as { requestId: string }).requestId;
+    fake.send({
+      ...fake.session.next('artifact_chunk'),
+      requestId: transfer,
+      data: body.toString('base64'),
+    });
+    fake.send({
+      ...fake.session.next('artifact_end'),
+      requestId: transfer,
+      sizeBytes: body.length,
+      sha256: createHash('sha256').update(body).digest('hex'),
+    });
+    const res = await download;
+    expect(res.status).toBe(200);
+    // The browser saves it under the file's own name, never a path.
+    expect(res.headers.get('content-disposition')).toContain('"invoice.pdf"');
+    expect(Buffer.from(await res.arrayBuffer()).equals(body)).toBe(true);
+    fake.inbox.length = 0;
+  });
+
+  it('refuses a folder this app does not have, without asking the server', async () => {
+    const { agent, fake, orgId } = await downloadServer();
+    const projectId = await seedProjectWithFolder(orgId, agent.serverId);
+    const res = await owner.request('POST', '/api/v1/operations/files.list', {
+      input: { projectId, folder: 'etc', path: '' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(fake.inbox.filter((frame) => frame.type === 'files')).toHaveLength(0);
   });
 
   it('refuses a connection for a server that never enrolled', async () => {

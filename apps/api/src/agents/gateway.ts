@@ -5,6 +5,7 @@ import {
   memoryBytes,
   EnrollRequest,
   VDeployError,
+  type FileListResult,
   type LogLine,
 } from '@vdeploy/contracts';
 import {
@@ -126,24 +127,57 @@ interface LogRequest {
   done: (error?: string) => void;
 }
 
-interface ArtifactRequest {
+interface ArtifactTransfer {
   serverId: string;
   onChunk: (data: Buffer) => void;
   onEnd: (end: { sizeBytes: number; sha256?: string; error?: string }) => void;
 }
 
-/** What a backup on its way out of VDeploy needs from the server holding it. */
+/** What a folder listing needs from the server holding the folder. */
+interface FileRequest {
+  serverId: string;
+  done: (result: FileListResult) => void;
+}
+
+/** Where a folder's contents come from: the agent holding the folder. */
+export interface FileSource {
+  /**
+   * Lists one of a project's permanent folders. The request names the
+   * project and the folder as the dashboard names them; the agent turns
+   * that into a place on its own disk, and nothing else.
+   */
+  files(
+    serverId: string,
+    request: { projectId: string; folder: string; path: string },
+  ): Promise<FileListResult>;
+}
+
+/**
+ * Something on a server on its way to the person who owns it: a backup out
+ * of the store, or one file out of an app's permanent folder. Both travel
+ * the same paced channel.
+ */
+export type ArtifactRequest =
+  | {
+      kind: 'backup';
+      requestId: string;
+      fileName: string;
+      image: string;
+      expectSha256: string | null;
+    }
+  | { kind: 'file'; requestId: string; projectId: string; folder: string; path: string };
+
 export interface ArtifactSource {
   /**
-   * Streams one backup artifact to `write`, which resolves when the bytes
-   * have been handed on. Nothing is written until the whole file hashes to
-   * `expectSha256`, except that the last chunk is held back until it does —
-   * so a download that completes is the backup that was checked, and one
+   * Streams one artifact to `write`, which resolves when the bytes have been
+   * handed on. Nothing is written until the whole thing hashes to what the
+   * agent says it read, except that the last chunk is held back until it
+   * does — so a download that completes is what was on the server, and one
    * that does not is short, and visibly so.
    */
   artifact(
     serverId: string,
-    request: { requestId: string; fileName: string; image: string; expectSha256: string | null },
+    request: ArtifactRequest,
     write: (chunk: Buffer) => Promise<void>,
     signal?: AbortSignal,
   ): Promise<{ sizeBytes: number }>;
@@ -198,11 +232,12 @@ export interface LogSource {
  * records acks and observed state. Agent input is validated like any other
  * untrusted input: a compromised server cannot hurt the control plane.
  */
-export class Gateway implements LogSource, ArtifactSource, TerminalSource {
+export class Gateway implements LogSource, ArtifactSource, TerminalSource, FileSource {
   private readonly connections = new Map<string, Connection>();
   private readonly logRequests = new Map<string, LogRequest>();
-  private readonly artifactRequests = new Map<string, ArtifactRequest>();
+  private readonly artifactRequests = new Map<string, ArtifactTransfer>();
   private readonly terminalRequests = new Map<string, TerminalRequest>();
+  private readonly fileRequests = new Map<string, FileRequest>();
   private stopListening: (() => Promise<void>) | null = null;
   private stopBuildListening: (() => Promise<void>) | null = null;
   private stopBackupListening: (() => Promise<void>) | null = null;
@@ -683,7 +718,7 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource {
    */
   artifact(
     serverId: string,
-    request: { requestId: string; fileName: string; image: string; expectSha256: string | null },
+    request: ArtifactRequest,
     write: (chunk: Buffer) => Promise<void>,
     signal?: AbortSignal,
   ): Promise<{ sizeBytes: number }> {
@@ -692,7 +727,7 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource {
       return Promise.reject(
         new VDeployError(
           'unavailable',
-          'The server holding this backup is offline, so it cannot be downloaded now',
+          'The server holding this is offline, so it cannot be downloaded now',
         ),
       );
     }
@@ -752,12 +787,13 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource {
               return;
             }
             const sum = running.digest('hex');
-            const expected = request.expectSha256 ?? end.sha256;
+            const expected =
+              (request.kind === 'backup' ? request.expectSha256 : null) ?? end.sha256;
             if (expected && sum !== expected) {
               // The last chunk never goes: an incomplete download is honest,
-              // a complete one that is not the backup that was checked is not.
+              // a complete one that is not what was on the server is not.
               failed = true;
-              finish('What came back is not the backup that was checked');
+              finish('What came back is not what is on the server');
               return;
             }
             if (held) await write(held);
@@ -790,9 +826,61 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource {
       });
       signal?.addEventListener('abort', abort, { once: true });
       connection.socket.send(
+        seal(
+          this.deps.key,
+          request.kind === 'backup'
+            ? {
+                ...connection.session.next('artifact'),
+                artifact: { requestId, fileName: request.fileName, image: request.image },
+              }
+            : {
+                ...connection.session.next('file_read'),
+                files: {
+                  requestId,
+                  projectId: request.projectId,
+                  folder: request.folder,
+                  path: request.path,
+                },
+              },
+        ),
+      );
+    });
+  }
+
+  /**
+   * Lists one of a project's permanent folders (§20 Runtime). A listing is a
+   * question, so it is asked and answered: nothing is stored about it, and
+   * an agent that has gone quiet means an empty answer with a reason rather
+   * than a page that waits forever.
+   */
+  files(
+    serverId: string,
+    request: { projectId: string; folder: string; path: string },
+  ): Promise<FileListResult> {
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      return Promise.reject(
+        new VDeployError('unavailable', 'This app’s server is offline, so its files cannot be read'),
+      );
+    }
+    const requestId = randomBytes(16).toString('base64url');
+    return new Promise<FileListResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.fileRequests.delete(requestId);
+        reject(new VDeployError('unavailable', 'The server did not answer in time'));
+      }, 15_000);
+      this.fileRequests.set(requestId, {
+        serverId,
+        done: (result) => {
+          clearTimeout(timer);
+          this.fileRequests.delete(requestId);
+          resolve(result);
+        },
+      });
+      connection.socket.send(
         seal(this.deps.key, {
-          ...connection.session.next('artifact'),
-          artifact: { requestId, fileName: request.fileName, image: request.image },
+          ...connection.session.next('files'),
+          files: { requestId, ...request },
         }),
       );
     });
@@ -1166,6 +1254,11 @@ export class Gateway implements LogSource, ArtifactSource, TerminalSource {
         return;
       }
       request.onChunk(Buffer.from(frame.data, 'base64'));
+    } else if (frame.type === 'files_result') {
+      // Only the server a listing went to may answer it.
+      const request = this.fileRequests.get(frame.result.requestId);
+      if (request?.serverId !== serverId) return;
+      request.done(frame.result);
     } else if (frame.type === 'logs_chunk' || frame.type === 'logs_end') {
       // Only the server a request went to may answer it.
       const request = this.logRequests.get(frame.requestId);

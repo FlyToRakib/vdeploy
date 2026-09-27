@@ -11,6 +11,7 @@ import { TaskResult } from './tasks.js';
 import { BuildResult } from './builds.js';
 import { DesiredDatabase, ObservedDatabase } from './databases.js';
 import { ReplicaEvidence } from './diagnosis.js';
+import { FileListResult } from './files.js';
 import { LogLine } from './logs.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
@@ -252,6 +253,16 @@ export const AgentFrame = z.discriminatedUnion('type', [
       .regex(/^[0-9a-f]{64}$/)
       .optional(),
     error: z.string().max(4096).optional(),
+  }),
+  /**
+   * What is in one of an app's permanent folders (§20 Runtime). The agent
+   * reads the folder itself; the control plane never learns a path on the
+   * server, only names and sizes.
+   */
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('files_result'),
+    result: FileListResult,
   }),
   z.strictObject({
     ...FrameHeader,

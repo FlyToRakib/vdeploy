@@ -32,7 +32,7 @@ export interface ProjectRow {
   spec: {
     source: { type: string; repo?: string; branch?: string };
     network?: { containerPort: number };
-    runtime: { replicas: number };
+    runtime: { replicas: number; volumes: { name: string; mountPath: string }[] };
   };
 }
 
@@ -58,6 +58,7 @@ const TABS = [
   { href: '/deployments', label: 'Deployments' },
   { href: '/logs', label: 'Logs' },
   { href: '/config', label: 'Config' },
+  { href: '/files', label: 'Files' },
   { href: '/terminal', label: 'Terminal' },
 ] as const;
 

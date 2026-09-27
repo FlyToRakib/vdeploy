@@ -67,6 +67,7 @@ export const backupDownloadRoutes =
           await deps.artifacts.artifact(
             subject.serverId,
             {
+              kind: 'backup' as const,
               requestId: randomBytes(16).toString('base64url'),
               fileName: backup.fileName,
               image: subject.image,

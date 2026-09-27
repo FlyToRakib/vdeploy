@@ -15,6 +15,7 @@ import { Memory } from '../spec/quantities.js';
 import { AiGrants } from '../grants.js';
 import { RestoreMode } from '../backups.js';
 import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
+import { FolderPath } from '../files.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
@@ -626,6 +627,28 @@ export const OPERATIONS = [
     'project',
     'Delete a permanent folder after taking a snapshot',
     obj({ ...P, volume: ResourceName }),
+  ),
+  // Looking at what an app wrote, and taking one file away with you (§20
+  // Runtime). Both read the app's own files, which is the one read category
+  // the AI is not granted by default.
+  query(
+    'files.list',
+    'project',
+    'sourceFiles',
+    'List what is in one of an app’s permanent folders',
+    obj({ ...P, folder: ResourceName, path: FolderPath.default('') }),
+  ),
+  // Tier 4 because the file leaves VDeploy, as a backup does — not because
+  // it is dangerous. The role and the password stay proportionate to one
+  // file out of an uploads folder; what the tier buys is that the assistant
+  // can never be the one taking a customer's data off their server.
+  operation(
+    'files.download',
+    'human_only',
+    'project',
+    'Download one file out of an app’s permanent folder',
+    obj({ ...P, folder: ResourceName, path: FolderPath.refine((p) => p !== '', 'name a file') }),
+    { minRole: 'developer', stepUp: false },
   ),
   // Sensitive as an intent; the plan raises it to destructive when it would
   // replace live data, which is what the gate then confirms.
