@@ -94,10 +94,11 @@ type Reader struct {
 	ProcMeminfo string
 }
 
-// Read takes one look. `live` is the set of project ids this server is
-// meant to be running: a permanent folder belonging to anything else is an
-// orphan, and saying so is the whole point of looking.
-func (r *Reader) Read(ctx context.Context, live map[string]bool, now time.Time) Report {
+// Read takes one look. `wanted` is every volume the desired state still
+// asks for, by name. A permanent folder outside it is an orphan — which
+// covers both ways one appears: the app was deleted, and the folder was
+// taken out of an app that is still running.
+func (r *Reader) Read(ctx context.Context, wanted map[string]bool, now time.Time) Report {
 	report := Report{
 		At:      now.UTC().Format(time.RFC3339),
 		Load:    r.load(),
@@ -135,7 +136,8 @@ func (r *Reader) Read(ctx context.Context, live map[string]bool, now time.Time) 
 		}
 		report.Docker.VolumesBytes += volume.SizeBytes
 		project := volume.Labels[compose.ProjectLabel]
-		if project == "" || live[project] || volume.InUse > 0 {
+		// Still asked for, or still held by a container: not an orphan.
+		if project == "" || wanted[volume.Name] || volume.InUse > 0 {
 			continue
 		}
 		report.Orphans = append(report.Orphans, Orphan{

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
@@ -48,9 +49,13 @@ type SnapshotRequest struct {
 	Volumes []string `json:"volumes"`
 	// Image is a container image already on this server — the project's own.
 	// Nothing in it runs: it is a shell around the folders while they copy.
-	Image          string   `json:"image"`
-	FileName       string   `json:"fileName"`
-	Mode           string   `json:"mode"`
+	Image    string `json:"image"`
+	FileName string `json:"fileName"`
+	Mode     string `json:"mode"`
+	// DeleteAfter removes the folders once the copy is written and read
+	// back (§17.2). One request rather than two, because the order is the
+	// guarantee: a copy that could not be taken deletes nothing.
+	DeleteAfter    bool     `json:"deleteAfter"`
 	Remove         []string `json:"remove"`
 	Offsite        *Offsite `json:"offsite,omitempty"`
 	TimeoutSeconds int      `json:"timeoutSeconds"`
@@ -58,15 +63,17 @@ type SnapshotRequest struct {
 
 // SnapshotResult is what is actually on disk afterwards.
 type SnapshotResult struct {
-	SnapshotID string          `json:"snapshotId"`
-	OK         bool            `json:"ok"`
-	SizeBytes  int64           `json:"sizeBytes"`
-	SHA256     string          `json:"sha256,omitempty"`
-	Verified   bool            `json:"verified"`
-	Error      string          `json:"error,omitempty"`
-	Removed    []string        `json:"removed"`
-	Offsite    *OffsiteOutcome `json:"offsite,omitempty"`
-	Log        string          `json:"log"`
+	SnapshotID string   `json:"snapshotId"`
+	OK         bool     `json:"ok"`
+	SizeBytes  int64    `json:"sizeBytes"`
+	SHA256     string   `json:"sha256,omitempty"`
+	Verified   bool     `json:"verified"`
+	Error      string   `json:"error,omitempty"`
+	Removed    []string `json:"removed"`
+	// DeletedVolumes are the folders that are now gone.
+	DeletedVolumes []string        `json:"deletedVolumes"`
+	Offsite        *OffsiteOutcome `json:"offsite,omitempty"`
+	Log            string          `json:"log"`
 }
 
 // Snapshot takes one snapshot, or puts one back.
@@ -191,6 +198,12 @@ func (r *Runner) take(
 		)
 		result.Offsite = &outcome
 	}
+	// And only now, with the copy written and measured, may the folders it
+	// came from go. Nothing above this line deletes anything.
+	if req.DeleteAfter {
+		result.DeletedVolumes = r.deleteFolders(ctx, req, mounts)
+		result.Log += fmt.Sprintf(", %d folders deleted", len(result.DeletedVolumes))
+	}
 	result.Removed = r.prune(
 		ctx,
 		Request{DatabaseID: req.ProjectID, FileName: req.FileName, Remove: req.Remove},
@@ -204,6 +217,31 @@ func (r *Runner) take(
 		},
 	)
 	return result
+}
+
+/*
+deleteFolders removes the folders the copy was just taken from (§17.2).
+
+This is the only place VDeploy destroys data. It runs after the copy is in
+the store and measured — never before, never in parallel — and the Engine
+checks it again: a volume without VDeploy's label, or one belonging to
+another app, or one any container still holds, is refused there.
+*/
+func (r *Runner) deleteFolders(
+	ctx context.Context,
+	req SnapshotRequest,
+	mounts map[string]string,
+) []string {
+	gone := make([]string, 0, len(mounts))
+	for volume := range mounts {
+		if err := r.Engine.RemoveVolume(ctx, volume, req.ProjectID); err != nil {
+			r.logf("a folder could not be deleted", "volume", volume, "error", err.Error())
+			continue
+		}
+		gone = append(gone, volume)
+	}
+	slices.Sort(gone)
+	return gone
 }
 
 // putBack writes a snapshot's folders back over the ones it came from. The

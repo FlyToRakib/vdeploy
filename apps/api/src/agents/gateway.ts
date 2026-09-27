@@ -541,6 +541,9 @@ export class Gateway
             image,
             fileName: snapshot.fileName,
             mode: 'take',
+            // A copy taken because the folder is about to go is the only
+            // one whose success decides whether the delete happens.
+            deleteAfter: snapshot.reason === 'pre_delete',
             remove: (await prunableSnapshots(db, snapshot.projectId, KEEP_SNAPSHOTS)).map(
               (old) => old.fileName,
             ),

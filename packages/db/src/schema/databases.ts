@@ -132,7 +132,7 @@ export const backups = pgTable(
     volumes: jsonb('volumes').$type<string[]>().notNull().default([]),
     /** Why it was taken, for the person reading the list. */
     reason: text('reason')
-      .$type<'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive'>()
+      .$type<'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive' | 'pre_delete'>()
       .notNull()
       .default('manual'),
     status: text('status').$type<'queued' | 'running' | 'done' | 'failed'>().notNull(),

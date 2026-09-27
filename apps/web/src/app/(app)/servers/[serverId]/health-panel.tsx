@@ -67,12 +67,14 @@ export function HealthPanel({
   using,
   lastReclaim,
   onReclaim,
+  onDeleteFolder,
   freeing,
 }: {
   health: ServerHealth | null;
   using: ServerUsing | null;
   lastReclaim: LastReclaim | null;
   onReclaim: () => void;
+  onDeleteFolder: (volume: string) => void;
   freeing: boolean;
 }) {
   if (!health && !using) {
@@ -202,14 +204,31 @@ export function HealthPanel({
             , holding {sizeWords(health.orphans.reduce((sum, o) => sum + o.sizeBytes, 0))}. Deleting
             an app never deletes its files, which is why they are still here.
           </p>
-          <ul className="grid gap-1">
+          <ul className="grid gap-2">
             {health.orphans.slice(0, 10).map((orphan) => (
               <li key={orphan.volume} className="flex flex-wrap items-center gap-2">
                 <span className="font-mono break-all">{orphan.volume}</span>
                 <span className="text-muted-foreground">{sizeWords(orphan.sizeBytes)}</span>
+                <span className="text-muted-foreground" title={orphan.createdAt}>
+                  made {ago(orphan.createdAt)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  className="ml-auto"
+                  onClick={() => {
+                    onDeleteFolder(orphan.volume);
+                  }}
+                >
+                  Delete it
+                </Button>
               </li>
             ))}
           </ul>
+          <p className="text-xs text-muted-foreground">
+            A copy is kept first, and the folder goes only if that copy worked. Deleting one waits
+            for a person to approve it and type its name.
+          </p>
         </div>
       )}
     </Card>

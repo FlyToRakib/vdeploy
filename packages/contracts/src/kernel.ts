@@ -74,6 +74,12 @@ export const PlanStep = z.discriminatedUnion('kind', [
     mode: z.enum(['new', 'in_place']),
   }),
   z.strictObject({ kind: z.literal('restore_volumes'), snapshotId: idSchema('backup') }),
+  /**
+   * Delete a permanent folder and everything in it (§17.2). A copy is taken
+   * and read back first, and the folder goes only if that worked — which is
+   * why this is one step and not two.
+   */
+  z.strictObject({ kind: z.literal('delete_volume'), volume: z.string().min(1).max(128) }),
   z.strictObject({
     kind: z.literal('run_task'),
     command: z.array(z.string().max(4096)).min(1).max(64),

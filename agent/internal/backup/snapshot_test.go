@@ -63,6 +63,69 @@ func TestEveryPermanentFolderGoesIntoOneSnapshot(t *testing.T) {
 	}
 }
 
+func TestAFolderGoesOnlyAfterItsCopyIsInTheStore(t *testing.T) {
+	engine := &fakeEngine{folders: strings.Repeat("uploaded-file-bytes", 200)}
+	runner := &Runner{Engine: engine, Open: opener(), TempDir: t.TempDir()}
+	req := snapshotRequest()
+	req.DeleteAfter = true
+
+	result := runner.Snapshot(context.Background(), req)
+	if !result.OK || len(result.DeletedVolumes) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	// What was deleted is the volume behind the folder, never the name.
+	want := compose.VolumeName(req.ProjectID, "uploads")
+	if !slices.Contains(engine.deleted, want) {
+		t.Fatalf("deleted = %v", engine.deleted)
+	}
+	if len(engine.stored) != 1 {
+		t.Fatalf("the copy is not in the store: %+v", engine.stored)
+	}
+}
+
+func TestACopyThatCouldNotBeTakenDeletesNothing(t *testing.T) {
+	// The order is the whole guarantee: there is no path where the folder
+	// goes and the copy does not exist.
+	engine := &fakeEngine{folders: ""}
+	runner := &Runner{Engine: engine, Open: opener(), TempDir: t.TempDir()}
+	req := snapshotRequest()
+	req.DeleteAfter = true
+
+	result := runner.Snapshot(context.Background(), req)
+	if result.OK || len(result.DeletedVolumes) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(engine.deleted) != 0 {
+		t.Fatalf("a folder was deleted with no copy of it: %v", engine.deleted)
+	}
+}
+
+func TestAFolderTheEngineRefusesToDeleteIsReportedNotForced(t *testing.T) {
+	engine := &fakeEngine{folders: strings.Repeat("x", 500)}
+	held := compose.VolumeName("prj_01J9Z3Q8S7M2K4X6V1B5N0C9D8", "uploads")
+	engine.deleteErr = map[string]error{held: errors.New("volume is in use")}
+	runner := &Runner{Engine: engine, Open: opener(), TempDir: t.TempDir()}
+	req := snapshotRequest()
+	req.DeleteAfter = true
+
+	result := runner.Snapshot(context.Background(), req)
+	if !result.OK || len(result.DeletedVolumes) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if slices.Contains(result.DeletedVolumes, held) {
+		t.Fatalf("a folder the Engine refused was reported as deleted")
+	}
+}
+
+func TestNothingIsDeletedUnlessItWasAskedFor(t *testing.T) {
+	engine := &fakeEngine{folders: strings.Repeat("x", 500)}
+	runner := &Runner{Engine: engine, Open: opener(), TempDir: t.TempDir()}
+	result := runner.Snapshot(context.Background(), snapshotRequest())
+	if !result.OK || len(engine.deleted) != 0 || len(result.DeletedVolumes) != 0 {
+		t.Fatalf("an ordinary snapshot deleted something: %v", engine.deleted)
+	}
+}
+
 func TestASnapshotOfNothingIsAFailureNotASuccess(t *testing.T) {
 	engine := &fakeEngine{folders: ""}
 	runner := &Runner{Engine: engine, Open: opener(), TempDir: t.TempDir()}

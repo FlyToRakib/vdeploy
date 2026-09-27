@@ -206,3 +206,18 @@ func (c *Client) PruneBuildCache(ctx context.Context) (int64, error) {
 	}
 	return out.SpaceReclaimed, nil
 }
+
+// RemoveVolume deletes one named volume and everything in it.
+//
+// This is the only place the agent ever destroys data, and it refuses on
+// three counts before it does: the volume must carry VDeploy's own label,
+// it must belong to the project named, and `force` is never set — so a
+// volume any container still references is the Engine's refusal, not this
+// code's judgement.
+func (c *Client) RemoveVolume(ctx context.Context, name, projectID string) error {
+	if _, err := c.VolumeOf(ctx, name, projectID); err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, "/volumes/"+url.PathEscape(name),
+		url.Values{"force": {"false"}}, nil, nil)
+}

@@ -645,6 +645,28 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       },
     };
   },
+  /**
+   * Deleting a permanent folder and everything in it (§17.2). It names a
+   * folder rather than an app, because by the time data can be deleted
+   * nothing is mounting it — and the app that owned it may be gone.
+   *
+   * One step, not two: the copy and the delete travel together so that the
+   * order is the guarantee rather than a hope about scheduling.
+   */
+  'volume.delete': (args) => ({
+    specHash: null,
+    changes: [{ path: 'files', before: args.volume, after: null }],
+    steps: [{ kind: 'delete_volume', volume: args.volume }],
+    tier: 'destructive',
+    blastRadius: {
+      projects: 0,
+      replicas: 0,
+      domains: [],
+      downtime: 'none',
+      dataAtRisk: [`everything in ${args.volume}`],
+      rollbackTo: null,
+    },
+  }),
   /** Keeping a copy of what an app has written, on request (§17.4). */
   'volume.snapshot': (_args, context) => {
     const project = requireProject(context);

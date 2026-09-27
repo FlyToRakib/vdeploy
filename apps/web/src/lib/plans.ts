@@ -34,6 +34,19 @@ const OPERATION_WORDS: Record<string, string> = {
   'env.unset': 'Remove a setting',
   'secret.rotate': 'Replace a secret with a new value',
   'storage.make_persistent': 'Keep a folder’s files',
+  'volume.snapshot': 'Keep a copy of the permanent folders',
+  'volume.restore': 'Put a copy of the files back',
+  'volume.delete': 'Delete a permanent folder and everything in it',
+  'database.create': 'Create a database',
+  'database.delete': 'Delete a database',
+  'database.restore': 'Put a backup back',
+  'database.import': 'Load a dump into a database',
+  'database.link': 'Give a database to an app',
+  'database.unlink': 'Take a database away from an app',
+  'cron.create': 'Add a scheduled job',
+  'cron.update': 'Change a scheduled job',
+  'cron.delete': 'Remove a scheduled job',
+  'task.run': 'Run a one-off command',
 };
 
 /** An operation in words: "Restart the app", not "project.restart". */

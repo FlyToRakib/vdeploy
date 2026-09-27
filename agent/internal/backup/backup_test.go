@@ -33,6 +33,16 @@ type fakeEngine struct {
 	imageErr     error
 	startErr     error
 	volumes      map[string]bool
+	deleted      []string
+	deleteErr    map[string]error
+}
+
+func (f *fakeEngine) RemoveVolume(_ context.Context, name, _ string) error {
+	if err := f.deleteErr[name]; err != nil {
+		return err
+	}
+	f.deleted = append(f.deleted, name)
+	return nil
 }
 
 func (f *fakeEngine) RunHelper(_ context.Context, h docker.Helper) (int, string, error) {

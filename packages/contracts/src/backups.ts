@@ -140,6 +140,12 @@ export const SnapshotRequest = z.strictObject({
   fileName: z.string().max(200),
   /** Taking one, or putting one back over the folders it came from. */
   mode: z.enum(['take', 'put_back']),
+  /**
+   * Delete the folders once the copy is written and read back (§17.2).
+   * One request rather than two steps, because the order *is* the
+   * guarantee: a copy that could not be taken means nothing is deleted.
+   */
+  deleteAfter: z.boolean().default(false),
   /** Older snapshots this server may delete, once this one is written. */
   remove: z.array(z.string().max(200)).max(50).default([]),
   /** Where a copy goes afterwards; absent means it stays here alone. */
@@ -164,6 +170,8 @@ export const SnapshotResult = z.strictObject({
   verified: z.boolean(),
   error: z.string().max(4096).optional(),
   removed: z.array(z.string().max(200)).max(50).default([]),
+  /** The folders that are now gone, by the name a person would recognise. */
+  deletedVolumes: z.array(z.string().max(128)).max(32).default([]),
   offsite: OffsiteResult.optional(),
   log: z.string().max(20_000),
 });
@@ -185,7 +193,7 @@ export const BackupView = z.strictObject({
   /** The permanent folders a snapshot holds; empty for a dump. */
   volumes: z.array(z.string().max(100)).max(32),
   /** Why it was taken: a person asked, a schedule came round, or a deploy was about to run. */
-  reason: z.enum(['manual', 'scheduled', 'pre_deploy', 'pre_destructive']),
+  reason: z.enum(['manual', 'scheduled', 'pre_deploy', 'pre_destructive', 'pre_delete']),
   sizeBytes: z.number().int().min(0).nullable(),
   verified: z.boolean(),
   error: z.string().nullable(),

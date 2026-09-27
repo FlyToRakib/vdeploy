@@ -86,6 +86,8 @@ type Result struct {
 type Engine interface {
 	RunHelper(ctx context.Context, h docker.Helper) (int, string, error)
 	EnsureVolume(ctx context.Context, name, owner string) (bool, error)
+	// RemoveVolume deletes a permanent folder, checking its labels first.
+	RemoveVolume(ctx context.Context, name, projectID string) error
 	// ReadVolumeFile reads one file back out of the store, without running anything.
 	ReadVolumeFile(
 		ctx context.Context,

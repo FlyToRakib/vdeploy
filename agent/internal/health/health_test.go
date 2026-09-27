@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func TestTheBuildCacheIsCountedAsBuildCacheNotAsSomebodysFiles(t *testing.T) {
 	// Docker files BuildKit's cache under volumes, which is the last place
 	// somebody hunting for gigabytes of build cache would look.
 	r := reader(t, &fakeEngine{usage: usage()})
-	report := r.Read(context.Background(), map[string]bool{live: true}, time.Now())
+	report := r.Read(context.Background(), map[string]bool{"vd-live-uploads": true}, time.Now())
 
 	if report.Docker.BuildCacheBytes != 7<<30 {
 		t.Fatalf("build cache = %d GB", report.Docker.BuildCacheBytes>>30)
@@ -90,7 +91,7 @@ func reader(t *testing.T, engine *fakeEngine) *Reader {
 
 func TestAFolderWhoseAppIsGoneIsNamed(t *testing.T) {
 	r := reader(t, &fakeEngine{usage: usage()})
-	report := r.Read(context.Background(), map[string]bool{live: true}, time.Now())
+	report := r.Read(context.Background(), map[string]bool{"vd-live-uploads": true}, time.Now())
 
 	if len(report.Orphans) != 1 {
 		t.Fatalf("orphans = %+v", report.Orphans)
@@ -112,6 +113,21 @@ func TestAnotherToolsDataIsNotVDeploysToOffer(t *testing.T) {
 	// Both of VDeploy's own are orphans once no project is live.
 	if len(report.Orphans) != 2 {
 		t.Fatalf("orphans = %+v", report.Orphans)
+	}
+}
+
+func TestAFolderTakenOutOfAnAppThatStillRunsIsAnOrphanToo(t *testing.T) {
+	// The other way one appears: the app is alive and well, and no longer
+	// asks for this folder. Nothing will ever mount it again either.
+	r := reader(t, &fakeEngine{usage: usage()})
+	report := r.Read(context.Background(), map[string]bool{}, time.Now())
+
+	var named []string
+	for _, orphan := range report.Orphans {
+		named = append(named, orphan.Volume)
+	}
+	if !slices.Contains(named, "vd-live-uploads") {
+		t.Fatalf("a folder nothing asks for was not named: %v", named)
 	}
 }
 

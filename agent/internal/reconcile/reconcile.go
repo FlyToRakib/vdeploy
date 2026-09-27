@@ -250,11 +250,15 @@ func (p *pass) inspect(ctx context.Context, state *spec.DesiredState) {
 		return
 	}
 	r.healthAt = r.now()
-	live := make(map[string]bool, len(state.Projects))
+	// Every permanent folder the desired state still asks for. Anything
+	// else VDeploy made is a folder nothing will ever mount again.
+	wanted := map[string]bool{}
 	for _, project := range state.Projects {
-		live[project.ProjectID] = true
+		for _, volume := range project.Spec.Runtime.Volumes {
+			wanted[compose.VolumeName(project.ProjectID, volume.Name)] = true
+		}
 	}
-	report := r.Health.Read(ctx, live, r.now())
+	report := r.Health.Read(ctx, wanted, r.now())
 	p.report.Health = &report
 }
 

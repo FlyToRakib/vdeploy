@@ -621,12 +621,14 @@ export const OPERATIONS = [
     'Keep a copy of everything in this app’s permanent folders now',
     obj(P),
   ),
+  // A folder is named, not an app: by the time data can be deleted nothing
+  // is mounting it, and the app that owned it may not exist any more.
   operation(
     'volume.delete',
     'destructive',
-    'project',
-    'Delete a permanent folder after taking a snapshot',
-    obj({ ...P, volume: ResourceName }),
+    'server',
+    'Delete a permanent folder and everything in it, after taking a copy',
+    obj({ ...S, volume: z.string().min(1).max(128) }),
   ),
   // Looking at what an app wrote, and taking one file away with you (§20
   // Runtime). Both read the app's own files, which is the one read category

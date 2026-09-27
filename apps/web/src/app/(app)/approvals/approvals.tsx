@@ -33,7 +33,11 @@ function PlanCard({
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const destructive = plan.tier === 'destructive';
-  const confirmWord = projectName ?? 'confirm';
+  const folder =
+    plan.operation === 'volume.delete'
+      ? plan.plan.changes.find((c) => c.path === 'files')?.before
+      : null;
+  const confirmWord = typeof folder === 'string' ? folder : (projectName ?? 'confirm');
   const risks = riskSentences(plan.plan);
 
   async function decide(approve: boolean) {

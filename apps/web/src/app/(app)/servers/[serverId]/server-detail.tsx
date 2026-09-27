@@ -2,6 +2,7 @@
 
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { useCrumbName } from '@/components/breadcrumbs';
 import { CopyCommand } from '@/components/copy-command';
 import { useStepUp } from '@/components/step-up';
@@ -122,6 +123,28 @@ export function ServerDetail({ serverId }: { serverId: string }) {
     } catch (err) {
       setFreeing(false);
       setError(message(err, 'Nothing could be freed.'));
+    }
+  }
+
+  /**
+   * Deleting a folder whose app is gone (§17.2). It is destructive, so it
+   * goes to the approvals queue rather than happening: a person approves it
+   * there, typing the folder's name, and a copy is taken before it goes.
+   */
+  async function deleteFolder(volume: string) {
+    const id = toast.loading(`Asking to delete ${volume}…`);
+    try {
+      // Deleting data asks for the password again, here as everywhere.
+      const outcome = await stepUp(() => runOperation('volume.delete', { serverId, volume }));
+      toast.success(
+        outcome.status === 'pending_approval'
+          ? 'Waiting for someone to approve it in Approvals, where its name has to be typed out.'
+          : `${volume} is being deleted; a copy is kept first.`,
+        { id },
+      );
+      reload();
+    } catch (err) {
+      toast.error(message(err, 'That folder could not be deleted.') ?? 'It did not work.', { id });
     }
   }
 
@@ -321,6 +344,7 @@ export function ServerDetail({ serverId }: { serverId: string }) {
           lastReclaim={server.lastReclaim}
           freeing={freeing}
           onReclaim={() => void freeDisk()}
+          onDeleteFolder={(volume) => void deleteFolder(volume)}
         />
         <Card className="grid content-start gap-2 md:col-span-2">
           <h2 className="font-medium">Agent</h2>

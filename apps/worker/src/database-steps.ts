@@ -543,6 +543,86 @@ export function snapshotFileName(project: string, taken: Date): string {
 }
 
 /**
+ * Deleting a permanent folder and everything in it (§17.2).
+ *
+ * The folder is named as the server reported it, so this has to work out
+ * which app it belonged to — the label on the volume says, and the agent
+ * checks that label again before it removes anything. The copy and the
+ * delete go out as **one** request: a copy that could not be taken deletes
+ * nothing, and that is a property of the order, not of the scheduling.
+ */
+export async function deleteVolumeStep(
+  deps: DatabaseStepDeps & { pollMs: number; backupTimeoutMs?: number },
+  state: ApplyState,
+  volume: string,
+): Promise<void> {
+  // A server-scoped plan: the server it acts on is the one it named.
+  const serverId = typeof state.args.serverId === 'string' ? state.args.serverId : '';
+  if (!serverId) throw new VDeployError('not_found', 'That folder is not on a server VDeploy knows');
+  const owner = await folderOwner(deps.db, serverId, volume);
+  if (!owner) {
+    throw new VDeployError(
+      'not_found',
+      `${volume} is not a permanent folder VDeploy made on this server`,
+    );
+  }
+  const [project] = await deps.db.select().from(projects).where(eq(projects.id, owner.projectId));
+  if (!project) throw new VDeployError('not_found', 'The app that folder belonged to is not here');
+
+  const queued = await deps.db.transaction((tx) =>
+    queueSnapshot(tx, {
+      orgId: state.orgId,
+      projectId: owner.projectId,
+      serverId,
+      fileName: snapshotFileName(project.name, deps.now()),
+      volumes: [owner.folder],
+      reason: 'pre_delete',
+    }),
+  );
+  const deadline = Date.now() + (deps.backupTimeoutMs ?? 60 * 60_000);
+  for (;;) {
+    const snapshot = await getBackup(deps.db, queued.id);
+    if (snapshot?.status === 'done') {
+      state.notes.push(
+        `${volume} is gone. A copy of what was in it was kept first: ${String(Math.round((snapshot.sizeBytes ?? 0) / 1024))} KB.`,
+      );
+      return;
+    }
+    if (snapshot?.status === 'failed') {
+      throw new VDeployError(
+        'unavailable',
+        `A copy of ${volume} could not be taken, so nothing was deleted. ${snapshot.error ?? ''}`.trim(),
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new VDeployError('unavailable', 'The copy did not finish in time, so nothing was deleted');
+    }
+    await new Promise((resolve) => setTimeout(resolve, deps.pollMs));
+  }
+}
+
+/**
+ * Which app a folder belonged to, and what the app called it. The server's
+ * own report is the source: it carries the label the agent read off the
+ * volume, which is also the label the agent checks again before deleting.
+ */
+async function folderOwner(
+  db: DatabaseStepDeps['db'],
+  serverId: string,
+  volume: string,
+): Promise<{ projectId: string; folder: string } | null> {
+  const [seen] = await db
+    .select({ report: observedState.report })
+    .from(observedState)
+    .where(eq(observedState.serverId, serverId));
+  const orphan = seen?.report.health?.orphans.find((o) => o.volume === volume);
+  if (!orphan) return null;
+  const prefix = `vd-${orphan.projectId.replace(/^prj_/, '').toLowerCase()}-`;
+  if (!volume.startsWith(prefix)) return null;
+  return { projectId: orphan.projectId, folder: volume.slice(prefix.length) };
+}
+
+/**
  * A copy of the permanent folders before something destructive touches them
  * (§17.4). It waits for the answer: a plan that would lose files does not
  * proceed on the hope that the copy worked.
