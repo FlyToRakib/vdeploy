@@ -114,6 +114,9 @@ type Reconciler struct {
 	Health *health.Reader
 	// HealthEvery paces that look (default health.Every).
 	HealthEvery time.Duration
+	// Traffic reports how many requests each service answered and how many
+	// failed, for a stepped rollout (§16); nil never steps one up.
+	Traffic Traffic
 	// Inspector gathers evidence on replicas that are not serving; nil gathers none.
 	Inspector Inspector
 	Now       func() time.Time
@@ -125,6 +128,8 @@ type Reconciler struct {
 	unsavedAt     time.Time
 	measured      time.Time
 	healthAt      time.Time
+	// canaries: how far each project's stepped rollout has got.
+	canaries map[string]canary
 	// moving: new permanent folders (by volume) whose files still have to be copied in.
 	moving   map[string]bool
 	evidence map[string]evidenceCache
@@ -172,6 +177,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	}
 	if r.databaseRevision == nil {
 		r.databaseRevision = map[string]int{}
+	}
+	if r.canaries == nil {
+		r.canaries = map[string]canary{}
 	}
 	p := &pass{
 		r:        r,

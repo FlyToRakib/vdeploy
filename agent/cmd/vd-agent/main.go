@@ -194,6 +194,10 @@ func serve(configPath string, log *slog.Logger) error {
 		if err := os.MkdirAll(cfg.RoutingDir, 0o755); err != nil { // #nosec G301 -- Traefik reads it
 			return fmt.Errorf("routing dir: %w", err)
 		}
+		// What the router has answered, for a stepped rollout (§16).
+		reconciler.Traffic = &reconcile.TraefikTraffic{
+			URL: fmt.Sprintf("http://%s:%d/metrics", docker.TraefikName, docker.MetricsPort),
+		}
 		reconciler.Routing = reconcile.TraefikRouting{
 			Engine:  engine,
 			Options: docker.TraefikOptions{DynamicDir: cfg.RoutingDir, ACMEEmail: cfg.ACMEEmail, ACMEServer: cfg.ACMEServer},

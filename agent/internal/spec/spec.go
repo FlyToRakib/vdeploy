@@ -121,9 +121,21 @@ type Health struct {
 type Deploy struct {
 	Strategy    string `json:"strategy"`
 	DrainPeriod string `json:"drainPeriod"`
+	// Canary is the stepped rollout (§16); absent means switch all at once.
+	Canary *Canary `json:"canary,omitempty"`
 	// ReleaseCommand runs once per release before its replicas start.
 	ReleaseCommand []string `json:"releaseCommand,omitempty"`
 	ReleaseTimeout string   `json:"releaseTimeout"`
+}
+
+// Canary is how much traffic the new release takes, and when it stops.
+type Canary struct {
+	// Steps are the shares of traffic to walk through, 1–99.
+	Steps []int `json:"steps"`
+	// StepDuration is how long each share serves before the next.
+	StepDuration string `json:"stepDuration"`
+	// AutoRollbackErrorRate is the share of failed requests that ends it.
+	AutoRollbackErrorRate float64 `json:"autoRollbackErrorRate"`
 }
 
 // Runtime is how the application's containers run.

@@ -35,6 +35,36 @@ type Backend struct {
 	Port      int
 }
 
+/*
+Traffic is where a project's requests go.
+
+Usually one set of replicas. During a canary (§16) it is two: the release
+that is already serving, and the new one taking a share. The share is a
+weight rather than a count of containers, so two replicas of the new
+release can still take one per cent of the traffic — which is the whole
+point of a canary and is impossible if you split by instance.
+*/
+type Traffic struct {
+	Backends []Backend
+	// Canary is the new release's replicas, empty when nothing is stepping up.
+	Canary []Backend
+	// Percent of requests the canary takes, 1–99. Outside that it is not a split.
+	Percent int
+}
+
+// splitting reports whether this really is two releases sharing traffic.
+func (t Traffic) splitting() bool {
+	return len(t.Canary) > 0 && len(t.Backends) > 0 && t.Percent > 0 && t.Percent < 100
+}
+
+// all is every replica traffic may reach, for the ordinary single-service case.
+func (t Traffic) all() []Backend {
+	if len(t.Canary) == 0 {
+		return t.Backends
+	}
+	return append(append([]Backend{}, t.Backends...), t.Canary...)
+}
+
 func quote(host string) string { return "`" + host + "`" }
 
 func rule(d spec.Domain) string {
@@ -81,6 +111,30 @@ func middlewares(key string, n spec.Network) (object, []string) {
 	return defs, chain
 }
 
+// services renders either one service, or a weighted pair sharing traffic.
+func services(key string, n spec.Network, traffic Traffic) object {
+	if !traffic.splitting() {
+		return object{key: service(n, traffic.all())}
+	}
+	weighted := object{"services": []object{
+		{"name": key + "-stable", "weight": 100 - traffic.Percent},
+		{"name": key + "-new", "weight": traffic.Percent},
+	}}
+	// With sticky sessions on, a visitor who lands on the new release stays
+	// there: sending somebody back and forth between two versions mid-order
+	// is worse than either version.
+	if n.LoadBalancer.Sticky.Enabled {
+		weighted["sticky"] = object{"cookie": object{
+			"name": n.LoadBalancer.Sticky.Cookie + "_v", "secure": true, "httpOnly": true,
+		}}
+	}
+	return object{
+		key:             object{"weighted": weighted},
+		key + "-stable": service(n, traffic.Backends),
+		key + "-new":    service(n, traffic.Canary),
+	}
+}
+
 func service(n spec.Network, backends []Backend) object {
 	servers := make([]object, 0, len(backends))
 	for _, b := range backends {
@@ -98,8 +152,8 @@ func service(n spec.Network, backends []Backend) object {
 
 // File renders one project's routing, or reports that it has none: no
 // network, no hostnames, or no replica ready to take traffic.
-func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Redirect, backends []Backend) ([]byte, bool) {
-	if network == nil || len(hosts) == 0 || len(backends) == 0 {
+func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Redirect, traffic Traffic) ([]byte, bool) {
+	if network == nil || len(hosts) == 0 || len(traffic.all()) == 0 {
 		return nil, false
 	}
 	middlewareDefs, chain := middlewares(key, *network)
@@ -139,7 +193,7 @@ func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Re
 	}
 	config := object{"http": object{
 		"routers":     routers,
-		"services":    object{key: service(*network, backends)},
+		"services":    services(key, *network, traffic),
 		"middlewares": middlewareDefs,
 	}}
 	// JSON is valid YAML, and Traefik's file provider only reads .yml files.

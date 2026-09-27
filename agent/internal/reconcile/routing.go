@@ -43,32 +43,57 @@ func (t TraefikRouting) Write(key string, content []byte) error { return t.Dir.W
 // Prune implements Routing.
 func (t TraefikRouting) Prune(keep map[string]bool) error { return t.Dir.Prune(keep) }
 
-// backends is where a project's traffic goes: its new replicas once every one
-// of them is ready (blue/green), until then the old release still running.
-func (p *pass) backends(project spec.DesiredProject, containers []compose.Container) []router.Backend {
+/*
+backends is where a project's traffic goes: its new replicas once every one
+of them is ready (blue/green), until then the old release still running.
+
+With a canary the two overlap on purpose — the new release takes a share
+while the old one keeps the rest — so this reports both, and the router
+turns that into weights rather than into a count of containers.
+*/
+func (p *pass) backends(project spec.DesiredProject, containers []compose.Container) router.Traffic {
 	port := project.Spec.Network.ContainerPort
-	var out []router.Backend
-	if p.settled[project.ProjectID] {
+	fresh := func() []router.Backend {
+		var out []router.Backend
 		for _, c := range containers {
 			out = append(out, router.Backend{Container: c.Name, Port: port})
 		}
 		return out
 	}
+	var stable []router.Backend
 	for _, c := range p.old(project.ProjectID) {
 		if c.State == "running" {
-			out = append(out, router.Backend{Container: c.Name, Port: port})
+			stable = append(stable, router.Backend{Container: c.Name, Port: port})
 		}
 	}
-	if len(out) > 0 {
-		return out
+
+	if p.settled[project.ProjectID] {
+		// Every new replica is ready. Blue/green switches now; a canary
+		// gives the new release a share and watches what comes back.
+		if project.Spec.Deploy.Strategy == "canary" && len(stable) > 0 {
+			verdict := p.r.stepCanary(project, compose.ProjectKey(project.ProjectID)+"-new@file")
+			switch {
+			case verdict.Failed:
+				p.event("canary_failed", project.ProjectID, "", verdict.Reason)
+				return router.Traffic{Backends: stable}
+			case !verdict.Done:
+				p.report.Settling = true // look again before the step is up
+				return router.Traffic{Backends: stable, Canary: fresh(), Percent: verdict.Percent}
+			}
+		}
+		return router.Traffic{Backends: fresh()}
+	}
+	if len(stable) > 0 {
+		return router.Traffic{Backends: stable}
 	}
 	// Nothing old to fall back on (a first deploy, or scaling up): route the ready ones.
+	var ready []router.Backend
 	for _, c := range containers {
 		if p.states[c.Name] == StateReady {
-			out = append(out, router.Backend{Container: c.Name, Port: port})
+			ready = append(ready, router.Backend{Container: c.Name, Port: port})
 		}
 	}
-	return out
+	return router.Traffic{Backends: ready}
 }
 
 // routes are the hostnames a project answers on: its own domains and its
@@ -133,9 +158,9 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 			continue
 		}
 		key := compose.ProjectKey(project.ProjectID)
-		backends := p.backends(project, containers)
+		traffic := p.backends(project, containers)
 		hosts, redirects := routes(project)
-		content, ok := router.File(key, network, hosts, redirects, backends)
+		content, ok := router.File(key, network, hosts, redirects, traffic)
 		if !ok {
 			if len(containers) > 0 {
 				keep[key] = true // replicas still starting: leave the current routing as it is

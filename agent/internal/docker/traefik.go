@@ -16,6 +16,9 @@ const (
 	// TraefikImage is v3.7.13, pinned by digest.
 	TraefikImage = "traefik@sha256:1c32e7c368204fd72812152ebdd2ac0425993df6fd982317deb02e48f2d5423c"
 	TraefikName  = "vd-traefik"
+	// MetricsPort is where Traefik says what it has answered (§16). It is
+	// never published: only the agent, on the same bridge, can read it.
+	MetricsPort = 8082
 	// InfraLabel marks platform containers; they are never in ListManaged.
 	InfraLabel = "io.vdeploy.infra"
 	acmeVolume = "vd-traefik-acme"
@@ -58,6 +61,14 @@ func traefikArgs(opts TraefikOptions) []string {
 		"--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web",
 		"--certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json",
 		"--ping=true",
+		// What the router answered, for a stepped rollout (§16). On an
+		// entrypoint of its own, never published: the agent reads it over
+		// the bridge, and nothing outside the server can.
+		"--entrypoints.internal.address=:8082",
+		"--metrics.prometheus=true",
+		"--metrics.prometheus.entrypoint=internal",
+		"--metrics.prometheus.addentrypointslabels=false",
+		"--metrics.prometheus.addserviceslabels=true",
 		"--log.level=WARN",
 		"--global.sendanonymoususage=false",
 		"--global.checknewversion=false",
