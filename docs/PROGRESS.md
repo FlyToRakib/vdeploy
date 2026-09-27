@@ -1,9 +1,38 @@
 # VDeploy Implementation Progress
 
-**Milestone:** M4 — complete platform (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24)
-**Task:** 4.4 — M4 exit on the VPS testbed
+**Milestone:** M5 — scale and balance (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27)
+**Task:** 5.1 — the operations still catalogued but unimplemented
 **Status:** in progress
-**Updated:** 2026-09-27 18:40 UTC
+**Updated:** 2026-09-27 20:10 UTC
+
+## M4 exit — met 2026-09-27
+
+`scripts/e2e.mjs --vps` in the VPS testbed: **41 checks**, the M1 and M2
+ones plus everything M4 added — an app's permanent folder browsed by name
+and one file taken off the server whole (2 MB, byte for byte), a copy of
+those folders kept with something actually in it, the server saying what
+its disk is made of and freeing what nothing needs while every running app
+stayed running and every rollback target survived, an app set up from the
+catalog and serving, a compose file read with what it asks for and cannot
+have named, and a public status page readable without signing in that shows
+only what was put on it. `--walkthrough` then drives the dashboard in a
+real browser as a person who does not code. The production baseline was
+verified unchanged before and after every run, and the testbed and its
+volume were removed by name afterwards.
+
+**Nothing essential requires SSH.** Looking at what an app wrote, taking a
+file away, a shell in a container, running a one-off command, reading the
+logs, seeing what the disk is full of and freeing it, deleting a folder
+whose app is gone, reading the firewall — all of it is in the dashboard,
+and each goes through the same plan, gate and audit as anything else.
+
+Two bugs the exit run found, both fixed before it passed:
+a pre-destructive snapshot was mounting a folder's *name* as if it were the
+volume, so Docker made an empty one and the copy found nothing — which
+blocked every destructive change to an app with permanent folders; and a
+nil Go slice encodes as `null` where the schema says array, so an empty
+list cost the agent its connection, over and over, looking like a network
+fault.
 
 ## M2 exit — met 2026-09-21
 
@@ -156,10 +185,11 @@ GitHub.
 - [x] 4.3j compose import (§15, §17.5): the way in from wherever somebody has been running things. It is a **reading, not an execution** — `compose.read` creates nothing, and the list of what will *not* come across is the part worth reading. A compose file can ask for the server itself: `privileged`, `cap_add`, `devices`, the host's own network, a path on the host. VDeploy's spec deliberately cannot express any of it (ADR 0003, §8 L6), and silently dropping them would be two failures at once — an app that mysteriously does not work, and a person who believes it came over faithfully. So each one is named **in the words of what it meant**: “it asks for full control of the server, which VDeploy never grants”. What does come across: settings in either shape compose allows, the container's port rather than the published one, named volumes as permanent folders, and `depends_on`. A service whose image is a database VDeploy runs becomes a **managed database** rather than an app, with its password made on the server and nothing published — and that is said too, because it is a real difference and not a detail. A path on the host is refused with where to put those files instead; a service built from a Dockerfile is sent to become a project of its own. The dashboard's New project gains “Bring a compose file”: paste or choose it, read what it would make, then create
 - [x] 4.3k uptime history and the public status page (§18): **only changes are recorded** — one row the moment an app stops serving, one the moment it starts again. A sample every minute would be tens of thousands of rows an app a month to say the same thing less exactly; this way an outage that began at 03:14:22 is recorded as beginning then, and ninety days of a healthy app costs two rows. What counts as serving is the same judgement the project screen makes, so the number on a status page and the word on the project page can never disagree; a stopped app is not an outage, because somebody asked for it. The arithmetic gets the case that matters right: an app that went down a week ago and is still down has **no change inside a one-day window**, and reporting that as 100 % would be the most misleading number this platform could produce — so the state before the window is read first. The page itself is the one thing here anybody may read without signing in, so it is written as if strangers are reading it, because they are: a label somebody wrote, whether it is working, and how much of the last ninety days it was — no ids, no addresses, no server names, and a page that is off answers exactly as one that does not exist. Plain HTML, no scripts and no requests anywhere, served by the API rather than the dashboard, because it has to answer when things are going badly — which is the only time anybody opens one
 - [x] 4.3l the firewall, read and never written (§20 Servers, §30, ADR 0016): the check that matters already existed — VDeploy connects to ports 80 and 443 from outside and says whether a visitor could get in. What was missing is the other half: when that fails there are two possible culprits, this server's own firewall and the provider's, and until you know which you are guessing. So the agent reads ufw's and firewalld's **own files** — ufw's `### tuple ###` lines rather than the iptables lines below them, which are what it compiled the request into — and the screen says either “ports 80 and 443 are open here, so it is your hosting provider's firewall, not this server's”, or the one line to paste. It does **not** change anything: the agent has never run a process on the machine (backups use a container, metrics and diagnostics read /proc, the one exec in the platform is the terminal), and a firewall is the single thing on a server that can lock its owner out — a rule applied through a control plane reached over the network is a rule that can cut the hand applying it. A firewall VDeploy cannot read says so, because “no firewall found” must never read as “nothing is blocked”
+- [x] 4.4 M4 exit on the VPS testbed: the full e2e (41 checks) and the non-coder walkthrough, both against the testbed on the test VPS, with the production baseline verified unchanged before and after each run — 13 containers, host nginx, every service and both web ports untouched — and the testbed and its volume removed by name at the end. The e2e now covers the M4 surface: browsing a permanent folder, taking a file off the server, a copy of those folders that is not empty, the disk breakdown and safe reclaim with everything still running afterwards, an app from the catalog, a compose file read, and the public status page
 
 ## Doing
 
-- [ ] 4.4 M4 exit: the full e2e and the non-coder walkthrough against the VPS testbed, baseline verified unchanged, proving nothing essential requires SSH
+- [ ] 5.1 the operations still catalogued but unimplemented: the ten that are one section of the spec each (domain.add/remove, tls.configure, health.configure, resources.limits, deploy.strategy, scaling.rules, network.middleware, loadbalancer.configure, volume.create), then app-level backups (backup.trigger/schedule/restore across an app’s databases and folders at once), server lifecycle (server.drain, server.remove), and project.rebuild, registry.add, git.connect
 
 ## Next
 
@@ -214,5 +244,5 @@ GitHub.
 ## Environment
 
 - Local: Node 22, pnpm 11.8, Docker Desktop. No local Go — Go builds/tests run in the official `golang` image.
-- Testbed: not yet provisioned
+- Testbed: created and removed per run (`vdeploy-test-testbed` on the VPS, `vdeploy-test-dind` locally)
 - Baseline snapshot: docs/vps-baseline.json (captured 2026-09-19, `pnpm vps:verify` to diff)

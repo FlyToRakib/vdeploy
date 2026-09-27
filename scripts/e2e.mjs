@@ -780,7 +780,8 @@ async function healthAndReclaim(serverId) {
   const { result: before } = await op('server.status', { serverId });
   pass(
     'the server says what its disk is made of',
-    'images ' + String(before.health.docker.imagesBytes >> 20) + ' MB',
+    // Divide, never shift: JS shifts truncate to 32 bits, and a disk is bigger than that.
+    'images ' + String(Math.round(before.health.docker.imagesBytes / 1024 ** 2)) + ' MB',
   );
 
   const running = managedContainers().length;
