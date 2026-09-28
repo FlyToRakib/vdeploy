@@ -1,4 +1,5 @@
 import {
+  Puzzle,
   Building2,
   Activity,
   Bell,
@@ -67,6 +68,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Git',
     icon: GitBranch,
     keywords: ['github', 'gitlab', 'bitbucket', 'repository', 'connect', 'push'],
+  },
+  {
+    href: '/settings/plugins',
+    label: 'Integrations',
+    icon: Puzzle,
+    keywords: ['plugin', 'integration', 'api key', 'webhook', 'extend'],
   },
   {
     href: '/settings/sso',

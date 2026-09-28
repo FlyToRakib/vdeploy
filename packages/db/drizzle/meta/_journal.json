@@ -267,6 +267,13 @@
       "when": 1790613923855,
       "tag": "0037_sso",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790615593719,
+      "tag": "0038_plugins",
+      "breakpoints": true
     }
   ]
 }

@@ -33,6 +33,9 @@ export function actorRecord(actor: Actor): ActorRecord {
     userId: actor.userId,
     origin: actor.origin,
     ...(actor.kind === 'ai' ? { aiSessionId: actor.aiSessionId, model: actor.model } : {}),
+    // Which integration did it, so the audit log says a plugin's name
+    // rather than the name of whoever installed it (ADR 0023).
+    ...(actor.kind === 'human' && actor.pluginId ? { pluginId: actor.pluginId } : {}),
   };
 }
 

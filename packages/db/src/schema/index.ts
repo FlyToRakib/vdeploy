@@ -8,6 +8,7 @@ export * from './terminal.js';
 export * from './metrics.js';
 export * from './notifications.js';
 export * from './github.js';
+export * from './plugins.js';
 export * from './sources.js';
 export * from './ai.js';
 export * from './uptime.js';

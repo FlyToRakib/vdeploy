@@ -1,6 +1,12 @@
 import type { HumanActor } from '@vdeploy/ai';
 import { idSchema, Role, VDeployError, type Id } from '@vdeploy/contracts';
-import { member, session as sessionTable, type Database } from '@vdeploy/db';
+import {
+  member,
+  pluginById,
+  pluginUsed,
+  session as sessionTable,
+  type Database,
+} from '@vdeploy/db';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -19,7 +25,12 @@ const SCOPE_ROLE: Readonly<Record<z.infer<typeof ApiKeyScope>, Role>> = {
 };
 const RANK: Readonly<Record<Role, number>> = { viewer: 0, developer: 1, admin: 2, owner: 3 };
 
-export const ApiKeyMetadata = z.object({ orgId: idSchema('organization'), scope: ApiKeyScope });
+export const ApiKeyMetadata = z.object({
+  orgId: idSchema('organization'),
+  scope: ApiKeyScope,
+  /** Set when the key belongs to an integration rather than a person (ADR 0023). */
+  pluginId: idSchema('plugin').optional(),
+});
 
 export interface ResolvedActor {
   actor: HumanActor;
@@ -47,15 +58,32 @@ async function fromApiKey(auth: Auth, db: Database, key: string): Promise<Resolv
   const userId = result.key.referenceId as Id<'user'>;
   const memberRole = await roleIn(db, userId, metadata.data.orgId);
   const ceiling = SCOPE_ROLE[metadata.data.scope];
+  /**
+   * A key belonging to an integration carries that integration's grant
+   * (ADR 0023): the operations an owner read and allowed, and nothing
+   * else. A plugin that has been removed, or switched off, has a key
+   * that is refused — the row is the grant, so there is one thing to
+   * revoke rather than two that can disagree.
+   */
+  const plugin = metadata.data.pluginId ? await pluginById(db, metadata.data.pluginId) : null;
+  if (metadata.data.pluginId && !plugin?.enabled) {
+    throw new VDeployError('unauthenticated', 'That integration is no longer allowed here');
+  }
+  if (plugin) {
+    // Written without being waited on: every call it makes would
+    // otherwise pay for a write nobody is reading in the same second.
+    void pluginUsed(db, plugin.id, new Date()).catch(() => undefined);
+  }
   return {
     actor: {
       kind: 'human',
-      origin: 'api',
+      origin: plugin ? 'plugin' : 'api',
       userId,
       orgId: metadata.data.orgId,
       role: RANK[memberRole] <= RANK[ceiling] ? memberRole : ceiling,
       // API keys never satisfy step-up: sensitive account actions need a person.
       stepUpAt: null,
+      ...(plugin ? { allowed: plugin.operations, pluginId: plugin.id } : {}),
     },
     sessionId: null,
   };

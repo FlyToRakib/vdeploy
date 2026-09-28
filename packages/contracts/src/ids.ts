@@ -48,6 +48,8 @@ export const ID_PREFIXES = {
   rateLimit: 'rtl',
   /** A company's own identity provider (§26 M6). */
   ssoProvider: 'sso',
+  /** A narrow, revocable capability given to somebody's integration (§26 M6). */
+  plugin: 'plg',
   notificationChannel: 'nch',
   notification: 'ntf',
 } as const;

@@ -11,10 +11,22 @@ interface ActorBase {
 
 export interface HumanActor extends ActorBase {
   kind: 'human';
-  /** `webhook`: a push to a connected repository, acting as the person who connected it. */
-  origin: 'dashboard' | 'api' | 'cli' | 'webhook';
+  /**
+   * `webhook`: a push to a connected repository, acting as the person who
+   * connected it. `plugin`: an integration an owner allowed (§26 M6),
+   * acting as the person who installed it and never wider.
+   */
+  origin: 'dashboard' | 'api' | 'cli' | 'webhook' | 'plugin';
   /** When the user last re-authenticated (§20.2 step-up), if ever this session. */
   stepUpAt: Date | null;
+  /**
+   * The only operations this actor may call, when it is something with a
+   * declared capability rather than a person (ADR 0023). Absent means
+   * whatever the role allows, which is what a person has.
+   */
+  allowed?: readonly string[];
+  /** Which plugin is acting, for the audit log; set alongside `allowed`. */
+  pluginId?: string;
 }
 
 /**

@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — next: a plugin system
+**Task:** M6 — next: servers VDeploy provisions itself
 **Status:** in progress
-**Updated:** 2026-09-30 03:05 UTC
+**Updated:** 2026-09-30 05:40 UTC
 
 ## M6 — the ecosystem
 
@@ -136,6 +136,25 @@ kind of model, and a second and third place source can come from.
   and every endpoint the document names are both held to `fetchableOrigin`:
   https, and never loopback, a private range, or the link-local address
   every cloud answers its own credentials on
+
+- [x] **a plugin is a capability, not code** (ADR 0023) — the word
+  usually means a hook loaded into the process, and that is exactly the
+  second path Principle I says never to build: no plan, no tier, no
+  approval, no audit entry, and no way to know afterwards that a plugin
+  was what deleted somebody's database. What people actually want from
+  one is real and VDeploy could not do it: **a narrow, revocable,
+  readable slice** of what you can do, for somebody else's integration.
+  An API key is read/write over everything its holder can reach, so
+  handing a deploy bot one means handing it the ability to delete the
+  project. A plugin declares exactly the operations it needs, an owner
+  reads that list and allows it, and the list becomes **a ceiling of its
+  own beneath the role's** — an operation not on it is refused even when
+  the role would allow it, and one VDeploy grows later is not quietly
+  included. Tier 4 is never grantable. The row *is* the grant, so
+  switching a plugin off stops its key on the next call rather than
+  leaving two things to revoke that can disagree. And the audit log says
+  which plugin: an entry reading "the owner listed the servers" when a
+  bot did it is worse than no entry
 
 Four bugs, all found by using the thing rather than by a test:
 
@@ -473,8 +492,8 @@ GitHub.
 
 ## Next
 
-- M6, in order: a plugin system, and servers VDeploy provisions itself
-  (Hetzner, DigitalOcean, Vultr)
+- M6: servers VDeploy provisions itself (Hetzner, DigitalOcean, Vultr) —
+  the last item on the list
 
 ## Known gaps (tracked, not forgotten)
 
@@ -501,6 +520,14 @@ GitHub.
   the app's afterwards, which is the point but is said only once. Staging
   gets no database of its own. Its dashboard card has not been opened in a
   browser; the apply path is covered by the worker tests.
+- Plugins add nothing to VDeploy — no new operation, screen, deploy
+  strategy or database engine; they can only use what is here, and the
+  honest answer to "add Redis support as a plugin" is a pull request.
+  Installing one is pasting a manifest: there is no registry, because a
+  catalogue is a trust decision nobody has made. The `enabled` column has
+  no operation on it yet, so the dashboard removes a plugin rather than
+  pausing one. Its screen has not been opened in a browser; the API path
+  is tested, including that a granted key cannot call anything else.
 - SSO: no SCIM, so somebody who leaves the company keeps their VDeploy
   membership until an admin removes it — disconnecting a provider takes
   the door away, not the room. No group-to-role mapping: everybody
@@ -524,6 +551,7 @@ GitHub.
 
 ## Decisions made
 
+- 2026-09-30 A plugin is a capability, not code — docs/adr/0023-a-plugin-is-a-capability.md
 - 2026-09-30 SSO: the protocol is borrowed, the authorization is ours — docs/adr/0022-sso-protocol-borrowed-authorization-owned.md
 - 2026-09-29 Staging owns its keys, and promoting moves the image — docs/adr/0021-staging-promotes-an-image.md
 - 2026-09-29 A preview is a project, and it reads the app's secrets — docs/adr/0020-a-preview-is-a-project.md

@@ -150,6 +150,14 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   },
   'sso.verify_domain': { providerId: 'org-acme-example' },
   'sso.disconnect': { providerId: 'org-acme-example' },
+  'plugin.install': {
+    manifest: {
+      name: 'deploy-bot',
+      description: 'Deploys when the build server says so',
+      operations: ['project.list'],
+    },
+  },
+  'plugin.uninstall': { pluginId: newId('plugin') },
   'preview.open': {
     pullRequest: {
       provider: 'github',

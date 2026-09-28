@@ -19,6 +19,7 @@ import { RestoreMode } from '../backups.js';
 import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { FolderPath } from '../files.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
+import { PluginManifest } from '../plugins.js';
 import { PreviewRef } from '../previews.js';
 import { EmailDomain, SsoSettings } from '../sso.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
@@ -121,6 +122,13 @@ export const OPERATIONS = [
   query('server.resources', 'server', 'metrics', 'Show server CPU, memory and disk usage', obj(S)),
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
+  query(
+    'plugin.list',
+    'org',
+    'config',
+    'List the integrations this organization has allowed, and what each may do',
+    obj({}),
+  ),
   query(
     'sso.list',
     'org',
@@ -735,6 +743,28 @@ export const OPERATIONS = [
     'project',
     'Take down a preview and everything it made; the app it previews is untouched',
     obj(P),
+  ),
+  // Allowing an integration is tier 4 because it hands out a key that
+  // can call VDeploy. What makes that safe is that the list of what it
+  // may call is written down, shown to the person approving it, and
+  // enforced above whatever its role would otherwise allow (ADR 0023) —
+  // and that reading a list and agreeing to it is a thing only a person
+  // can do.
+  operation(
+    'plugin.install',
+    'human_only',
+    'org',
+    'Allow an integration to call a named list of operations, and give it a key',
+    obj({ manifest: PluginManifest }),
+    { minRole: 'owner', stepUp: true },
+  ),
+  operation(
+    'plugin.uninstall',
+    'sensitive',
+    'org',
+    'Remove an integration and the key it was given',
+    obj({ pluginId: idSchema('plugin') }),
+    { minRole: 'admin' },
   ),
   // Connecting an identity provider is tier 4 for the same reason
   // 'secret.set' is: it takes a client secret or a signing certificate

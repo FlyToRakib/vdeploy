@@ -168,7 +168,19 @@ export interface ActorRecord {
   userId: string;
   aiSessionId?: string;
   model?: string;
-  origin: 'dashboard' | 'api' | 'cli' | 'ai' | 'mcp' | 'webhook' | 'scheduler' | 'agent';
+  origin:
+    | 'dashboard'
+    | 'api'
+    | 'cli'
+    | 'ai'
+    | 'mcp'
+    | 'webhook'
+    | 'scheduler'
+    | 'agent'
+    /** An integration an owner allowed (§26 M6); `pluginId` names which. */
+    | 'plugin';
+  /** Which integration acted, when origin is `plugin`. */
+  pluginId?: string;
 }
 
 export const plans = pgTable(
