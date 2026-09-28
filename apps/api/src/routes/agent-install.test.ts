@@ -76,3 +76,36 @@ describe('the one-command installer', () => {
     expect(script).toContain(`CP_URL='https://cp.example.com/'\\''; rm -rf /; '\\'''`);
   });
 });
+
+describe('binaries that are not there yet', () => {
+  it('refuses, and tries again on the next request', async () => {
+    // A control plane whose binaries are still being unpacked, or whose
+    // mount is not ready, answers 503 — and then answers properly once
+    // they arrive. Remembering the failure would mean 503 for the rest
+    // of this process's life, to everybody, until somebody restarts it.
+    const later = mkdtempSync(join(tmpdir(), 'vdeploy-agents-later-'));
+    const server = await app(later);
+    try {
+      const refused = await server.inject({ url: '/api/v1/agent/install.sh' });
+      expect(refused.statusCode).toBe(503);
+
+      writeFileSync(join(later, 'vd-agent-linux-amd64'), 'amd64 binary');
+      writeFileSync(join(later, 'vd-agent-linux-arm64'), 'arm64 binary');
+
+      const served = await server.inject({ url: '/api/v1/agent/install.sh' });
+      expect(served.statusCode).toBe(200);
+      expect(served.body).toContain(`SUM_amd64='${sha('amd64 binary')}'`);
+    } finally {
+      rmSync(later, { recursive: true, force: true });
+    }
+  });
+
+  it('hashes them once, not on every request', async () => {
+    const server = await app(dir);
+    const first = await server.inject({ url: '/api/v1/agent/install.sh' });
+    // Taking the files away after a success must not change the answer:
+    // that is what "hashed once, at the first request" means.
+    const gone = await app(dir);
+    expect((await gone.inject({ url: '/api/v1/agent/install.sh' })).body).toBe(first.body);
+  });
+});

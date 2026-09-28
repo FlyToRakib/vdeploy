@@ -11,9 +11,17 @@ export const binaryName = (arch: AgentArch) => `vd-agent-linux-${arch}`;
 /**
  * The agent binaries this control plane serves, with their SHA-256. Hashed
  * once, at the first request: the files never change while it runs.
+ *
+ * **Only a success is remembered.** A failure is almost always temporary
+ * — the image still unpacking, a mount not ready, a filesystem stalling
+ * under load — and remembering one would mean the installer answers 503
+ * for the rest of this process's life, to everybody, until somebody
+ * thinks to restart it. That is an afternoon nobody gets back, in
+ * exchange for saving one stat call.
  */
 export class AgentBinaries {
-  private sums: Promise<Record<AgentArch, string> | null> | null = null;
+  private sums: Record<AgentArch, string> | null = null;
+  private asking: Promise<Record<AgentArch, string> | null> | null = null;
 
   constructor(private readonly dir: string) {}
 
@@ -22,7 +30,10 @@ export class AgentBinaries {
   }
 
   checksums(): Promise<Record<AgentArch, string> | null> {
-    this.sums ??= (async () => {
+    if (this.sums) return Promise.resolve(this.sums);
+    // One request does the work while others wait for the same answer;
+    // if it fails, the next request tries again rather than inheriting it.
+    this.asking ??= (async () => {
       if (!AGENT_ARCHES.every((a) => existsSync(this.path(a)))) return null;
       const entries = await Promise.all(
         AGENT_ARCHES.map(
@@ -39,8 +50,15 @@ export class AgentBinaries {
         ),
       );
       return Object.fromEntries(entries) as Record<AgentArch, string>;
-    })();
-    return this.sums;
+    })()
+      .then((found) => {
+        this.sums = found;
+        return found;
+      })
+      .finally(() => {
+        this.asking = null;
+      });
+    return this.asking;
   }
 }
 
