@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -18,12 +19,14 @@ const (
 )
 
 type engine struct {
+	name   string
 	loaded []byte
 	give   string
 	err    error
 }
 
-func (e *engine) LoadImage(_ context.Context, tarball io.Reader, _ string) (string, error) {
+func (e *engine) LoadImage(_ context.Context, tarball io.Reader, name string) (string, error) {
+	e.name = name
 	body, err := io.ReadAll(tarball)
 	if err != nil {
 		return "", err
@@ -146,5 +149,28 @@ func TestMalformedRequestsAnswerRatherThanCrash(t *testing.T) {
 		if loader(t, &engine{give: id}, &record{}).Load(context.Background(), req).OK {
 			t.Fatalf("%+v was accepted", req)
 		}
+	}
+}
+
+/*
+Docker refuses a reference with an upper-case letter in it, and an id is
+upper-case.
+
+The name is only a label — what the agent trusts is the ID that comes back
+— which is exactly why it was easy to get wrong and why nothing else would
+have noticed: an image that arrived perfectly well was refused on its name,
+and the build it belonged to failed with it.
+*/
+func TestTheImageIsTaggedWithSomethingDockerAccepts(t *testing.T) {
+	body := []byte("a tarball, near enough")
+	e := &engine{give: id}
+	if !loader(t, e, &record{}).Load(context.Background(), arrival(serve(t, body).URL, body)).OK {
+		t.Fatal("the image did not arrive")
+	}
+	if e.name != strings.ToLower(e.name) {
+		t.Fatalf("loaded under %q, which Docker will not take", e.name)
+	}
+	if !strings.HasPrefix(e.name, "vd-arrived/") || !strings.Contains(e.name, ":") {
+		t.Fatalf("loaded under %q", e.name)
 	}
 }
