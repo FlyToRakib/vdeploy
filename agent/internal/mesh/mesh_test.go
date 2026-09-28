@@ -37,19 +37,21 @@ func keypair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 // fakeEngine stands in for Docker: one gateway per network, one address per
 // container, both handed out by the test.
 type fakeEngine struct {
+	asked     []string
 	gateway   string
 	container string
 	noNetwork bool
 }
 
-func (f fakeEngine) NetworkGateway(context.Context, string) (string, error) {
+func (f *fakeEngine) NetworkGateway(_ context.Context, name string) (string, error) {
 	if f.noNetwork {
 		return "", errors.New("no such network")
 	}
+	f.asked = append(f.asked, name)
 	return f.gateway, nil
 }
 
-func (f fakeEngine) ContainerIP(context.Context, string, string) (string, error) {
+func (f *fakeEngine) ContainerIP(context.Context, string, string) (string, error) {
 	if f.container == "" {
 		return "", errors.New("not running")
 	}
@@ -121,7 +123,7 @@ func setup(t *testing.T, grantTo string) *pair {
 
 	b := &Runner{
 		Identity: Identity{ServerID: serverB, Key: bPrivate},
-		Engine:   fakeEngine{container: serviceHost},
+		Engine:   &fakeEngine{container: serviceHost},
 	}
 	b.Apply(context.Background(), spec.Mesh{
 		Listen: ptr(listenPort),
@@ -133,7 +135,7 @@ func setup(t *testing.T, grantTo string) *pair {
 	endpoint := net.JoinHostPort("127.0.0.1", strconv.Itoa(listenPort))
 	a := &Runner{
 		Identity: Identity{ServerID: serverA, Key: aPrivate},
-		Engine:   fakeEngine{gateway: "127.0.0.1"},
+		Engine:   &fakeEngine{gateway: "127.0.0.1"},
 	}
 	a.Apply(context.Background(), spec.Mesh{
 		Peers: []spec.MeshPeer{{ServerID: serverB, PublicKey: Encode(bPublic), Endpoint: &endpoint}},
@@ -282,7 +284,7 @@ func TestAForwardWaitsForItsNetwork(t *testing.T) {
 	endpoint := "127.0.0.1:1"
 	a := &Runner{
 		Identity: Identity{ServerID: serverA, Key: private},
-		Engine:   fakeEngine{noNetwork: true},
+		Engine:   &fakeEngine{noNetwork: true},
 	}
 	t.Cleanup(a.Close)
 	config := spec.Mesh{
@@ -297,7 +299,7 @@ func TestAForwardWaitsForItsNetwork(t *testing.T) {
 		t.Fatal("a forward opened on a network that does not exist")
 	}
 	// And once it does exist, the next pass opens it.
-	a.Engine = fakeEngine{gateway: "127.0.0.1"}
+	a.Engine = &fakeEngine{gateway: "127.0.0.1"}
 	a.Apply(context.Background(), config)
 	if a.Hosts(project) == nil {
 		t.Fatal("a forward never opened once its network appeared")
@@ -466,7 +468,7 @@ func TestTheMeshOutlivesThePassThatOpenedIt(t *testing.T) {
 
 	b := &Runner{
 		Identity: Identity{ServerID: serverB, Key: bPrivate},
-		Engine:   fakeEngine{container: serviceHost},
+		Engine:   &fakeEngine{container: serviceHost},
 	}
 	b.Apply(pass, spec.Mesh{
 		Listen: ptr(listenPort),
@@ -478,7 +480,7 @@ func TestTheMeshOutlivesThePassThatOpenedIt(t *testing.T) {
 	endpoint := net.JoinHostPort("127.0.0.1", strconv.Itoa(listenPort))
 	a := &Runner{
 		Identity: Identity{ServerID: serverA, Key: aPrivate},
-		Engine:   fakeEngine{gateway: "127.0.0.1"},
+		Engine:   &fakeEngine{gateway: "127.0.0.1"},
 	}
 	a.Apply(pass, spec.Mesh{
 		Peers: []spec.MeshPeer{{ServerID: serverB, PublicKey: Encode(bPublic), Endpoint: &endpoint}},
@@ -499,5 +501,54 @@ func TestTheMeshOutlivesThePassThatOpenedIt(t *testing.T) {
 	}
 	if back != "after the pass" {
 		t.Fatalf("got %q back", back)
+	}
+}
+
+/*
+Whatever reaches a forward is a container, so a forward never binds the
+loopback.
+
+A container's 127.0.0.1 is its own, so binding there binds somewhere
+nothing that matters can reach — and from a shell on the host it looks
+perfectly fine, which is the worst way for it to be wrong. Each kind binds
+the gateway of the network the thing that needs it is on: a project's own
+network for a database, so only that project's containers can reach it,
+and the default bridge for a router, which this machine's containers can
+reach and the internet cannot.
+*/
+func TestAForwardBindsWhereTheThingThatNeedsItCanReach(t *testing.T) {
+	_, private := keypair(t)
+	public, _ := keypair(t)
+	endpoint := "127.0.0.1:1"
+	// The gateway is whatever Docker says; here it has to be bindable.
+	engine := &fakeEngine{gateway: "127.0.0.1"}
+	a := &Runner{Identity: Identity{ServerID: serverA, Key: private}, Engine: engine}
+	t.Cleanup(a.Close)
+	peer := []spec.MeshPeer{{ServerID: serverB, PublicKey: Encode(public), Endpoint: &endpoint}}
+
+	a.Apply(context.Background(), spec.Mesh{
+		Peers: peer,
+		Forwards: []spec.MeshForward{
+			{
+				ProjectID: project, Alias: "vd-db-x", ListenPort: freePort(t),
+				ToServerID: serverB, Kind: "database", DatabaseID: database,
+			},
+			{
+				ProjectID: project, ListenPort: freePort(t),
+				ToServerID: serverB, Kind: "router",
+			},
+		},
+	})
+
+	asked := strings.Join(engine.asked, " ")
+	if !strings.Contains(asked, "vd-"+strings.ToLower(strings.TrimPrefix(project, "prj_"))) {
+		t.Fatalf("a database was not offered on its project's own network: %v", engine.asked)
+	}
+	if !strings.Contains(asked, "bridge") {
+		t.Fatalf("a router was not offered where this machine's containers can reach: %v", engine.asked)
+	}
+	// And the address a router is offered on is the one it says it is.
+	if at := a.RouterAddress(serverB); !strings.HasPrefix(at, engine.gateway+":") {
+		t.Fatalf("a router was offered at %q", at)
 	}
 }

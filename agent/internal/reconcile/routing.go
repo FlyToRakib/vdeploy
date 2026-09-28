@@ -198,4 +198,7 @@ type MeshRunner interface {
 	// Routes are the apps this server should put in front of, when it is an
 	// edge (§13); empty on every other server.
 	Routes() []spec.EdgeRoute
+	// RouterAddress is where this machine's router reaches another
+	// server's, or empty while that is not open.
+	RouterAddress(serverID string) string
 }

@@ -323,3 +323,8 @@ func (c *Client) NetworkGateway(ctx context.Context, name string) (string, error
 	}
 	return "", fmt.Errorf("%s has no gateway address", name)
 }
+
+// DefaultBridge is Docker's own network, which every container can reach
+// the host on and the internet cannot. It is where a service belonging to
+// the machine rather than to one project is offered (§13).
+const DefaultBridge = "bridge"

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
+	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/spec"
 )
 
@@ -332,6 +333,25 @@ func forwardKey(f spec.MeshForward) string {
 	return f.ProjectID + "|" + f.Alias + "|" + strconv.Itoa(f.ListenPort)
 }
 
+/*
+RouterAddress is where this machine's own router reaches another server's,
+or empty when that forward is not open.
+
+The edge's routing files name this address, rather than assuming one, for
+the same reason the forward does not bind the loopback: what reads those
+files is a container.
+*/
+func (r *Runner) RouterAddress(serverID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, f := range r.forwards {
+		if f.spec.ToServerID == serverID && subjectOf(f.spec.Kind) == subjectRouter {
+			return net.JoinHostPort(f.address, strconv.Itoa(f.spec.ListenPort))
+		}
+	}
+	return ""
+}
+
 // Routes is what this server should put in front of, when it is an edge.
 func (r *Runner) Routes() []spec.EdgeRoute {
 	r.mu.Lock()
@@ -351,19 +371,31 @@ one character shorter and would have published somebody's database to the
 world.
 */
 func (r *Runner) open(ctx context.Context, key string, want spec.MeshForward) {
-	gateway := "127.0.0.1"
+	/*
+	 * Where to listen, and it is never the loopback.
+	 *
+	 * Whatever reaches a forward is a **container**: an app for a
+	 * database, this machine's own router for another machine's. A
+	 * container's 127.0.0.1 is its own, so binding there is binding
+	 * somewhere nothing that matters can reach — and it looks fine from a
+	 * shell on the host, which is the worst way for it to be wrong.
+	 *
+	 * So it binds a Docker gateway: the project's own network for a
+	 * database, so only that project's containers can reach it, and the
+	 * default bridge for a router, which the machine's own containers can
+	 * reach and the internet cannot. Binding every interface would have
+	 * been one word shorter and would have published somebody else's
+	 * router to the world.
+	 */
+	network := docker.DefaultBridge
 	if subjectOf(want.Kind) == subjectDatabase {
-		// An app reaches it, so it is offered on that app's own network.
-		found, err := r.Engine.NetworkGateway(ctx, compose.NetworkName(want.ProjectID))
-		if err != nil {
-			// The network may simply not exist yet: the next pass tries again.
-			return
-		}
-		gateway = found
+		network = compose.NetworkName(want.ProjectID)
 	}
-	// A router's forward is reached by this machine's own Traefik, which is
-	// on this machine: the loopback is as far as it needs to go, and any
-	// wider a binding would publish another server's router to the world.
+	gateway, err := r.Engine.NetworkGateway(ctx, network)
+	if err != nil {
+		// The network may simply not exist yet: the next pass tries again.
+		return
+	}
 	address := net.JoinHostPort(gateway, strconv.Itoa(want.ListenPort))
 	listener, err := net.Listen("tcp", address)
 	if err != nil {

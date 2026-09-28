@@ -2,6 +2,9 @@ package reconcile
 
 import (
 	"context"
+	"strconv"
+	"strings"
+
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
@@ -46,11 +49,19 @@ func (p *pass) edge(ctx context.Context, routes []spec.EdgeRoute) {
 		key := compose.ProjectKey(route.ProjectID)
 		network := route.Network
 		hosts, redirects := edgeHosts(route)
-		// One backend: the far server's router, reached through the mesh on
-		// a port of this machine's own.
-		traffic := router.Traffic{Backends: []router.Backend{
-			{Container: "127.0.0.1", Port: route.ListenPort},
-		}}
+		// One backend: the far server's router, at the address the mesh is
+		// actually offering it on. Asked rather than assumed, because what
+		// reads this file is a container, and a container's own loopback is
+		// not the machine's.
+		host, port, ok := strings.Cut(p.r.Mesh.RouterAddress(route.ToServerID), ":")
+		if !ok {
+			continue // not open yet; the next pass writes it
+		}
+		number, err := strconv.Atoi(port)
+		if err != nil {
+			continue
+		}
+		traffic := router.Traffic{Backends: []router.Backend{{Container: host, Port: number}}}
 		content, ok := router.File(key, &network, hosts, redirects, traffic)
 		if !ok {
 			continue
