@@ -28,6 +28,7 @@ import { and, asc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
 import { checkReachability } from '../agents/reachability.js';
 import { GITHUB_ADMIN } from './github.js';
 import { SOURCE_ADMIN } from './sources.js';
+import { SSO_ADMIN } from './sso.js';
 import { AI_ADMIN } from './ai-settings.js';
 import { NOTIFICATION_ADMIN } from './notifications.js';
 import { OFFSITE_ADMIN } from './offsite.js';
@@ -129,6 +130,7 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
   ...AI_ADMIN,
   ...GITHUB_ADMIN,
   ...SOURCE_ADMIN,
+  ...SSO_ADMIN,
   'user.invite': async ({ deps, actor, args }) => {
     const id = newId('invitation');
     const email = String(args.email).toLowerCase();

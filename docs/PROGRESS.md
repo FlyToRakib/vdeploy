@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — next: SSO/SAML
+**Task:** M6 — next: a plugin system
 **Status:** in progress
-**Updated:** 2026-09-30 01:20 UTC
+**Updated:** 2026-09-30 03:05 UTC
 
 ## M6 — the ecosystem
 
@@ -114,6 +114,28 @@ kind of model, and a second and third place source can come from.
   bought. Everything else about that release is production's own: its
   spec, its domains, its size, its keys. One staging copy per app, because
   a second would mean deciding which one the word meant
+
+- [x] **signing in with the account you already have** (ADR 0022) — the
+  split is the decision worth reading. **The protocol is borrowed**:
+  validating a SAML assertion means canonicalisation, reference
+  resolution, certificate matching, audience and timestamp checks, and
+  refusing responses nobody asked for — and the interesting failures of
+  every hand-rolled implementation are signature wrapping and
+  canonicalisation, which look exactly like working code until somebody
+  signs in as anybody. **The authorization is ours**: the plugin's own
+  registration endpoint takes an `organizationId` *in its request body*,
+  so it is off the allowlist and `sso.connect` writes the row with the
+  organization taken from the session. Connecting is tier 4, like
+  `secret.set`, because it takes a pasted secret and decides who can get
+  in. A domain belongs to one organization and must be **proved by a DNS
+  record** before anybody signs in through it; pointing a provider
+  somewhere else clears that proof. An arriving person joins as a
+  **viewer** — the provider says who somebody is, not what they may do —
+  and somebody already a member keeps the role VDeploy gave them. The
+  discovery fetch is an SSRF hole by construction, so what an owner types
+  and every endpoint the document names are both held to `fetchableOrigin`:
+  https, and never loopback, a private range, or the link-local address
+  every cloud answers its own credentials on
 
 Four bugs, all found by using the thing rather than by a test:
 
@@ -451,8 +473,8 @@ GitHub.
 
 ## Next
 
-- M6, in order: SSO/SAML, a plugin system, and servers VDeploy
-  provisions itself (Hetzner, DigitalOcean, Vultr)
+- M6, in order: a plugin system, and servers VDeploy provisions itself
+  (Hetzner, DigitalOcean, Vultr)
 
 ## Known gaps (tracked, not forgotten)
 
@@ -479,6 +501,15 @@ GitHub.
   the app's afterwards, which is the point but is said only once. Staging
   gets no database of its own. Its dashboard card has not been opened in a
   browser; the apply path is covered by the worker tests.
+- SSO: no SCIM, so somebody who leaves the company keeps their VDeploy
+  membership until an admin removes it — disconnecting a provider takes
+  the door away, not the room. No group-to-role mapping: everybody
+  arrives as a viewer and is promoted by hand. The SAML form asks for the
+  sign-in URL, issuer and certificate rather than reading them out of a
+  metadata document (which is accepted and stored, but not parsed).
+  `fetchableOrigin` checks what was typed, not what it resolves to. The
+  two dashboard screens — company sign-in, and the button on the sign-in
+  page — have not been opened in a browser; the API path is tested.
 - Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
@@ -493,6 +524,7 @@ GitHub.
 
 ## Decisions made
 
+- 2026-09-30 SSO: the protocol is borrowed, the authorization is ours — docs/adr/0022-sso-protocol-borrowed-authorization-owned.md
 - 2026-09-29 Staging owns its keys, and promoting moves the image — docs/adr/0021-staging-promotes-an-image.md
 - 2026-09-29 A preview is a project, and it reads the app's secrets — docs/adr/0020-a-preview-is-a-project.md
 - 2026-09-29 GitLab and Bitbucket connect with a token, not an app — docs/adr/0019-gitlab-and-bitbucket-by-token.md

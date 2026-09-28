@@ -44,6 +44,12 @@ export interface KernelDeps {
   probe: PortProbe;
   /** The VDeploy GitHub App, when this installation has one (M2 2.15). */
   github?: GithubDeps;
+  /**
+   * Reads the TXT records at a name, for proving a domain belongs to an
+   * organization (§26 M6). Tests replace it; without one no domain can
+   * be verified, which fails closed.
+   */
+  resolveTxt: (name: string) => Promise<string[]>;
   /** How this VDeploy reaches a Git host it was given; tests replace it. */
   fetch?: typeof fetch;
   /** The model behind the assistant; without one the assistant is off (§26).*/

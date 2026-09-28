@@ -1,4 +1,5 @@
 import {
+  Building2,
   Activity,
   Bell,
   Database,
@@ -66,6 +67,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Git',
     icon: GitBranch,
     keywords: ['github', 'gitlab', 'bitbucket', 'repository', 'connect', 'push'],
+  },
+  {
+    href: '/settings/sso',
+    label: 'Company sign-in',
+    icon: Building2,
+    keywords: ['sso', 'saml', 'oidc', 'identity', 'okta', 'entra', 'login'],
   },
   {
     href: '/settings/ai',

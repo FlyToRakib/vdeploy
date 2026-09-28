@@ -156,3 +156,52 @@ export function assessDns(
   }
   return { status: 'verified', message: `${seen.host} points to this server.`, instructions: [] };
 }
+
+/**
+ * Addresses a control plane must never be talked into fetching from: its
+ * own machine, the private network it sits on, and the link-local range
+ * every cloud puts its metadata service on.
+ */
+const NEVER_FETCH = [
+  '127.0.0.0/8',
+  '10.0.0.0/8',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+  '169.254.0.0/16',
+  '100.64.0.0/10',
+  '0.0.0.0/8',
+  '::1/128',
+  'fc00::/7',
+  'fe80::/10',
+];
+
+/**
+ * Whether a URL is one this VDeploy will fetch from when somebody who
+ * runs an organization names it — an identity provider's discovery
+ * document, for instance (§26 M6).
+ *
+ * Two rules, both about somebody else's reading of it. It must be
+ * **https**, because a client secret travels to whatever answers. And it
+ * must not be an address **inside this machine or its network**: an
+ * organization owner naming `169.254.169.254` is asking the control plane
+ * to read its own cloud credentials and hand them to a form.
+ *
+ * A hostname that merely resolves to a private address still gets
+ * through here — this is a check on what was typed, not a resolver — and
+ * the request that follows is made with a short timeout to something that
+ * has to answer as an OpenID provider to be of any use.
+ */
+export function fetchableOrigin(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  const host = parsed.hostname.replace(/^\[|]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) return false;
+  // A name is allowed; a literal address is checked against the ranges.
+  if (!/^[\d.]+$/.test(host) && !host.includes(':')) return true;
+  return !NEVER_FETCH.some((range) => inCidr(host, range));
+}

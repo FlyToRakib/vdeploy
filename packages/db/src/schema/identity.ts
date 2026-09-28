@@ -225,6 +225,39 @@ export const rateLimit = pgTable('rate_limit', {
   lastRequest: bigint('last_request', { mode: 'number' }).notNull().default(0),
 });
 
+/**
+ * A company's own identity provider (§26 M6, ADR 0022).
+ *
+ * One row per provider per organization, matched on the email domain
+ * somebody types in. The configuration holds a client secret or a signing
+ * certificate, so nothing here is ever returned to a caller — the list
+ * answers with the issuer, the domain and whether it is verified.
+ */
+export const ssoProvider = pgTable(
+  'sso_provider',
+  {
+    id: text('id').primaryKey(),
+    /** The identity provider's own name for itself. */
+    issuer: text('issuer').notNull(),
+    /** OpenID Connect settings, as JSON; null for a SAML provider. */
+    oidcConfig: text('oidc_config'),
+    /** SAML settings, as JSON; null for an OIDC provider. */
+    samlConfig: text('saml_config'),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
+    providerId: text('provider_id').notNull().unique(),
+    organizationId: text('organization_id').references(() => organization.id, {
+      onDelete: 'cascade',
+    }),
+    /** The email domain that chooses this provider, such as acme.com. */
+    domain: text('domain').notNull(),
+    /** Until the domain is proved, nobody signs in through it. */
+    domainVerified: boolean('domain_verified').notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('sso_provider_organization').on(t.organizationId)],
+);
+
 export const authSchema = {
   user,
   session,
@@ -239,6 +272,7 @@ export const authSchema = {
   passkey,
   apikey,
   rateLimit,
+  ssoProvider,
 };
 
 /** Instance-wide settings: one row, created at first-run setup. */

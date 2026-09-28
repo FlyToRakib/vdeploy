@@ -46,6 +46,8 @@ export const ID_PREFIXES = {
   passkey: 'psk',
   teamMember: 'tmm',
   rateLimit: 'rtl',
+  /** A company's own identity provider (§26 M6). */
+  ssoProvider: 'sso',
   notificationChannel: 'nch',
   notification: 'ntf',
 } as const;

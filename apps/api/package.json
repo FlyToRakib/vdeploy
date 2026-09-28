@@ -11,8 +11,9 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@better-auth/api-key": "^1.7.5",
-    "@better-auth/passkey": "^1.7.5",
+    "@better-auth/api-key": "^1.7.6",
+    "@better-auth/passkey": "^1.7.6",
+    "@better-auth/sso": "^1.7.6",
     "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/swagger": "^9.8.1",
@@ -22,7 +23,7 @@
     "@vdeploy/contracts": "workspace:*",
     "@vdeploy/core": "workspace:*",
     "@vdeploy/db": "workspace:*",
-    "better-auth": "^1.7.5",
+    "better-auth": "^1.7.6",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",
     "fastify-type-provider-zod": "^7.0.0",

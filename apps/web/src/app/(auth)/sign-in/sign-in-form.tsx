@@ -1,6 +1,6 @@
 'use client';
 
-import { KeyRound } from 'lucide-react';
+import { Building2, KeyRound } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type SubmitEvent } from 'react';
@@ -11,7 +11,7 @@ import { formText, messageOf } from '@/lib/forms';
 
 export function SignInForm() {
   const router = useRouter();
-  const [step, setStep] = useState<'password' | 'code'>('password');
+  const [step, setStep] = useState<'password' | 'code' | 'sso'>('password');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -49,11 +49,78 @@ export function SignInForm() {
     else done();
   }
 
+  /**
+   * Signing in through a company's own identity provider (§26 M6).
+   *
+   * Called directly rather than through a client plugin: it is one POST
+   * and a redirect, and the provider is chosen by the email domain, so
+   * there is nothing here for a package to do.
+   */
+  async function submitSso(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const email = formText(new FormData(event.currentTarget), 'email');
+    setBusy(true);
+    setError(null);
+    const res = await fetch('/api/auth/sign-in/sso', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, callbackURL: '/' }),
+    });
+    const body: unknown = await res.json().catch(() => null);
+    setBusy(false);
+    const url = res.ok ? (body as { url?: string }).url : undefined;
+    if (!url) {
+      setError(
+        messageOf(
+          body,
+          'No company sign-in is set up for that address. Use your email and password instead.',
+        ),
+      );
+      return;
+    }
+    window.location.assign(url);
+  }
+
   async function passkey() {
     setError(null);
     const result = await authClient.signIn.passkey();
     if (result.error) setError(messageOf(result.error, 'Passkey sign-in did not complete.'));
     else done();
+  }
+
+  if (step === 'sso') {
+    return (
+      <form onSubmit={(e) => void submitSso(e)} className="grid gap-4">
+        <h1 className="text-lg font-semibold">Sign in with your company account</h1>
+        <Field
+          label="Work email"
+          name="email"
+          type="email"
+          autoComplete="username"
+          hint="You are sent to your company's sign-in page; VDeploy never sees that password."
+          required
+          autoFocus
+        />
+        {error && (
+          <p role="alert" className="text-sm text-status-failed">
+            {error}
+          </p>
+        )}
+        <Button type="submit" disabled={busy}>
+          Continue
+        </Button>
+        <button
+          type="button"
+          className="text-center text-sm text-accent underline"
+          onClick={() => {
+            setError(null);
+            setStep('password');
+          }}
+        >
+          Back
+        </button>
+      </form>
+    );
   }
 
   if (step === 'code') {
@@ -86,6 +153,16 @@ export function SignInForm() {
       <h1 className="text-lg font-semibold">Sign in</h1>
       <Button variant="secondary" type="button" onClick={() => void passkey()}>
         <KeyRound aria-hidden className="size-4" /> Sign in with a passkey
+      </Button>
+      <Button
+        variant="secondary"
+        type="button"
+        onClick={() => {
+          setError(null);
+          setStep('sso');
+        }}
+      >
+        <Building2 aria-hidden className="size-4" /> Sign in with your company account
       </Button>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />

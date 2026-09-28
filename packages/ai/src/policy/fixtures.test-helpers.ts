@@ -139,6 +139,17 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'git.connect': { provider: 'github' },
   'preview.configure': { preview: { enabled: true } },
   'staging.create': { branch: 'develop' },
+  'sso.connect': {
+    domain: 'acme.example',
+    settings: {
+      protocol: 'oidc',
+      issuer: 'https://idp.example',
+      clientId: 'vdeploy',
+      clientSecret: 'not-a-real-secret',
+    },
+  },
+  'sso.verify_domain': { providerId: 'org-acme-example' },
+  'sso.disconnect': { providerId: 'org-acme-example' },
   'preview.open': {
     pullRequest: {
       provider: 'github',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessDns, inCidr, recordName, type DnsObservation } from './dns.js';
+import { fetchableOrigin, assessDns, inCidr, recordName, type DnsObservation } from './dns.js';
 
 const server = { ipv4: '8.8.4.4', ipv6: null };
 const seen = (overrides: Partial<DnsObservation> = {}): DnsObservation => ({
@@ -84,5 +84,40 @@ describe('assessDns', () => {
   it('cannot check without knowing where the server is', () => {
     const result = assessDns(seen({ a: ['8.8.4.4'] }), { ipv4: null, ipv6: null });
     expect(result.status).toBe('no_server_address');
+  });
+});
+
+describe('addresses this VDeploy will fetch from', () => {
+  it('takes an ordinary https name', () => {
+    expect(fetchableOrigin('https://login.microsoftonline.com/tenant/v2.0')).toBe(true);
+    expect(fetchableOrigin('https://idp.acme.example')).toBe(true);
+    expect(fetchableOrigin('https://8.8.8.8')).toBe(true);
+  });
+
+  it('refuses anything that would carry a client secret in the clear', () => {
+    expect(fetchableOrigin('http://idp.acme.example')).toBe(false);
+    expect(fetchableOrigin('ftp://idp.acme.example')).toBe(false);
+    expect(fetchableOrigin('not a url')).toBe(false);
+  });
+
+  it('refuses this machine, its network, and the metadata service', () => {
+    for (const url of [
+      'https://127.0.0.1',
+      'https://127.1.2.3',
+      'https://0.0.0.0',
+      'https://10.1.2.3',
+      'https://172.16.5.5',
+      'https://192.168.1.1',
+      // The address every cloud answers its own credentials on.
+      'https://169.254.169.254',
+      'https://100.64.0.1',
+      'https://[::1]',
+      'https://[fd00::1]',
+      'https://[fe80::1]',
+      'https://localhost',
+      'https://api.localhost',
+    ]) {
+      expect(fetchableOrigin(url), url).toBe(false);
+    }
   });
 });

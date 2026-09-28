@@ -32,6 +32,8 @@ export interface TestApp {
   queued: string[];
   /** What each "ip:port" answers from outside; unlisted ports never answer. */
   ports: Map<string, PortReach>;
+  /** TXT records this VDeploy can see, for proving a domain (§26 M6). */
+  txt: Map<string, string[]>;
   stop: () => Promise<void>;
 }
 
@@ -41,16 +43,20 @@ export async function startTestApp(
     github?: GithubDeps;
     model?: ModelClient;
     fetch?: typeof fetch;
+    /** What each name answers with; unlisted names answer with nothing. */
+    txt?: Map<string, string[]>;
   } = {},
 ): Promise<TestApp> {
   const database = await startTestDatabase();
   const mailer = memoryMailer();
   const queued: string[] = [];
   const ports = new Map<string, PortReach>();
+  const txt = options.txt ?? new Map<string, string[]>();
   const app = await buildServer({
     ...(options.github ? { github: options.github } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
+    resolveTxt: (name) => Promise.resolve(txt.get(name) ?? []),
     probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
     config: testConfig(database.url),
     db: database.db,
@@ -71,6 +77,7 @@ export async function startTestApp(
     mail: mailer.sent,
     queued,
     ports,
+    txt,
     stop: async () => {
       await app.close();
       await database.stop();

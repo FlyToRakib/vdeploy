@@ -23,6 +23,14 @@ const PUBLIC_PATHS: readonly RegExp[] = [
   /^\/two-factor\/(enable|disable|get-totp-uri|verify-totp|verify-backup-code|generate-backup-codes)$/,
   /^\/passkey\/(generate-register-options|verify-registration|generate-authenticate-options|verify-authentication|list-user-passkeys|delete-passkey|update-passkey)$/,
   /^\/organization\/(accept-invitation|reject-invitation|get-invitation|set-active|list|get-full-organization)$/,
+  // Signing in through a company's own identity provider (§26 M6). The
+  // sign-in half only: registering, changing and removing a provider are
+  // VDeploy operations, so that the organization a provider belongs to
+  // is decided by the session rather than claimed in a request body.
+  /^\/sign-in\/sso$/,
+  /^\/sso\/callback(\/[\w.-]+)?$/,
+  /^\/sso\/saml2\/sp\/(acs|slo|metadata)(\/[\w.-]+)?$/,
+  /^\/sso\/saml2\/logout\/[\w.-]+$/,
 ];
 
 export function isPublicAuthPath(path: string): boolean {

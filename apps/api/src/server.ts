@@ -1,3 +1,4 @@
+import { Resolver } from 'node:dns/promises';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { anthropicModel, openAiModel, type ModelClient } from '@vdeploy/ai';
@@ -66,6 +67,8 @@ export interface ServerDeps {
   probe?: PortProbe;
   /** Reaches a Git host the org connected; tests replace it. */
   fetch?: typeof fetch;
+  /** Reads TXT records when proving a domain; tests replace it. */
+  resolveTxt?: (name: string) => Promise<string[]>;
   /** The GitHub App; from the environment when unset. Tests point it at a stand-in. */
   github?: GithubDeps;
   /** The assistant's model, when no API key is configured. Tests script it. */
@@ -121,6 +124,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   );
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });
   const probe = deps.probe ?? tcpProbe;
+  // Proving a domain is a public DNS question, asked with a short timeout
+  // so a name nobody answers for is a refusal rather than a hang.
+  const resolveTxt =
+    deps.resolveTxt ??
+    (async (name: string) => {
+      const resolver = new Resolver({ timeout: 3000, tries: 2 });
+      try {
+        return (await resolver.resolveTxt(name)).map((parts: string[]) => parts.join(''));
+      } catch {
+        return [];
+      }
+    });
   const github = deps.github ?? githubFromConfig(config);
   const gatewayDeps = {
     db,
@@ -179,6 +194,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     reclaim: gateway,
     connected: (serverId: string) => gateway.isConnected(serverId),
     probe,
+    resolveTxt,
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(github ? { github } : {}),
     ...(model ? { model } : {}),

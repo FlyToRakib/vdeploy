@@ -2,6 +2,7 @@ import { newId } from '@vdeploy/contracts';
 import { account, auditLog, invitation, session, signInFailures } from '@vdeploy/db';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { isPublicAuthPath } from '../routes/auth.js';
 import { Browser, startTestApp, type TestApp } from '../test-helpers.js';
 
 let t: TestApp;
@@ -242,8 +243,66 @@ describe('the auth surface is an allowlist', () => {
     ['GET', '/api/auth/list-sessions'],
     ['POST', '/api/auth/revoke-sessions'],
     ['POST', '/api/auth/verify-password'],
+    // Registering an identity provider takes an organization id in the
+    // body (§26 M6, ADR 0022). Reachable, it would let anybody signed in
+    // decide how another organization's people sign in.
+    ['POST', '/api/auth/sso/register'],
+    ['POST', '/api/auth/sso/update-provider'],
+    ['POST', '/api/auth/sso/delete-provider'],
+    ['GET', '/api/auth/sso/providers'],
+    ['GET', '/api/auth/sso/get-provider'],
+    ['POST', '/api/auth/sso/verify-domain'],
+    ['POST', '/api/auth/sso/request-domain-verification'],
   ] as const)('%s %s is not reachable', async (method, url) => {
     const res = await new Browser(t.app).request(method, url, method === 'POST' ? {} : undefined);
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('signing in through an identity provider', () => {
+  it('offers the sign-in half of it, and only that half', () => {
+    // Asserted against the allowlist itself rather than through a
+    // request: the plugin answers 404 for a domain nobody has connected,
+    // which is indistinguishable from the route not existing.
+    for (const path of [
+      '/sign-in/sso',
+      '/sso/callback',
+      '/sso/callback/acme-example-com',
+      '/sso/saml2/sp/acs',
+      '/sso/saml2/sp/acs/acme-example-com',
+      '/sso/saml2/sp/metadata',
+      '/sso/saml2/sp/slo',
+      '/sso/saml2/logout/acme-example-com',
+    ]) {
+      expect(isPublicAuthPath(path), path).toBe(true);
+    }
+    for (const path of [
+      '/sso/register',
+      '/sso/update-provider',
+      '/sso/delete-provider',
+      '/sso/providers',
+      '/sso/get-provider',
+      '/sso/verify-domain',
+      '/sso/request-domain-verification',
+    ]) {
+      expect(isPublicAuthPath(path), path).toBe(false);
+    }
+  });
+
+  it('will not connect a provider for somebody else organization', async () => {
+    const stranger = new Browser(t.app, 'Stranger/1.0');
+    const res = await stranger.request('POST', '/api/v1/operations/sso.connect', {
+      input: {
+        domain: 'acme.example',
+        settings: {
+          protocol: 'oidc',
+          discoveryUrl: 'https://idp.example/.well-known/openid-configuration',
+          clientId: 'vdeploy',
+          clientSecret: 'not-a-real-secret',
+        },
+      },
+    });
+    // Nobody is signed in, so there is no organization to connect it to.
+    expect([401, 403]).toContain(res.statusCode);
   });
 });

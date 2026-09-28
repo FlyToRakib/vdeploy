@@ -20,6 +20,7 @@ import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { FolderPath } from '../files.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
 import { PreviewRef } from '../previews.js';
+import { EmailDomain, SsoSettings } from '../sso.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
 import { operation, query, Role, type OperationDefinition } from './define.js';
@@ -120,6 +121,13 @@ export const OPERATIONS = [
   query('server.resources', 'server', 'metrics', 'Show server CPU, memory and disk usage', obj(S)),
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
+  query(
+    'sso.list',
+    'org',
+    'config',
+    'List the identity providers this organization signs in through, and whether each is proved',
+    obj({}),
+  ),
   query(
     'staging.get',
     'project',
@@ -727,6 +735,34 @@ export const OPERATIONS = [
     'project',
     'Take down a preview and everything it made; the app it previews is untouched',
     obj(P),
+  ),
+  // Connecting an identity provider is tier 4 for the same reason
+  // 'secret.set' is: it takes a client secret or a signing certificate
+  // somebody pasted. It also decides who can sign in to this
+  // organization, which is not a thing to let anything but a person do.
+  operation(
+    'sso.connect',
+    'human_only',
+    'org',
+    'Let people with an email at this domain sign in through your identity provider',
+    obj({ domain: EmailDomain, settings: SsoSettings }),
+    { minRole: 'owner', stepUp: true },
+  ),
+  operation(
+    'sso.verify_domain',
+    'sensitive',
+    'org',
+    'Check the DNS record that proves this organization owns the domain',
+    obj({ providerId: z.string().min(1).max(200) }),
+    { minRole: 'admin' },
+  ),
+  operation(
+    'sso.disconnect',
+    'sensitive',
+    'org',
+    'Stop accepting sign-ins through an identity provider',
+    obj({ providerId: z.string().min(1).max(200) }),
+    { minRole: 'owner', stepUp: true },
   ),
   // GitLab and Bitbucket have no app to install: they take an access token
   // the person makes themselves, which is why connecting them is one call

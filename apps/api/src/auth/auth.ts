@@ -13,6 +13,7 @@ import {
 } from 'better-auth/plugins/organization/access';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { createHooks } from './hooks.js';
+import { ssoPlugin } from './sso.js';
 import type { Mailer } from './mailer.js';
 import { hashPassword, verifyPassword } from './password.js';
 
@@ -35,6 +36,7 @@ const MODEL_ID_KIND: Readonly<Record<string, IdKind>> = {
   passkey: 'passkey',
   apikey: 'apiKey',
   rateLimit: 'rateLimit',
+  ssoProvider: 'ssoProvider',
 };
 
 /** Every auth record gets a prefixed id like every other VDeploy record. */
@@ -149,6 +151,7 @@ export function createAuth(deps: AuthDeps) {
       defaultCookieAttributes: { httpOnly: true, sameSite: 'lax', secure: deps.production },
     },
     plugins: [
+      ssoPlugin({ db: deps.db }),
       organization({
         ac,
         roles,
