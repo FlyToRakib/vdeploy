@@ -76,12 +76,37 @@ function cookieHeader() {
   return [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
-/** Runs a shell command on the testbed host: the local machine or the VPS. */
+/**
+ * Runs a shell command on the testbed host: the local machine or the VPS.
+ *
+ * A VPS run opens one SSH connection per command, and a full run is
+ * hundreds of them — enough that sshd starts refusing, which ends the run
+ * with "Permission denied" somewhere in the middle and nothing to do with
+ * what was being tested. Multiplexing would be the real answer and
+ * Win32 OpenSSH has no ControlPath, so a refused *connection* is waited
+ * out instead. Only ssh's own failures (255) are retried: the remote
+ * command's own exit code is passed through untouched, because a command
+ * that failed is the answer, not a thing to try again.
+ */
 function onHost(command, input) {
-  const [bin, args] = vps
-    ? ['ssh', ['-C', '-o', 'BatchMode=yes', sshTarget, command]]
-    : ['sh', ['-c', command]];
-  return execFileSync(bin, args, { encoding: 'utf8', input, maxBuffer: 64 << 20 }).trim();
+  if (!vps) {
+    return execFileSync('sh', ['-c', command], {
+      encoding: 'utf8',
+      input,
+      maxBuffer: 64 << 20,
+    }).trim();
+  }
+  const args = ['-C', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', sshTarget, command];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return execFileSync('ssh', args, { encoding: 'utf8', input, maxBuffer: 64 << 20 }).trim();
+    } catch (error) {
+      if (error.status !== 255 || attempt >= 5) throw error;
+      // 2s, 4s, 8s… — long enough for a rate limit to forget us, short
+      // enough that a genuinely broken key still fails within a minute.
+      execFileSync('sh', ['-c', `sleep ${String(2 ** (attempt + 1))}`]);
+    }
+  }
 }
 
 /** Runs a shell command inside a testbed (where the inner Docker lives). */

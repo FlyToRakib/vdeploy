@@ -35,13 +35,39 @@ const REMOTE = [
   'echo "@disk"; df -P / | awk \'NR==2 {print $5}\'',
 ].join('; ');
 
+/**
+ * Reads the machine, waiting out a refused connection.
+ *
+ * This runs last, after a run that has opened hundreds of SSH
+ * connections — which is exactly when sshd starts refusing them. A
+ * check that *could not run* must never be mistaken for a check that
+ * *failed*, so the two are told apart here and said differently below.
+ */
 function capture() {
   const env = readEnv();
-  const raw = execFileSync(
-    'ssh',
-    ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', `${env.VPS_USER}@${env.VPS_HOST}`, REMOTE],
-    { encoding: 'utf8', timeout: 60_000 },
-  );
+  const args = [
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ConnectTimeout=15',
+    `${env.VPS_USER}@${env.VPS_HOST}`,
+    REMOTE,
+  ];
+  let raw;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      raw = execFileSync('ssh', args, { encoding: 'utf8', timeout: 60_000 });
+      break;
+    } catch (error) {
+      if (attempt >= 5) {
+        console.error('BASELINE NOT CHECKED — the machine could not be reached:');
+        console.error(`  ${String(error.stderr ?? error.message).trim()}`);
+        console.error('  This is not a report that anything changed. Run it again.');
+        process.exit(2);
+      }
+      execFileSync('sh', ['-c', `sleep ${String(2 ** (attempt + 1))}`]);
+    }
+  }
   const sections = {};
   let current = '';
   for (const line of raw.split('\n')) {

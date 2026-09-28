@@ -3,7 +3,7 @@
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
 **Task:** M6 — 54 checks locally, 42 on the VPS including all five M6 ones
 **Status:** in progress
-**Updated:** 2026-09-30 08:15 UTC
+**Updated:** 2026-09-30 09:10 UTC
 
 ## M6 — the ecosystem
 
@@ -523,6 +523,20 @@ GitHub.
   re-confirmed this time is the four multi-server checks M5 already
   passed there — placement, the builder, the mesh and the edge — which
   come after the point it stopped
+- [x] **a run that opens hundreds of SSH connections survives being
+  throttled for it** — the VPS run above did not stop because anything
+  was wrong with VDeploy; it stopped because a harness that opens one
+  connection per command eventually gets refused by the host's own rate
+  limit. Multiplexing is the real answer and Win32 OpenSSH has no
+  `ControlPath`, so a refused *connection* is waited out instead: only
+  ssh's own failure (255) is retried, 2s to 32s, and the remote
+  command's exit code is passed through untouched, because a command
+  that failed is the answer rather than something to try again. The
+  baseline check gets the same treatment and one thing more — when it
+  runs out of retries it says **BASELINE NOT CHECKED** and exits 2,
+  distinct from BASELINE CHANGED and exit 1. A check that could not run
+  must never read as a report that something changed on a machine whose
+  other thirteen containers are somebody's production
 - [x] the M6 exit, locally — **54 checks passed**, including the restore
   drill, on two machines. The e2e gains five checks for what M6 added — a preview of a pull request that builds, runs and is then taken away whole; a staging copy following its own branch; a promote that leaves production running **the image staging ran**; and an integration key that does the one thing it was allowed and is refused everything else its role would permit. **Two real bugs, both only findable by running it.** Ticking "build a preview for every pull request" rebuilt the app from source and replaced its containers, because every spec edit pins a release and deploys — and that edit changes nothing about the running app. And the first promote on a real server was **refused by the agent, correctly**: ADR 0008 says an agent runs a local image id only if its own records say it built those bytes *for that project*, and promotion hands production an image built for the staging copy. The rule is narrowed rather than relaxed (ADR 0021 addendum), the way ADR 0017 narrowed it for images crossing servers
 - The M6 exit: the e2e on two machines again, with what M6 added —
