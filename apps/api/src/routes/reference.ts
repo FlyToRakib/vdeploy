@@ -155,7 +155,7 @@ export function openApiDocument(publicUrl: string): Record<string, unknown> {
         '',
         '## Authenticating',
         '',
-        'Send an API key as `Authorization: Bearer <key>`. Make one in the',
+        'Send an API key in an `x-api-key` header. Make one in the',
         'dashboard under Security, or with `api_key.create` while signed in.',
         'A key carries a scope — read-only keys cannot reach anything that',
         'changes.',
@@ -178,7 +178,12 @@ export function openApiDocument(publicUrl: string): Record<string, unknown> {
     servers: [{ url: new URL(publicUrl).origin }],
     components: {
       securitySchemes: {
-        apiKey: { type: 'http', scheme: 'bearer', description: 'An API key from the dashboard.' },
+        apiKey: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-api-key',
+          description: 'An API key from the dashboard, under Security.',
+        },
         session: {
           type: 'apiKey',
           in: 'cookie',
