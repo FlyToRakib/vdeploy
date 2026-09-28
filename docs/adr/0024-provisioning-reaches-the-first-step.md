@@ -53,6 +53,20 @@ Three consequences fall out of the same choice:
   somebody's machines as a side effect of tidying up a token is not a
   thing to be clever about.
 
+## Asking for a machine is a person's job
+
+`server.provision` is **tier 4**, like `server.add` beside it — which only
+adds a machine somebody already has and already pays for. Asking a
+provider for a new one starts a monthly bill, and the AI's spend cap
+(§8 L7) counts tokens: nothing in the grant matrix counts money that is
+not tokens. "Costs money every month" is therefore a blast radius the
+matrix has no answer for, and the honest place to stop it is where every
+other money-shaped decision stops.
+
+It was tier 2 first. Reading the catalog against itself — free
+`server.add` at tier 4, billable `server.provision` at tier 2 — is what
+made that obvious.
+
 ## Three providers, one file
 
 Each provider's shapes live beside each other in `clouds.ts` because the

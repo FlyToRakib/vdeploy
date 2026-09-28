@@ -84,6 +84,17 @@ also not this repository, and is treated the same way.
   app's credentials. On a private repository that is the same set of
   people who could already deploy.
 
+## Turning them on does not restart the app
+
+Every other spec edit pins a release and deploys, because every other
+spec edit changes how the app runs. This one describes what happens to
+*other* projects when a pull request is opened: nothing about the running
+container changes and the agent does nothing with it, so the plan writes
+the spec and stops, and says downtime: none.
+
+That was not the first spelling. Watching the e2e tick the box and then
+rebuild the app from source is how it became this one.
+
 ## Two things it gets right
 
 **Closing a preview is not deleting an app.** `project.delete` is tier 3
