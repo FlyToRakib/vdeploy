@@ -13,6 +13,7 @@ import {
   BuildServerSection,
   ServerSection,
   SettingsSection,
+  StagingSection,
   SizeSection,
   StorageSection,
 } from './sections';
@@ -135,6 +136,7 @@ export function ProjectConfig() {
       <SizeSection />
       <StorageSection />
       <ScheduleSection />
+      <StagingSection />
       <PreviewsSection />
       <ServerSection />
       <BuildServerSection />

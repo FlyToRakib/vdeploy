@@ -18,6 +18,7 @@ export * from './webhook.js';
 export * from './github.js';
 export * from './previews.js';
 export * from './sources.js';
+export * from './staging.js';
 export * from './project-status.js';
 export * from './templates.js';
 export * from './compose.js';

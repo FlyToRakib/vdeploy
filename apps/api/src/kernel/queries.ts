@@ -37,7 +37,7 @@ import { DATABASE_QUERIES } from './database-queries.js';
 import { drainPlan } from './reclaim.js';
 import { OFFSITE_QUERIES } from './offsite.js';
 import { GITHUB_QUERIES } from './github.js';
-import { PREVIEW_QUERIES } from './previews.js';
+import { PREVIEW_QUERIES, STAGING_QUERIES } from './previews.js';
 import { SOURCE_QUERIES } from './sources.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
 import type { Handler } from './context.js';
@@ -69,6 +69,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
   ...NOTIFICATION_QUERIES,
   ...GITHUB_QUERIES,
   ...PREVIEW_QUERIES,
+  ...STAGING_QUERIES,
   ...SOURCE_QUERIES,
   'project.list': async ({ deps, actor }) => projectSummaries(deps.db, actor.orgId),
   'project.get': async ({ deps, args }) => {

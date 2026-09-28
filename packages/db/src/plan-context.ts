@@ -9,6 +9,7 @@ import {
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
 import { getBackup, getDatabase, linksOf } from './databases.js';
+import { stagingFor } from './staging.js';
 import {
   databaseLinks,
   databases,
@@ -25,6 +26,8 @@ export interface ProjectSnapshot {
   running: boolean;
   /** The app this one previews, when it is a preview (§26 M6). */
   previewOf: Id<'project'> | null;
+  /** The app this one is the staging copy of (§26 M6). */
+  stagingOf: Id<'project'> | null;
 }
 
 export interface PlanWorld {
@@ -36,6 +39,13 @@ export interface PlanWorld {
   targetBackup?: { id: Id<'backup'>; kind: 'dump' | 'volumes'; databaseId: Id<'database'> | null };
   /** Every server a new app could go on, when nobody named one. */
   candidates?: Candidate[];
+  /** The staging copy of the project in focus (§26 M6). */
+  staging?: {
+    id: Id<'project'>;
+    name: string;
+    currentReleaseId: Id<'release'> | null;
+    image: string | null;
+  } | null;
   server?: ServerBudget | null;
   unsaved?: string[];
 }
@@ -207,12 +217,15 @@ export async function loadPlanWorld(
     ...(database ? { database: database.state } : {}),
     // What this app reads its data from: a deploy copies it first (§17.4).
     linkedDatabases: await linkedDatabases(db, projectId),
+    // Its staging copy: promoting reads it, and making one refuses over it.
+    staging: (await stagingFor(db, projectId)) as NonNullable<PlanWorld['staging']> | null,
     project: {
       id: row.id as Id<'project'>,
       spec: readSpec(row.spec),
       currentReleaseId: row.currentReleaseId as Id<'release'> | null,
       running: row.running,
       previewOf: row.previewOf as Id<'project'> | null,
+      stagingOf: row.stagingOf as Id<'project'> | null,
     },
     // The server the plan is *about*. For everything but a move that is
     // the one the app is on; a move names another, and checking the app

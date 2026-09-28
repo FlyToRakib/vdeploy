@@ -138,6 +138,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'backup.restore': { backupId: newId('backup') },
   'git.connect': { provider: 'github' },
   'preview.configure': { preview: { enabled: true } },
+  'staging.create': { branch: 'develop' },
   'preview.open': {
     pullRequest: {
       provider: 'github',

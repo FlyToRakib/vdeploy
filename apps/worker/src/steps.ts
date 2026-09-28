@@ -24,12 +24,14 @@ import {
   readHead,
   SECTION_EDITS,
   specAfter,
+  withCopiedSecrets,
   tarballPath,
   type GithubAppConfig,
 } from '@vdeploy/core';
 import {
   abandonBuild,
   connectionFor,
+  listSecrets,
   secretsOwner,
   currentSecretVersions,
   diagnoseProject,
@@ -184,6 +186,7 @@ const SPEC_EDITS = new Set([
   'cron.update',
   'cron.delete',
   'preview.open',
+  'staging.create',
   ...SECTION_EDITS,
 ]);
 
@@ -191,7 +194,7 @@ async function updateSpec(
   deps: StepDeps,
   state: ApplyState,
   placed?: string,
-  preview?: { of: Id<'project'>; ref: PreviewRef },
+  derived?: { previewOf?: Id<'project'>; ref?: PreviewRef; stagingOf?: Id<'project'> },
 ) {
   if (!SPEC_EDITS.has(state.operation)) {
     throw new VDeployError('internal', `${state.operation} does not change the spec`);
@@ -213,11 +216,11 @@ async function updateSpec(
       'A new project has no secrets yet; create it first, then add its secrets',
     );
   }
-  if (state.projectId === null || preview) {
+  if (state.projectId === null || derived) {
     const id = newId('project');
-    // A preview runs beside the app it previews: the same machine, so
+    // A copy runs beside the app it was made from: the same machine, so
     // nothing it is allowed to reach has to cross one.
-    const serverId = preview ? (row?.serverId ?? null) : null;
+    const serverId = derived ? (row?.serverId ?? null) : null;
     const chosen = serverId ?? (await chooseServer(deps, state, spec, placed));
     await deps.db.transaction(async (tx) => {
       await tx.insert(projects).values({
@@ -227,11 +230,12 @@ async function updateSpec(
         name: spec.metadata.name,
         spec,
         specHash: hashOf(spec),
-        ...(preview ? { previewOf: preview.of, previewRef: preview.ref } : {}),
+        ...(derived?.previewOf ? { previewOf: derived.previewOf, previewRef: derived.ref } : {}),
+        ...(derived?.stagingOf ? { stagingOf: derived.stagingOf } : {}),
       });
       await refreshInstantHosts(tx, { orgId: state.orgId, projectId: id });
     });
-    // Everything after this step acts on the preview, not on the app.
+    // Everything after this step acts on the copy, not on the app.
     state.projectId = id;
     return;
   }
@@ -470,6 +474,81 @@ async function storeArchive(deps: StepDeps, state: ApplyState, res: Response): P
     createdBy: state.actor,
   });
   return id;
+}
+
+/**
+ * Gives this project its own copies of another's secrets (§26 M6).
+ *
+ * A staging copy owns its keys so that they can be replaced with the test
+ * ones; a preview reads the app's instead and never runs this. The values
+ * are read and written inside one transaction and never leave it — the
+ * spec that comes out names new ids and no values at all.
+ */
+async function copySecrets(deps: StepDeps, state: ApplyState, from: string) {
+  const row = await project(deps, state);
+  await deps.db.transaction(async (tx) => {
+    const copies = new Map<string, string>();
+    for (const secret of await listSecrets(tx, from)) {
+      const { value } = await readSecret(tx, deps.secretsKey, from, secret.id);
+      const made = await putSecret(tx, deps.secretsKey, {
+        orgId: state.orgId,
+        projectId: row.id,
+        name: secret.name,
+        value,
+        actor: state.actor,
+        generated: secret.generated,
+      });
+      copies.set(secret.id, made.secretId);
+    }
+    if (copies.size === 0) return;
+    const spec = withCopiedSecrets(row.spec, copies);
+    await tx
+      .update(projects)
+      .set({ spec, specHash: hashOf(spec), updatedAt: deps.now() })
+      .where(eq(projects.id, row.id));
+  });
+}
+
+/**
+ * Runs here exactly the image another project has been running (ADR 0021).
+ *
+ * The image, not the commit: rebuilding the same commit produces a
+ * different artifact, and "it worked in staging" would stop meaning
+ * anything. Everything else about this release is this project's own —
+ * its spec, its domains, its keys — because what is being promoted is
+ * what staging proved, not how staging is configured.
+ */
+async function promoteRelease(deps: StepDeps, state: ApplyState, from: string) {
+  const row = await project(deps, state);
+  const [source] = await deps.db
+    .select({ image: releases.image, buildId: releases.buildId, version: releases.version })
+    .from(releases)
+    .innerJoin(projects, eq(projects.currentReleaseId, releases.id))
+    .where(eq(projects.id, from));
+  if (!source?.image) {
+    throw new VDeployError('conflict', 'That copy has not deployed anything yet');
+  }
+  const [latest] = await deps.db
+    .select({ version: releases.version })
+    .from(releases)
+    .where(eq(releases.projectId, row.id))
+    .orderBy(desc(releases.version))
+    .limit(1);
+  const release = createRelease({
+    projectId: row.id as Id<'project'>,
+    version: (latest?.version ?? 0) + 1,
+    spec: row.spec,
+    image: source.image,
+    secretVersions: await pinSecrets(deps, secretsOwner(row), row.spec),
+    now: deps.now(),
+  });
+  await deps.db.insert(releases).values({
+    ...release,
+    ...(source.buildId ? { buildId: source.buildId } : {}),
+    createdAt: new Date(release.createdAt),
+  });
+  state.releaseId = release.id;
+  state.notes.push(`Promoting what has been running in staging (${source.image}).`);
 }
 
 /** How the agent builds each spec strategy (ADR 0008); the rest are not built yet. */
@@ -748,10 +827,18 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
         deps,
         state,
         step.server,
-        step.previewOf && step.previewRef
-          ? { of: step.previewOf, ref: step.previewRef }
+        step.previewOf || step.stagingOf
+          ? {
+              ...(step.previewOf ? { previewOf: step.previewOf } : {}),
+              ...(step.previewRef ? { ref: step.previewRef } : {}),
+              ...(step.stagingOf ? { stagingOf: step.stagingOf } : {}),
+            }
           : undefined,
       );
+    case 'copy_secrets':
+      return copySecrets(deps, state, step.from);
+    case 'promote_release':
+      return promoteRelease(deps, state, step.from);
     case 'create_release':
       return newRelease(deps, state);
     case 'activate_release':

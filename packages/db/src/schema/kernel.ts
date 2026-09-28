@@ -120,6 +120,12 @@ export const projects = pgTable(
     previewOf: text('preview_of'),
     /** Which pull request it belongs to; null unless previewOf is set. */
     previewRef: jsonb('preview_ref').$type<PreviewRef>(),
+    /**
+     * The app this one is the staging copy of (§26 M6, ADR 0021).
+     * Unlike a preview, it owns its own secrets and keeps its own data —
+     * what the link is for is promoting what it has tested.
+     */
+    stagingOf: text('staging_of'),
     /** Flagged folders a person marked as only temporary (§17.2). */
     ignoredPaths: jsonb('ignored_paths').$type<string[]>().notNull().default([]),
     createdAt: createdAt(),

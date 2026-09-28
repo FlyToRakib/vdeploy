@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — next: a staging environment
+**Task:** M6 — next: SSO/SAML
 **Status:** in progress
-**Updated:** 2026-09-29 23:10 UTC
+**Updated:** 2026-09-30 01:20 UTC
 
 ## M6 — the ecosystem
 
@@ -97,6 +97,23 @@ kind of model, and a second and third place source can come from.
   that reads a managed database is refused in words, because a preview
   pointed at the real one would run the pull request's migrations against
   production data
+
+- [x] **a staging environment, and promoting from it** (ADR 0021) — the
+  same idea as a preview, arranged the other way round on the two
+  questions that matter, because it is a different thing for a different
+  job. A preview is disposable and reads the app's secrets; staging is
+  permanent, **keeps its data**, and gets **copies of the keys it owns**,
+  because the whole point of a staging environment is that its keys are
+  the test ones and a copy can be changed where a reference cannot. It
+  starts as a copy rather than empty: VDeploy cannot know which keys must
+  differ, and the alternative is an environment that fails its first
+  deploy on a missing setting. Promoting runs in production **exactly the
+  image staging has been running** — the same bytes, not a rebuild of the
+  same commit, because a rebuild is a different artifact and "it worked in
+  staging" would stop meaning anything, which is the entire value being
+  bought. Everything else about that release is production's own: its
+  spec, its domains, its size, its keys. One staging copy per app, because
+  a second would mean deciding which one the word meant
 
 Four bugs, all found by using the thing rather than by a test:
 
@@ -434,8 +451,8 @@ GitHub.
 
 ## Next
 
-- M6, in order: a staging environment, SSO/SAML, a plugin system, and
-  servers VDeploy provisions itself (Hetzner, DigitalOcean, Vultr)
+- M6, in order: SSO/SAML, a plugin system, and servers VDeploy
+  provisions itself (Hetzner, DigitalOcean, Vultr)
 
 ## Known gaps (tracked, not forgotten)
 
@@ -456,6 +473,12 @@ GitHub.
   the webhook's answer and the dashboard carry the outcome. The previews
   panel on a project's Config screen has not been opened in a browser; its
   data path is covered by the API and worker tests.
+- Staging: a copy is placed on the app's machine, which is what makes
+  promoting an image work without moving it; staging elsewhere needs the
+  transfer that moving an app already uses. Copied secrets do not track
+  the app's afterwards, which is the point but is said only once. Staging
+  gets no database of its own. Its dashboard card has not been opened in a
+  browser; the apply path is covered by the worker tests.
 - Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
@@ -470,6 +493,7 @@ GitHub.
 
 ## Decisions made
 
+- 2026-09-29 Staging owns its keys, and promoting moves the image — docs/adr/0021-staging-promotes-an-image.md
 - 2026-09-29 A preview is a project, and it reads the app's secrets — docs/adr/0020-a-preview-is-a-project.md
 - 2026-09-29 GitLab and Bitbucket connect with a token, not an app — docs/adr/0019-gitlab-and-bitbucket-by-token.md
 - 2026-09-27 The firewall is read, never written — docs/adr/0016-firewall-read-only.md

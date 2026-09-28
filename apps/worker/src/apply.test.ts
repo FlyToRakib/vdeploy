@@ -15,6 +15,7 @@ import {
   createChannel,
   deleteChannel,
   linkInstallation,
+  listSecrets,
   listDeliveries,
   unlinkInstallation,
   finishBuild,
@@ -849,5 +850,119 @@ describe('previews', () => {
   it('refuses to close an app that is not a preview', async () => {
     const { app } = await previewable();
     await expect(plan('preview.close', { projectId: app.id })).rejects.toThrow(/is an app/);
+  });
+});
+
+describe('staging', () => {
+  beforeEach(() => {
+    deps.fetch = () =>
+      Promise.resolve(new Response(new Uint8Array([0x1f, 0x8b, 1, 2]), { status: 200 }));
+  });
+  afterEach(() => {
+    delete deps.fetch;
+  });
+
+  /** An app that deploys from a branch, with one secret and one folder. */
+  async function withStaging() {
+    const created = await createProject();
+    const secret = await t.db.transaction((tx) =>
+      putSecret(tx, SECRETS, {
+        orgId,
+        projectId: created.id,
+        name: 'stripe_key',
+        value: 'sk_live_the_real_one',
+        actor: { userId, origin: 'dashboard' },
+      }),
+    );
+    const next = spec({
+      source: { type: 'git', provider: 'github', repo: 'acme/blog', branch: 'main' },
+      build: { strategy: 'dockerfile' },
+      network: { containerPort: 3000, domains: [{ host: 'blog.example.com' }] },
+      runtime: {
+        env: [{ key: 'STRIPE_KEY', secretRef: secret.secretId }],
+        volumes: [{ name: 'uploads', mountPath: '/app/uploads' }],
+      },
+    });
+    await t.db
+      .update(projects)
+      .set({ spec: next, specHash: 'c'.repeat(64) })
+      .where(eq(projects.id, created.id));
+    const made = await plan('staging.create', { projectId: created.id, branch: 'develop' });
+    expect(await applyPlan(deps, made.id)).toBe('applied');
+    const [staging] = await t.db.select().from(projects).where(eq(projects.stagingOf, created.id));
+    return { app: created, staging: staging!, secretId: secret.secretId };
+  }
+
+  it('gives the copy its own keys, so the test ones can replace them', async () => {
+    const { app, staging, secretId } = await withStaging();
+    expect(staging.name).toBe('blog-staging');
+    expect(staging.spec.source).toMatchObject({ branch: 'develop' });
+    // Its own folder stays: staging is an environment, not a preview.
+    expect(staging.spec.runtime.volumes).toHaveLength(1);
+
+    const copies = await listSecrets(t.db, staging.id);
+    expect(copies).toMatchObject([{ name: 'stripe_key' }]);
+    expect(copies[0]?.id).not.toBe(secretId);
+    // The spec points at the copy, not at the app's.
+    expect(staging.spec.runtime.env).toEqual([{ key: 'STRIPE_KEY', secretRef: copies[0]?.id }]);
+    // And it is the same value, so it works the first time.
+    const copied = await readSecret(t.db, SECRETS, staging.id, copies[0]!.id);
+    expect(copied.value).toBe('sk_live_the_real_one');
+
+    // Changing staging's key leaves the app's alone: that is the point.
+    await t.db.transaction((tx) =>
+      putSecret(tx, SECRETS, {
+        orgId,
+        projectId: staging.id,
+        name: 'stripe_key',
+        value: 'sk_test_the_other_one',
+        actor: { userId, origin: 'dashboard' },
+      }),
+    );
+    expect((await readSecret(t.db, SECRETS, app.id, secretId)).value).toBe('sk_live_the_real_one');
+  });
+
+  it('refuses a second staging copy, and a copy of a copy', async () => {
+    const { app, staging } = await withStaging();
+    await expect(plan('staging.create', { projectId: app.id, branch: 'other' })).rejects.toThrow(
+      /already has a staging copy/,
+    );
+    await expect(
+      plan('staging.create', { projectId: staging.id, branch: 'other' }),
+    ).rejects.toThrow(/already a copy/);
+  });
+
+  it('promotes the image staging ran, not a rebuild of the same commit', async () => {
+    const { app, staging } = await withStaging();
+    const [ran] = await t.db
+      .select()
+      .from(releases)
+      .where(eq(releases.projectId, staging.id))
+      .orderBy(desc(releases.version))
+      .limit(1);
+    expect(ran?.image).toBeTruthy();
+
+    const promote = await plan('staging.promote', { projectId: app.id });
+    expect(await applyPlan(deps, promote.id)).toBe('applied');
+
+    const [now] = await t.db
+      .select()
+      .from(releases)
+      .where(eq(releases.projectId, app.id))
+      .orderBy(desc(releases.version))
+      .limit(1);
+    // The same bytes staging proved.
+    expect(now?.image).toBe(ran?.image);
+    // Under production's own spec: its domain is still its own.
+    expect(now?.spec.network?.domains).toMatchObject([{ host: 'blog.example.com' }]);
+    const [after] = await t.db.select().from(projects).where(eq(projects.id, app.id));
+    expect(after?.currentReleaseId).toBe(now?.id);
+  });
+
+  it('will not promote from an app with no staging copy', async () => {
+    const created = await createProject();
+    await expect(plan('staging.promote', { projectId: created.id })).rejects.toThrow(
+      /no staging copy/,
+    );
   });
 });

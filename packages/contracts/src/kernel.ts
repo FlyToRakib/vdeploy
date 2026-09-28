@@ -61,8 +61,26 @@ export const PlanStep = z.discriminatedUnion('kind', [
      */
     previewOf: idSchema('project').optional(),
     previewRef: PreviewRef.optional(),
+    /**
+     * The app this project is the staging copy of (§26 M6). Like
+     * `previewOf` it tells the apply to insert a row rather than write
+     * over the app; unlike it, the new project owns its own secrets.
+     */
+    stagingOf: idSchema('project').optional(),
   }),
   z.strictObject({ kind: z.literal('create_release') }),
+  /**
+   * Gives a new project its own copies of another's secrets (§26 M6). A
+   * staging copy owns its keys so that they can be the test ones; a
+   * preview reads the app's instead, and never has this step.
+   */
+  z.strictObject({ kind: z.literal('copy_secrets'), from: idSchema('project') }),
+  /**
+   * Runs in this project exactly the image another has been running
+   * (ADR 0021) — the same bytes, already built and already tested, not a
+   * rebuild of the same commit that could differ.
+   */
+  z.strictObject({ kind: z.literal('promote_release'), from: idSchema('project') }),
   z.strictObject({
     kind: z.literal('deploy'),
     strategy: z.enum(['blueGreen', 'canary', 'rolling', 'recreate']),

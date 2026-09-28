@@ -884,3 +884,96 @@ export function PreviewsSection() {
     </Section>
   );
 }
+
+interface StagingAnswer {
+  staging: {
+    id: string;
+    name: string;
+    branch: string | null;
+    running: boolean;
+    url: string | null;
+  } | null;
+  promotable?: boolean;
+}
+
+/**
+ * A staging copy of this app (§26 M6, ADR 0021).
+ *
+ * It is made from the app and starts as a copy — its keys included, so
+ * that it works the first time — and then diverges: its own secrets, its
+ * own data, its own address. Promoting runs in production exactly the
+ * image staging has been running, not a rebuild of the same commit.
+ */
+export function StagingSection() {
+  const { projectId, act } = useProject();
+  const spec = useSpec();
+  const [answer, setAnswer] = useState<StagingAnswer | null>(null);
+
+  useEffect(() => {
+    void query<StagingAnswer>('staging.get', { projectId }).then(setAnswer, () => {
+      setAnswer({ staging: null });
+    });
+  }, [projectId, spec]);
+
+  if (spec.source?.type !== 'git') return null;
+  const staging = answer?.staging;
+  return (
+    <Section
+      title="Staging"
+      hint="A copy of this app following another branch, with its own settings and its own data."
+    >
+      {answer === null && <Skeleton className="h-10" />}
+      {answer !== null && !staging && (
+        <form
+          className="grid gap-3"
+          action={(form) => {
+            void act(
+              'staging.create',
+              { projectId, branch: formText(form, 'branch').trim() },
+              'Making a staging copy',
+            );
+          }}
+        >
+          <Field
+            label="Branch it follows"
+            name="branch"
+            defaultValue="develop"
+            required
+            hint="It starts as a copy of this app, keys included, so it works straight away. Replace the ones that must differ."
+          />
+          <Button type="submit" className="justify-self-start">
+            Make a staging copy
+          </Button>
+        </form>
+      )}
+      {staging && (
+        <div className="grid gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{staging.name}</span>
+            {staging.branch && <span className="text-muted-foreground">{staging.branch}</span>}
+            <Status health={staging.running ? 'healthy' : 'warning'}>
+              {staging.running ? 'Running' : 'Stopped'}
+            </Status>
+            {staging.url && (
+              <a className="text-accent underline" href={staging.url}>
+                Open
+              </a>
+            )}
+          </div>
+          <p className="text-muted-foreground">
+            {answer.promotable
+              ? 'Staging is running something this app is not. Promoting runs exactly that here — the same build, not a new one.'
+              : 'This app is already running what staging is running.'}
+          </p>
+          <Button
+            className="justify-self-start"
+            disabled={!answer.promotable}
+            onClick={() => void act('staging.promote', { projectId }, `Promoting ${staging.name}`)}
+          >
+            Promote to production
+          </Button>
+        </div>
+      )}
+    </Section>
+  );
+}

@@ -18,6 +18,7 @@ export * from './fronting.js';
 export * from './mesh.js';
 export * from './previews.js';
 export * from './sources.js';
+export * from './staging.js';
 export * from './transfers.js';
 export * from './uptime.js';
 export * from './backup-targets.js';

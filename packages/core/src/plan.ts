@@ -20,6 +20,7 @@ import { describeCron } from './cron.js';
 import { defaultEnvKey, engineProfile } from './databases.js';
 import type { SectionEdit } from './spec-edit.js';
 import { place, type Candidate } from './placement.js';
+import { promotionRefusal } from './staging.js';
 import { templateSecrets } from './templates.js';
 import { checkFits, footprint, type ServerBudget } from './governor.js';
 import { maxTier } from './risk.js';
@@ -30,6 +31,8 @@ export interface ProjectState {
   spec: ApplicationSpec;
   /** The app this one previews, when it is a preview (§26 M6). */
   previewOf?: Id<'project'> | null;
+  /** The app this one is the staging copy of (§26 M6). */
+  stagingOf?: Id<'project'> | null;
   currentReleaseId: Id<'release'> | null;
   /** False while stopped: a stopped project holds no capacity. */
   running?: boolean;
@@ -80,6 +83,13 @@ export interface PlanContext {
    * the plan records where the app is going and the governor checks that
    * server rather than no server at all.
    */
+  /** The staging copy of the project in focus, when it has one (§26 M6). */
+  staging?: {
+    id: Id<'project'>;
+    name: string;
+    currentReleaseId: Id<'release'> | null;
+    image: string | null;
+  } | null;
   candidates?: Candidate[];
   /**
    * Folders where the running app wrote files outside its permanent folders,
@@ -373,6 +383,83 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       steps: [{ kind: 'delete_project', keepData: false }],
       tier: 'sensitive',
       blastRadius: radius(preview.spec, { downtime: 'permanent', dataAtRisk: [] }),
+    };
+  },
+  /**
+   * A staging copy (ADR 0021), derived like a preview and arranged the
+   * other way round: it keeps its data and its domains-to-be, and it is
+   * given **copies** of the app's secrets rather than a reference to
+   * them, because the point of a staging environment is that its keys can
+   * be the test ones.
+   */
+  'staging.create': (args, context) => {
+    const parent = requireProject(context);
+    if (parent.previewOf || parent.stagingOf) {
+      throw new VDeployError('conflict', 'This is already a copy of another app');
+    }
+    if (context.staging) {
+      throw new VDeployError(
+        'conflict',
+        `${parent.spec.metadata.name} already has a staging copy; change the branch it follows instead`,
+      );
+    }
+    const spec = specAfter('staging.create', args, parent.spec);
+    const draft = specChange(null, spec, 'sensitive', context);
+    const steps: PlanStep[] = [];
+    for (const step of draft.steps) {
+      if (step.kind === 'update_spec') {
+        steps.push({
+          ...step,
+          stagingOf: parent.id,
+          ...(spec.placement.server ? { server: spec.placement.server } : {}),
+        });
+        // Between writing the spec and pinning the release, so the first
+        // version already runs against its own keys rather than the app's.
+        steps.push({ kind: 'copy_secrets', from: parent.id });
+      } else {
+        steps.push(step);
+      }
+    }
+    return { ...draft, steps };
+  },
+  /**
+   * The same image, not the same commit built again (ADR 0021).
+   *
+   * Production keeps its own spec — its domains, its size, its keys — and
+   * takes only what staging proved: the bytes. A rebuild of the same
+   * commit is a different artifact, and "it worked in staging" would stop
+   * meaning anything.
+   */
+  'staging.promote': (_args, context) => {
+    const app = requireProject(context);
+    const staging = context.staging;
+    if (!staging) {
+      throw new VDeployError(
+        'not_found',
+        `${app.spec.metadata.name} has no staging copy to promote from`,
+      );
+    }
+    const refusal = promotionRefusal({
+      name: staging.name,
+      currentReleaseId: staging.currentReleaseId,
+      image: staging.image,
+    });
+    if (refusal) throw new VDeployError('conflict', refusal);
+    return {
+      specHash: null,
+      changes: [
+        { path: 'release.image', before: app.spec.source.type, after: `from ${staging.name}` },
+      ],
+      steps: [
+        { kind: 'promote_release', from: staging.id },
+        { kind: 'deploy', strategy: app.spec.deploy.strategy },
+      ],
+      tier: 'sensitive',
+      blastRadius: radius(app.spec, {
+        downtime: app.spec.deploy.strategy === 'recreate' ? 'brief' : 'none',
+        dataAtRisk: [],
+        rollbackTo: app.currentReleaseId,
+      }),
     };
   },
   'project.update_spec': (args, context) => {

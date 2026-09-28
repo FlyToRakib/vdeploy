@@ -121,6 +121,13 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'staging.get',
+    'project',
+    'config',
+    'Show this app staging copy, what each of them is running, and whether they differ',
+    obj(P),
+  ),
+  query(
     'preview.list',
     'project',
     'config',
@@ -672,6 +679,25 @@ export const OPERATIONS = [
     // returns, which is the proof.
     obj({ provider: z.enum(['github']) }),
     { minRole: 'admin' },
+  ),
+  // A staging copy is made from the app, so the app is what it is scoped
+  // to — and promoting is scoped to the app as well, because production
+  // is the thing being changed.
+  operation(
+    'staging.create',
+    'sensitive',
+    'project',
+    'Make a staging copy of this app that follows another branch',
+    obj({ ...P, branch: z.string().min(1).max(255) }),
+    { minRole: 'admin' },
+  ),
+  operation(
+    'staging.promote',
+    'sensitive',
+    'project',
+    'Run in production exactly what staging has been running',
+    obj(P),
+    { minRole: 'admin', stepUp: true },
   ),
   operation(
     'preview.configure',
