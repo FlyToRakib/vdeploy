@@ -291,7 +291,17 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     const spec = named
       ? asDrafted
       : withServer(asDrafted, place(asDrafted, context.candidates ?? []));
-    const draft = specChange(null, spec, 'sensitive', context);
+    const drafted = specChange(null, spec, 'sensitive', context);
+    // Carried on the step so the apply uses the machine that was approved
+    // rather than choosing again.
+    const draft = {
+      ...drafted,
+      steps: drafted.steps.map((step) =>
+        step.kind === 'update_spec' && spec.placement.server
+          ? { ...step, server: spec.placement.server }
+          : step,
+      ),
+    };
     // A template may need settings only the server should ever know. They
     // are made once the project exists — between writing the spec and
     // pinning the release, so the first version already has them.

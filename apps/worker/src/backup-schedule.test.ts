@@ -225,7 +225,16 @@ describe('backups proved by putting them back', () => {
     await t.db.delete(verifications);
     await t.db
       .update(databases)
-      .set({ backupPolicy: policy(), verifiedAt: null, verifyCheckedAt: null })
+      .set({
+        backupPolicy: policy(),
+        verifiedAt: null,
+        verifyCheckedAt: null,
+        // When the database was made is where the clock starts, so it is
+        // pinned: left as the moment the test ran, whether a check is due
+        // at three in the morning depends on what time of day the suite
+        // happens to be run.
+        createdAt: new Date('2026-09-24T02:59:00Z'),
+      })
       .where(eq(databases.id, databaseId));
   });
 

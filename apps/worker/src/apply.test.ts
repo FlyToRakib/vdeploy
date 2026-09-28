@@ -157,7 +157,7 @@ async function plan(
   reasons: string[] = [],
 ) {
   const projectId = typeof args.projectId === 'string' ? args.projectId : null;
-  const built = buildPlan(operation, args, await loadPlanWorld(t.db, projectId, args));
+  const built = buildPlan(operation, args, await loadPlanWorld(t.db, projectId, args, orgId));
   const [row] = await t.db
     .insert(plans)
     .values({
@@ -207,6 +207,9 @@ beforeAll(async () => {
     name: 'server-01',
     status: 'online',
     agentPublicKey: 'x'.repeat(44),
+    // A connected server has told the control plane how big it is, and
+    // without that it is not somewhere anything can be placed.
+    capacity: { cpus: 4, memoryBytes: 8 * 1024 ** 3, diskBytes: 80 * 1024 ** 3 },
   });
   deps = {
     db: t.db,
@@ -234,6 +237,33 @@ afterAll(async () => {
 });
 
 describe('applyPlan', () => {
+  /*
+   * An app placed "wherever there is room" has to survive the second look.
+   *
+   * Applying re-plans from the world as it is now and refuses anything
+   * whose plan no longer matches, which is what stops a change made
+   * against a world that has moved. But the re-plan has to see the same
+   * world: without the organization the planner sees no servers to choose
+   * between, so every plan that chose one came back as a plan that could
+   * choose none, and went stale — every time, on the one path the feature
+   * exists for.
+   */
+  it('applies a plan that chose its own server, rather than calling it stale', async () => {
+    const row = await plan('project.create', {
+      spec: spec({ metadata: { name: 'unplaced' } }),
+    });
+    const outcome = await applyPlan(deps, row.id);
+    if (outcome !== 'applied') {
+      const [p2] = await t.db.select().from(plans).where(eq(plans.id, row.id));
+      throw new Error(outcome + ': ' + JSON.stringify(p2?.error));
+    }
+    const [placed] = await t.db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.name, 'unplaced'), isNull(projects.deletedAt)));
+    expect(placed?.serverId).toBe(serverId);
+  });
+
   it('creates, releases and deploys a new project, pinned by digest', async () => {
     const created = await createProject();
     const [release] = await t.db.select().from(releases).where(eq(releases.projectId, created.id));
@@ -382,10 +412,16 @@ describe('applyPlan', () => {
   it('refuses a project with nowhere to go before there is a plan at all', async () => {
     // It used to be caught at the last step of the apply, after the plan
     // existed and somebody had approved it. Placement moved it to the
-    // moment it is asked for, where the answer is also more useful.
+    // moment it is asked for, where the answer is also more useful: it
+    // says how much was wanted and what the roomiest machine had.
     await expect(
-      plan('project.create', { spec: spec({ metadata: { name: 'homeless' } }) }),
-    ).rejects.toThrow(/no servers yet/);
+      plan('project.create', {
+        spec: spec({
+          metadata: { name: 'homeless' },
+          runtime: { resources: { memory: { request: '64Gi', limit: '64Gi' } } },
+        }),
+      }),
+    ).rejects.toThrow(/no server has that free/);
   });
 });
 

@@ -134,10 +134,17 @@ async function converge(deps: StepDeps, spec: ApplicationSpec, expected: Expecta
   }
 }
 
-async function chooseServer(deps: StepDeps, state: ApplyState, spec: ApplicationSpec) {
-  // The planner already chose when nobody named one, and wrote it into
-  // the spec, so by here there is always an answer (§14).
-  const requested = state.args.serverId ?? spec.placement.server;
+async function chooseServer(
+  deps: StepDeps,
+  state: ApplyState,
+  spec: ApplicationSpec,
+  placed?: string,
+) {
+  // The planner already chose when nobody named one, and put it on the
+  // step, so by here there is always an answer (§14) — and it is the
+  // answer somebody approved, not one worked out again from a world that
+  // has moved on since.
+  const requested = state.args.serverId ?? spec.placement.server ?? placed;
   if (typeof requested !== 'string') {
     throw new VDeployError('invalid_input', 'Choose which server this project should run on');
   }
@@ -171,7 +178,7 @@ const SPEC_EDITS = new Set([
   ...SECTION_EDITS,
 ]);
 
-async function updateSpec(deps: StepDeps, state: ApplyState) {
+async function updateSpec(deps: StepDeps, state: ApplyState, placed?: string) {
   if (!SPEC_EDITS.has(state.operation)) {
     throw new VDeployError('internal', `${state.operation} does not change the spec`);
   }
@@ -188,7 +195,7 @@ async function updateSpec(deps: StepDeps, state: ApplyState) {
   }
   if (state.projectId === null) {
     const id = newId('project');
-    const serverId = await chooseServer(deps, state, spec);
+    const serverId = await chooseServer(deps, state, spec, placed);
     await deps.db.transaction(async (tx) => {
       await tx.insert(projects).values({
         id,
@@ -659,7 +666,7 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
     case 'snapshot_volumes':
       return snapshotVolumesStep(deps, state, step.volumes);
     case 'update_spec':
-      return updateSpec(deps, state);
+      return updateSpec(deps, state, step.server);
     case 'create_release':
       return newRelease(deps, state);
     case 'activate_release':

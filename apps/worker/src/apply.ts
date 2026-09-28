@@ -132,7 +132,11 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
     .returning();
   if (!row) return 'skipped';
 
-  const world = await loadPlanWorld(deps.db, row.projectId, row.args);
+  // The organization matters: without it the planner sees no servers to
+  // choose between, so a plan that placed an app "wherever there is room"
+  // re-plans here as a plan that could place it nowhere — and every one of
+  // them goes stale instead of running.
+  const world = await loadPlanWorld(deps.db, row.projectId, row.args, row.orgId);
   let fresh: string;
   try {
     fresh = buildPlan(row.operation as OperationName, row.args, world).planHash;

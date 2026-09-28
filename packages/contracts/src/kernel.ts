@@ -41,7 +41,19 @@ export type Release = z.infer<typeof Release>;
 
 /** One ordered, idempotent unit of work the worker executes for a plan. */
 export const PlanStep = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('update_spec'), specHash: Sha256 }),
+  z.strictObject({
+    kind: z.literal('update_spec'),
+    specHash: Sha256,
+    /**
+     * The server the planner chose when nobody named one (§14). It is on
+     * the step, not worked out again later, because the whole point of
+     * placing in the planner is that **what was approved names the
+     * machine** — and a second answer computed at apply time, against a
+     * world that has moved on by a few seconds, is a different machine
+     * from the one somebody read and agreed to.
+     */
+    server: idSchema('server').optional(),
+  }),
   z.strictObject({ kind: z.literal('create_release') }),
   z.strictObject({
     kind: z.literal('deploy'),
