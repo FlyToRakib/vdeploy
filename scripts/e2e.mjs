@@ -37,6 +37,15 @@ const TESTBED = vps ? 'vdeploy-test-testbed' : 'vdeploy-test-dind';
  * shown on a single box, so the exit run has two.
  */
 const TESTBED2 = `${TESTBED}-2`;
+/**
+ * A third machine, for the edge tier (§13): one box answering the internet
+ * in front of the others. It only runs where there is room for a third
+ * Docker daemon — the VPS testbed is deliberately small — and when there
+ * is not, the run says so rather than quietly skipping it.
+ */
+const TESTBED3 = `${TESTBED}-3`;
+/** The edge tier needs a third machine, so it is opt-in where room is tight. */
+const edgeTier = process.argv.includes('--edge') || !vps;
 const API = 'http://127.0.0.1:18090';
 // One origin for the dashboard, the API and the agents, as in production: the
 // same address from this machine (through the testbed's port) and from inside
@@ -537,8 +546,6 @@ async function secondServer(firstServerId) {
     storageScanSeconds: 5,
     acmeServer: 'https://127.0.0.1:14000/dir',
     allowUnsupportedOS: true,
-    // It serves nothing from outside, so it holds no web ports.
-    routing: false,
   };
   inBed(
     TESTBED2,
@@ -581,6 +588,125 @@ async function secondServer(firstServerId) {
   await placesWhereThereIsRoom();
   await privateTrafficBetweenServers(firstServerId, second.serverId);
   await buildsHereRunsThere(firstServerId, second.serverId);
+  await edgeInFront(second.serverId);
+}
+
+/**
+ * One machine answering the internet for the others (§13 5.4c).
+ *
+ * The proof is a request that goes all the way through: a visitor reaches
+ * the edge, the edge carries it over the mesh to the app server's own
+ * router, and that router answers with the app — which is running on a
+ * machine the visitor never addressed and that holds no certificate.
+ */
+async function edgeInFront(appServerId) {
+  // A third Docker daemon needs room the VPS testbed does not have, so it
+  // runs here by default and on the VPS only when asked for.
+  if (!edgeTier) {
+    log('the edge tier is not run on this machine: pass --edge to include it');
+    return;
+  }
+  if (!onHost(`docker ps -q -f name=^${TESTBED3}$`)) {
+    log(`creating testbed ${TESTBED3}`);
+    onHost(
+      `docker run -d --name ${TESTBED3} --privileged ${vps ? '--memory=1g --memory-swap=1g --cpus=1' : ''} ` +
+        `--restart=no -v ${TESTBED3}-docker:/var/lib/docker docker:27-dind --storage-driver=overlay2`,
+    );
+    for (let i = 0; i < 60; i++) {
+      try {
+        inBed(TESTBED3, 'docker info >/dev/null 2>&1 && echo ready');
+        break;
+      } catch {
+        execFileSync(process.execPath, ['-e', 'setTimeout(()=>{},1000)']);
+      }
+    }
+  }
+
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const { result: edge } = await op('server.add', { name: 'edge-1', role: 'edge' });
+  const config = {
+    reconcileSeconds: 5,
+    storageScanSeconds: 5,
+    acmeServer: 'https://127.0.0.1:14000/dir',
+    allowUnsupportedOS: true,
+  };
+  inBed(
+    TESTBED3,
+    `mkdir -p /etc/vdeploy && echo '${JSON.stringify(config)}' > /etc/vdeploy/agent.json`,
+  );
+  inBed(
+    TESTBED3,
+    `docker run -d --name cp-proxy -p 18090:8080 ${CADDY} ` +
+      `caddy reverse-proxy --from :8080 --to ${bedAddress(TESTBED)}:8080 >/dev/null` +
+      ` && until wget -qO- ${PUBLIC_URL}/api/v1/setup >/dev/null 2>&1; do sleep 1; done`,
+  );
+  inBed(
+    TESTBED3,
+    `wget -qO /usr/local/bin/vd-agent ${PUBLIC_URL}/api/v1/agent/download/vd-agent-linux-amd64 ` +
+      `&& chmod 755 /usr/local/bin/vd-agent ` +
+      `&& vd-agent enroll --url ${PUBLIC_URL} --token ${edge.token}`,
+  );
+  inBed(TESTBED3, 'nohup vd-agent run > /var/log/vd-agent.log 2>&1 &');
+  await until('the edge is online', async () => {
+    const { result } = await op('server.status', { serverId: edge.serverId });
+    return result.status === 'online';
+  });
+
+  // The edge reaches the app servers the same way anything crosses: they
+  // have to accept private traffic, and until they do it routes nothing.
+  await call('POST', '/api/v1/auth/step-up', { password });
+  await op('server.set_private_traffic', {
+    serverId: appServerId,
+    enabled: true,
+    address: bedAddress(TESTBED2),
+  });
+
+  const created = await op('project.create', {
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'fronted' },
+      source: { type: 'image', image: 'nginx:1.27-alpine' },
+      build: { strategy: 'image' },
+      network: { containerPort: 80 },
+      placement: { server: appServerId },
+    },
+  });
+  const frontedDone = await settled(planOf(created), 600_000);
+  if (frontedDone.status !== 'applied') {
+    throw new Error(`the fronted app was not deployed: ${frontedDone.status}`);
+  }
+  const fronted = await projectNamed('fronted');
+  const host = fronted.url?.replace(/^https?:[/][/]/, '');
+  if (!host) throw new Error('the fronted app has no hostname');
+
+  // Asked of the edge, by name, from a machine that is neither the edge
+  // nor the server running the app.
+  const body = await until(
+    'the edge answers for an app on another server',
+    () => {
+      const out = inTestbed(
+        `wget -q -O - -T 3 --header 'Host: ${host}' http://${bedAddress(TESTBED3)}/ 2>/dev/null || true`,
+      );
+      return /nginx/i.test(out) ? out : null;
+    },
+    180_000,
+  );
+  void body;
+  // And the machine running it never learned the hostname's certificate:
+  // DNS points at the edge, so the edge is the only one that asks for one.
+  pass('an edge answered for an app running on another server', host);
+}
+
+/** The plan a change produced, whichever shape the operation answered in. */
+const planOf = (answer) => answer.result?.plan?.id ?? answer.plan?.id ?? answer.result?.planId;
+
+/** A project by the name it was given, once it exists. */
+async function projectNamed(name) {
+  const { result: list } = await op('project.list', {});
+  const found = list.find((one) => one.name === name);
+  if (!found) throw new Error(`no project called ${name}: ${list.map((o) => o.name).join(', ')}`);
+  return found;
 }
 
 /** The name of a project's running container, on whichever machine it is on. */
@@ -594,7 +720,7 @@ function replicaOn(bed, projectId) {
  * most room left, decided in the plan rather than worked out later.
  */
 async function placesWhereThereIsRoom() {
-  const { result: created } = await op('project.create', {
+  const answer = await op('project.create', {
     spec: {
       apiVersion: 'vdeploy/v1',
       kind: 'Application',
@@ -604,19 +730,22 @@ async function placesWhereThereIsRoom() {
       network: { containerPort: 80 },
     },
   });
-  await settled(created.planId);
+  const done = await settled(planOf(answer), 600_000);
+  if (done.status !== 'applied') throw new Error(`the app was not placed: ${done.status}`);
+  const created = await projectNamed('placed');
   // Which of the two wins depends on how big each testbed is, which is not
   // the same on every machine this runs on. What is the same everywhere is
   // that a server was chosen, that the choice is in the app's record, and
   // that the app is running on the machine the record names.
-  const { result: project } = await op('project.get', { projectId: created.projectId });
   const { result: servers } = await op('server.list', {});
-  const chosen = servers.find((one) => one.id === project.serverId);
-  if (!chosen) throw new Error(`an app was placed nowhere: ${JSON.stringify(project.serverId)}`);
+  const chosen = servers.find((one) => one.id === created.serverId);
+  if (!chosen) throw new Error(`an app was placed nowhere: ${JSON.stringify(created.serverId)}`);
   const bed = chosen.name === 'testbed-2' ? TESTBED2 : TESTBED;
-  if (!replicaOn(bed, created.projectId)) {
-    throw new Error(`the app is recorded on ${chosen.name} but is not running there`);
-  }
+  await until(
+    'the placed app is running where its record says',
+    () => replicaOn(bed, created.id) !== '',
+    120_000,
+  );
   pass('placed on a server nobody named, and running on the one it says', chosen.name);
 
   // And one that fits nowhere is refused when it is asked for, in a
@@ -649,14 +778,22 @@ async function placesWhereThereIsRoom() {
  * the database were beside it.
  */
 async function privateTrafficBetweenServers(firstServerId, secondServerId) {
-  const { result: made } = await op('database.create', {
+  const madeAnswer = await op('database.create', {
     serverId: firstServerId,
     name: 'shared-db',
     engine: 'postgres',
     version: '18',
+    size: '1Gi',
   });
-  await settled(made.planId);
-  const { result: created } = await op('project.create', {
+  const madeDone = await settled(planOf(madeAnswer), 600_000);
+  if (madeDone.status !== 'applied') {
+    throw new Error(`the shared database was not created: ${madeDone.status}`);
+  }
+  const { result: databases } = await op('database.list', {});
+  const made = databases.find((one) => one.name === 'shared-db');
+  if (!made) throw new Error('the shared database is not listed');
+
+  const acrossAnswer = await op('project.create', {
     spec: {
       apiVersion: 'vdeploy/v1',
       kind: 'Application',
@@ -667,13 +804,14 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
       placement: { server: secondServerId },
     },
   });
-  await settled(created.planId);
+  await settled(planOf(acrossAnswer), 600_000);
+  const created = await projectNamed('across');
 
   // Until the machine holding the data accepts private traffic this is
   // refused, and the refusal names the machine and what to do about it.
   let early = '';
   try {
-    await op('database.link', { projectId: created.projectId, databaseId: made.databaseId });
+    await op('database.link', { projectId: created.id, databaseId: made.id });
   } catch (err) {
     early = String(err);
   }
@@ -690,16 +828,16 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
   });
   pass('private traffic turned on, deliberately, for one server');
 
-  const { result: linked } = await op('database.link', {
-    projectId: created.projectId,
-    databaseId: made.databaseId,
-  });
-  await settled(linked.planId);
+  const linked = await op('database.link', { projectId: created.id, databaseId: made.id });
+  const linkedDone = await settled(planOf(linked), 600_000);
+  if (linkedDone.status !== 'applied') {
+    throw new Error(`the cross-server link was not applied: ${JSON.stringify(linkedDone.error)}`);
+  }
 
   // The proof: the app's own container opens that database, by the name it
   // would use if it were beside it, on a machine it has never heard of.
   await until('the app opens the database across the mesh', async () => {
-    const container = replicaOn(TESTBED2, created.projectId);
+    const container = replicaOn(TESTBED2, created.id);
     if (!container) return false;
     const url = inBed(
       TESTBED2,
@@ -727,7 +865,7 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
  */
 async function buildsHereRunsThere(firstServerId, secondServerId) {
   const upload = await uploadArchive(nodeAppArchive('built elsewhere'));
-  const { result: created } = await op('project.create', {
+  const answer = await op('project.create', {
     spec: {
       apiVersion: 'vdeploy/v1',
       kind: 'Application',
@@ -739,18 +877,22 @@ async function buildsHereRunsThere(firstServerId, secondServerId) {
       placement: { server: secondServerId },
     },
   });
-  await settled(created.planId, 900_000);
+  const done = await settled(planOf(answer), 900_000);
+  if (done.status !== 'applied') {
+    throw new Error(`building elsewhere did not finish: ${done.status} ${String(done.error)}`);
+  }
+  const created = await projectNamed('elsewhere');
 
   // It was built on the first machine — which has the build images — and
   // it runs on the second, which has never compiled anything.
   const built = inBed(TESTBED, "docker images --format '{{.Repository}}' | grep -c '^vd-build/'");
   if (Number(built) < 1) throw new Error('nothing was built on the builder');
-  const container = replicaOn(TESTBED2, created.projectId);
+  const container = replicaOn(TESTBED2, created.id);
   if (!container) throw new Error('the app is not running on the server it was placed on');
   // Asked from the machine, not from inside the container: what a built
   // image happens to carry is the app's business, and `wget` being absent
   // from it would say nothing about whether it serves.
-  const answer = await until(
+  const served = await until(
     'the app built elsewhere serves',
     () => {
       const ip = inBed(
@@ -765,7 +907,7 @@ async function buildsHereRunsThere(firstServerId, secondServerId) {
   );
   pass(
     'built on one server, carried to another, and serving there',
-    `${answer.trim()} — the image was checked on arrival`,
+    `${served.trim()} — the image was checked on arrival`,
   );
 }
 
@@ -1711,7 +1853,7 @@ try {
   if (process.argv.includes('--teardown')) {
     // Each by name, never by pattern: this runs on a machine with other
     // people's containers on it.
-    for (const bed of [TESTBED2, TESTBED]) {
+    for (const bed of [TESTBED3, TESTBED2, TESTBED]) {
       if (!onHost(`docker ps -aq -f name=^${bed}$`)) continue;
       log(`removing testbed ${bed} and its volume ${bed}-docker`);
       onHost(`docker rm -f ${bed} >/dev/null && docker volume rm ${bed}-docker >/dev/null`);
