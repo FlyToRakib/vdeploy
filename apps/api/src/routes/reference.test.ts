@@ -59,7 +59,11 @@ describe('the public API describes itself from the catalog (§26 M6)', () => {
     for (const operation of OPERATIONS) {
       const path = `/api/v1/operations/${operation.name}`;
       const entry = doc.paths[path]?.post as unknown as
-        | { requestBody: { content: Record<string, { schema: { properties: { input: unknown } } }> } }
+        | {
+            requestBody: {
+              content: Record<string, { schema: { properties: { input: unknown } } }>;
+            };
+          }
         | undefined;
       const json = entry?.requestBody.content['application/json'];
       const schema = json?.schema.properties.input;
