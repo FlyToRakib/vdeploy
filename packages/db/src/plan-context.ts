@@ -28,6 +28,9 @@ export interface ProjectSnapshot {
   previewOf: Id<'project'> | null;
   /** The app this one is the staging copy of (§26 M6). */
   stagingOf: Id<'project'> | null;
+  /** What it is running now: the current release's image and version. */
+  image?: string;
+  releaseVersion?: number;
 }
 
 export interface PlanWorld {
@@ -213,6 +216,14 @@ export async function loadPlanWorld(
   }
   const [row] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!row) return { project: null };
+  // What it is running now, so a plan that changes the image can say what
+  // it is changing from rather than leaving somebody to guess.
+  const [current] = row.currentReleaseId
+    ? await db
+        .select({ image: releases.image, version: releases.version })
+        .from(releases)
+        .where(eq(releases.id, row.currentReleaseId))
+    : [];
   const world: PlanWorld = {
     ...(database ? { database: database.state } : {}),
     // What this app reads its data from: a deploy copies it first (§17.4).
@@ -226,6 +237,7 @@ export async function loadPlanWorld(
       running: row.running,
       previewOf: row.previewOf as Id<'project'> | null,
       stagingOf: row.stagingOf as Id<'project'> | null,
+      ...(current ? { image: current.image, releaseVersion: current.version } : {}),
     },
     // The server the plan is *about*. For everything but a move that is
     // the one the app is on; a move names another, and checking the app

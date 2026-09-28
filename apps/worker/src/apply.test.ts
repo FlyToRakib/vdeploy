@@ -943,6 +943,9 @@ describe('staging', () => {
     expect(ran?.image).toBeTruthy();
 
     const promote = await plan('staging.promote', { projectId: app.id });
+    // What somebody approving it reads: the bytes, named plainly.
+    const [planned] = await t.db.select().from(plans).where(eq(plans.id, promote.id));
+    expect(planned?.plan.changes).toMatchObject([{ path: 'release.image', after: ran?.image }]);
     expect(await applyPlan(deps, promote.id)).toBe('applied');
 
     const [now] = await t.db

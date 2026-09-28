@@ -33,6 +33,9 @@ export interface ProjectState {
   previewOf?: Id<'project'> | null;
   /** The app this one is the staging copy of (§26 M6). */
   stagingOf?: Id<'project'> | null;
+  /** What it is running now, so a plan can say what it changes from. */
+  image?: string;
+  releaseVersion?: number;
   currentReleaseId: Id<'release'> | null;
   /** False while stopped: a stopped project holds no capacity. */
   running?: boolean;
@@ -448,7 +451,9 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     return {
       specHash: null,
       changes: [
-        { path: 'release.image', before: app.spec.source.type, after: `from ${staging.name}` },
+        // The bytes, named plainly: this is the whole of what promoting
+        // changes, and somebody approving it should see exactly that.
+        { path: 'release.image', before: app.image ?? null, after: staging.image },
       ],
       steps: [
         { kind: 'promote_release', from: staging.id },
