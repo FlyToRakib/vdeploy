@@ -1,11 +1,54 @@
 # VDeploy Implementation Progress
 
-**Milestone:** M5 — scale and balance (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27)
-**Task:** the M5 exit on the VPS testbed
+**Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
+**Task:** M6 — starting on the MCP server and the CLI
 **Status:** in progress
-**Updated:** 2026-09-28 18:05 UTC
+**Updated:** 2026-09-28 20:30 UTC
 
-## M5 — what the two-machine run has proved so far
+## M5 exit — met 2026-09-28
+
+`scripts/e2e.mjs --vps` on the VPS testbed: **48 checks**, the M1, M2 and
+M4 ones plus everything M5 added, on **two machines** — because none of M5
+means anything on one. The production baseline was verified unchanged
+before and after, and both testbeds and their volumes were removed by name
+afterwards. Locally, with a third machine for the edge, the same run is
+**49 checks**.
+
+What the run proves that no unit test could:
+
+- an app **placed on a server nobody named**, running on the machine its
+  record names — and one that fits nowhere **refused when it is asked
+  for**, naming what the roomiest machine had free;
+- a database on another server **refused** to an app while that server
+  accepts no private traffic, in words that name the machine and what to
+  do; then allowed once it does;
+- an app **speaking to a database on another server** — eight bytes of the
+  Postgres handshake out, the answer back — under the name it would use if
+  the database were beside it;
+- an image **built on one machine and served from another**, checked on
+  arrival;
+- and locally, a visitor reaching an **edge** and being answered by an app
+  on a machine they never addressed.
+
+**Eight bugs the run found, every one in code that had unit tests and had
+never run on two machines.** The list is in the section below, because the
+pattern is worth keeping: unit tests prove the pieces, and the pieces were
+right. What was wrong was always the seam — a context that belonged to the
+wrong lifetime, an address that was right from the host and wrong from a
+container, a name computed in two places, a machine nobody told.
+
+One of them is worth repeating on its own: **the end-to-end check passed a
+broken mesh twice**, because it used a bare connect that only proves the
+*local* socket accepted. It now speaks Postgres and waits for the byte that
+comes back. A check that cannot fail is worse than no check, because it is
+counted.
+
+Not covered by the VPS run: the **edge tier**, which needs a third Docker
+daemon and so runs locally by default and on the VPS only with `--edge`;
+and the dashboard card for private traffic, which has not been opened in a
+browser.
+
+## M5 — the eight bugs, and what they have in common
 
 Every M5 feature is built, and the end-to-end run now brings up **three
 machines** — a control plane and app server, a second app server, and an
@@ -272,7 +315,7 @@ GitHub.
 - [x] 5.4a builder servers (§15): a build is the heaviest thing a small server ever does, and a production box that compiles is a production box that goes slow on the evening somebody deploys — so a project can name **another machine to build on**, and a machine can be added as a builder that compiles for the others and serves nothing at all. Queueing the build elsewhere was one field; what it costs is that the image then exists on a server that will never start it, and **ADR 0008 says a local image ID names nothing** — any id could be any image on the disk, which is why an agent runs only what its own record says it built. That rule is not relaxed but **narrowed** (ADR 0017): the bytes must match the size and hash the builder measured as it wrote them, *and* loading them must produce exactly the id the control plane named. An image id is the hash of its own config, so “these bytes, and this id out” cannot be satisfied by pointing at something already on the disk — it is the same guarantee as having built it. The image travels the way an app's folders travel when it moves: a one-time token, piped through the control plane, nothing kept. The builder drops its copy the moment it has sent it, and sweeps anything a dead deploy abandoned. And the thing that keeps it all honest: **the build is not finished until the image has arrived** — it stays running until then, so a transfer that failed is a build that failed, with a reason, rather than a deploy that starts an image that is not there. A builder is never placed on, cannot be moved onto, runs no router, and its preflight skips ports 80 and 443 because it serves nothing. **One latent bug found on the way**: `project.move` was checking the app against the server it was *leaving* — the plan context loads the project's own server, and nobody had told it that a move names a different one — so a move onto a full machine passed the governor every time and failed at the last step of the apply
 - [x] 5.4b private traffic between an organization's own servers (§13) — **and a deliberate deviation from the spec's word, recorded in ADR 0018**. The capability is overdue and narrow: a managed database binds to its own server's internal network, so an app on another server cannot reach it at all, which is why moving an app has to drag its database along and why "the database on the big machine, the app on the small one" was not something anybody could ask for. §13 says WireGuard. WireGuard wants a kernel module or `/dev/net/tun` with `NET_ADMIN`, an interface, and host routes — on a platform whose agent has never configured the host's network, never edited `/etc/nginx` and never touched the firewall — and the one thing it would buy for all that, **transparent L3 routing**, is unusable here anyway, because giving an app container a route to a remote subnet means host routes or `NET_ADMIN` inside every app container. So the honest comparison was never "WireGuard versus something lesser" but "two tunnels that both carry named TCP services, one of which also demands a kernel module". The agents already prove who they are to the control plane with an Ed25519 key (ADR 0004); now they prove it to each other with the same one, as a TLS certificate nothing signs and whose name means nothing — the **raw public key** is checked against the peer list, and that is the whole of it. What crosses is a **named service**, not a network: the app dials the name it would dial if the database were beside it, its own agent is listening there **on the project network's own gateway** (an address that project's containers can reach and nothing else can — not the host's other services, not another project, not the internet), and that agent carries the bytes to the agent that has the database. The connection string does not change; the app never learns anything crossed a machine. Three things it gets right, each because the naive version is wrong: **the server with the data decides**, checking its own grants before it dials anything, because an agent that forwarded whatever it was asked for would be an open proxy on a machine running somebody else's app; **the key check runs on resumed sessions**, because TLS 1.3 lets a client come back without a fresh certificate exchange and Go's client does so by default, so a check written as `VerifyPeerCertificate` is never called on exactly the connections that matter — a peer removed from the organization would keep completing handshakes, and there is a test that fails against that spelling; and **nothing is configured, so nothing drifts** — applying the arrangement is idempotent and runs every pass, so a network that does not exist yet and a peer that is down for an hour are both just a pass that opens nothing. Listening is off until somebody turns it on, per server, and the dashboard says what it opens where they turn it on
 - [x] 5.4c a dedicated edge tier (§13): one machine answering the internet in front of several app servers, so DNS has a single address, one place holds the certificates, and the servers behind it can be added, drained or replaced without anybody re-pointing a hostname. It rides entirely on 5.4b, with one addition — a second kind of thing that crosses the mesh, alongside a database: a server's **own router**. And that is the decision worth stating, because routing to the *replicas* is the obvious design and the wrong one: the app server's router already knows which replicas are ready, what share a canary is taking and where a sticky visitor belongs, and working that out twice, in two places, from two views of the world that can disagree, is how a canary and a rollout end up fighting. Routing to the router instead means every deploy strategy, health check and canary keeps working exactly as it did, with a second machine in front making no difference to any of them — and the routing file an edge writes is **the same file any server writes**, only with a local port the mesh carries instead of a container of its own. Two consequences: the edge is the machine DNS points at, so it is the machine a DNS check is made against and therefore **the only one that requests certificates** — the app servers behind it stop asking for any, and everything that follows from “which machine answers for this hostname” now asks one function; and an edge **routes nothing** to a server that has not turned private traffic on, because a route it cannot serve is worse than no route at all when DNS already points here. An edge is never placed on, cannot be moved onto, is told no secret, no image and no volume — only hostnames, what they want doing to them, and which server to hand the request to
-- [ ] the M5 exit on the VPS testbed
+- [x] the M5 exit on the VPS testbed — 48 checks on two machines, baseline verified unchanged before and after, both testbeds removed by name
 
 ## Next
 
