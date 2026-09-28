@@ -15,7 +15,6 @@ import {
 import { createPostgresBackend, Worker } from 'bullmq';
 import { createTransport } from 'nodemailer';
 import { pino } from 'pino';
-import { z } from 'zod';
 import { applyPlan } from './apply.js';
 import { runAutoscaling } from './autoscale-loop.js';
 import { closeStalePreviews } from './preview-expiry.js';
@@ -24,44 +23,10 @@ import { runDueBackups, runDueVerifications } from './backup-schedule.js';
 import { runDueCrons } from './cron-schedule.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
 import { safePoster, sendDueNotifications } from './notifications.js';
+import { WorkerConfig } from './config.js';
 import { publicRegistries } from './registry.js';
 
-const config = parseEnv(
-  z.object({
-    DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
-    APPROVAL_KEY: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/, 'must be 32 bytes as 64 hex characters')
-      .transform((hex) => Buffer.from(hex, 'hex')),
-    SECRETS_KEY: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/, 'must be 32 bytes as 64 hex characters')
-      .transform((hex) => Buffer.from(hex, 'hex')),
-    LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-    /** smtp(s)://user:pass@host:port — email notifications need it. */
-    SMTP_URL: z.url({ protocol: /^smtps?$/ }).optional(),
-    MAIL_FROM: z.string().min(3).default('VDeploy <no-reply@localhost>'),
-    /** The dashboard's address, for links in notifications. */
-    PUBLIC_URL: z.url({ protocol: /^https?$/ }).optional(),
-    /** Let webhooks reach private addresses (a LAN-only install); off, they reach only the internet. */
-    WEBHOOK_ALLOW_PRIVATE: z.stringbool().default(false),
-    /** The VDeploy GitHub App (ADR 0010), for private repositories. */
-    GITHUB_APP_ID: z.string().optional(),
-    GITHUB_APP_PRIVATE_KEY_FILE: z.string().optional(),
-    GITHUB_API_URL: z.url().default('https://api.github.com'),
-    /** Resolvers for domain checks (ip or ip:port, comma-separated); the system's when unset. */
-    DNS_SERVERS: z
-      .string()
-      .default('')
-      .transform((list) =>
-        list
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      ),
-  }),
-  process.env,
-);
+const config = parseEnv(WorkerConfig, process.env);
 
 // Node gives each address 250 ms by default before trying the next; on a slow
 // or nested network every attempt times out. Registries answer within 2.5 s.
