@@ -174,6 +174,49 @@ function loadImages() {
   inTestbed('docker load -q', archive);
 }
 
+/**
+ * The images the run itself deploys, carried in rather than fetched from
+ * the internet halfway through.
+ *
+ * A test that pulls from a registry in the middle of itself is a test that
+ * fails for reasons that have nothing to do with the code: a slow layer
+ * turns "the app did not start" into a red run, and it looks exactly like
+ * a bug in the thing being tested. Twice it was one. They come from this
+ * machine, which already has them, by the same route the control plane's
+ * own images take.
+ */
+const APP_IMAGES = [
+  'nginx:1.27-alpine',
+  'nginx:1.28-alpine',
+  // The managed database an app links to (§17.3), and the control plane's own.
+  'postgres:18-alpine',
+  'postgres:16-alpine',
+];
+
+function loadAppImages(beds = [TESTBED]) {
+  for (const image of APP_IMAGES) {
+    try {
+      execFileSync('docker', ['image', 'inspect', '-f', '{{.Id}}', image], { stdio: 'ignore' });
+    } catch {
+      log(`fetching ${image} once, on this machine`);
+      execFileSync('docker', ['pull', '-q', image], { stdio: 'ignore' });
+    }
+  }
+  for (const bed of beds) {
+    const missing = APP_IMAGES.filter(
+      (image) =>
+        !inBed(bed, `docker image inspect -f '{{.Id}}' ${image} 2>/dev/null || true`).trim(),
+    );
+    if (missing.length === 0) continue;
+    log(`loading ${String(missing.length)} app images into ${bed}`);
+    inBed(
+      bed,
+      'docker load -q',
+      execFileSync('docker', ['save', ...missing], { maxBuffer: 2 ** 31 }),
+    );
+  }
+}
+
 /** A rerun starts clean: everything here lives inside the testbed's own daemon. */
 function resetTestbed() {
   inTestbed(
@@ -578,6 +621,8 @@ async function secondServer(firstServerId) {
       `&& chmod 755 /usr/local/bin/vd-agent ` +
       `&& vd-agent enroll --url ${controlPlane} --token ${second.token}`,
   );
+  // The second machine deploys too, so it gets the same images.
+  loadAppImages([TESTBED2]);
   inBed(TESTBED2, 'nohup vd-agent run > /var/log/vd-agent.log 2>&1 &');
   await until('the second server is online', async () => {
     const { result } = await op('server.status', { serverId: second.serverId });
@@ -1841,6 +1886,7 @@ try {
   ensureTestbed();
   resetTestbed();
   loadImages();
+  loadAppImages();
   startControlPlane();
   await openTunnel();
   if (walkthrough) {
