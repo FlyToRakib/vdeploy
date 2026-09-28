@@ -75,3 +75,40 @@ describe('the command line is the catalog (§26 M6)', () => {
     }
   });
 });
+
+describe('what M6 added reaches every surface without being written twice', () => {
+  // §24's promise is one definition and five consumers. These are the
+  // operations M6 added; none of them was typed into the CLI, and this
+  // asserts that none of them had to be.
+  const added = OPERATIONS.filter(
+    (op) =>
+      /^(preview|staging|sso|plugin|cloud|git)\./.test(op.name) || op.name === 'server.provision',
+  );
+
+  it('is a real list, not an empty one', () => {
+    expect(added.length).toBeGreaterThan(20);
+  });
+
+  it('has a command for every one of them', () => {
+    const missing = added.filter((op) => !COMMANDS.some((c) => c.operation.name === op.name));
+    expect(missing.map((op) => op.name)).toEqual([]);
+  });
+
+  it('spells each one the same way the API does', () => {
+    for (const op of added) {
+      // The dotted form works too, so a name copied out of the API
+      // reference is a command without translating it.
+      const found = findCommand([op.name]);
+      expect(found?.command.operation.name, op.name).toBe(op.name);
+    }
+  });
+
+  it('keeps the ones only a person may do out of the model reach', () => {
+    // Tier 4 is never offered as a tool, so a model cannot connect an
+    // identity provider, allow an integration or paste a cloud token.
+    const humanOnly = added.filter((op) => op.tier === 'human_only').map((op) => op.name);
+    expect(humanOnly).toEqual(
+      expect.arrayContaining(['sso.connect', 'plugin.install', 'cloud.connect']),
+    );
+  });
+});

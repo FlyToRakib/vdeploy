@@ -580,7 +580,7 @@ async function run() {
   await secrets(hello.id);
   await releaseCommand(hello.id);
   const uploadsProject = await buildFromSource(server.serverId);
-  await fromGithub(server.serverId);
+  const fromGithubId = await fromGithub(server.serverId);
   await explainsFailure(server.serverId);
   await logsAndHistory(hello.id);
   await managedDatabase(server.serverId, hello.id);
@@ -589,6 +589,9 @@ async function run() {
   await fromTemplate(server.serverId);
   await composeRead();
   await statusPage(uploadsProject);
+  await previewOfAPullRequest(fromGithubId);
+  await stagingAndPromote(fromGithubId);
+  await aPluginKey();
   await secondServer(server.serverId);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
@@ -1686,6 +1689,146 @@ async function fromGithub(serverId) {
     'a real app from GitHub: fetched, built on the server, served',
     `${String(page.length)} bytes`,
   );
+  return (await projectNamed('from-github')).id;
+}
+
+/**
+ * A preview of one pull request (§26 M6, ADR 0020).
+ *
+ * Opened by hand rather than through a webhook: what is being checked is
+ * that a preview **is a project** — its own build, its own container, its
+ * own address — and that closing it takes the whole thing away. The
+ * webhook that usually opens one is covered where it can be exercised
+ * without a repository somebody has to own.
+ */
+async function previewOfAPullRequest(appId) {
+  // Turning previews on is a spec change like any other, so it is a
+  // plan that has to land before a preview can be asked for.
+  const turnedOn = await op('preview.configure', {
+    projectId: appId,
+    preview: { enabled: true, fromForks: false, max: 2, expireAfterDays: 7 },
+  });
+  const ready = await settled(turnedOn.plan.id, 600_000);
+  if (ready.status !== 'applied') {
+    throw new Error(`previews could not be turned on: ${JSON.stringify(ready)}`);
+  }
+  const opened = await op('preview.open', {
+    projectId: appId,
+    pullRequest: {
+      provider: 'github',
+      host: 'https://github.com',
+      repo: 'heroku/node-js-getting-started',
+      number: 1,
+      branch: 'main',
+      title: 'A pull request',
+    },
+  });
+  const plan = await settled(opened.plan.id, 1_200_000);
+  if (plan.status !== 'applied') {
+    throw new Error(`the preview did not deploy: ${JSON.stringify(plan)}`);
+  }
+  const { result: previews } = await op('preview.list', { projectId: appId });
+  if (previews.length !== 1 || previews[0].pullRequest.number !== 1) {
+    throw new Error(`expected one preview: ${JSON.stringify(previews)}`);
+  }
+  const preview = await projectNamed('from-github-pr-1');
+  const containers = managedContainers().filter(([name]) =>
+    name.includes(preview.id.toLowerCase()),
+  );
+  if (containers.length !== 1) {
+    throw new Error(`the preview is not running: ${JSON.stringify(managedContainers())}`);
+  }
+  pass('a preview of a pull request: its own build, its own container', previews[0].name);
+
+  const closed = await op('preview.close', { projectId: preview.id });
+  const gone = await settled(closed.plan.id, 300_000);
+  if (gone.status !== 'applied') throw new Error(`the preview did not close: ${gone.status}`);
+  await until(
+    'preview gone',
+    () =>
+      managedContainers().filter(([name]) => name.includes(preview.id.toLowerCase())).length === 0,
+    60_000,
+  );
+  const { result: after } = await op('preview.list', { projectId: appId });
+  if (after.length !== 0) throw new Error(`the preview is still listed: ${JSON.stringify(after)}`);
+  // The app it previewed is untouched.
+  const { result: app } = await op('project.get', { projectId: appId });
+  if (!app || app.deletedAt) throw new Error('closing a preview deleted the app');
+  pass('closing it took the whole thing away, and left the app alone');
+}
+
+/**
+ * A staging copy, and shipping exactly what it ran (§26 M6, ADR 0021).
+ *
+ * The check that matters is the last one: production's new release names
+ * the **same image** staging was running, not a rebuild of the same
+ * commit.
+ */
+async function stagingAndPromote(appId) {
+  const made = await op('staging.create', { projectId: appId, branch: 'main' });
+  const built = await settled(made.plan.id, 1_200_000);
+  if (built.status !== 'applied') {
+    throw new Error(`staging did not deploy: ${JSON.stringify(built)}`);
+  }
+  const { result: before } = await op('staging.get', { projectId: appId });
+  if (!before.staging) throw new Error('staging was not made');
+  pass('a staging copy, following its own branch', before.staging.name);
+
+  const staging = await projectNamed(before.staging.name);
+  const newest = async (projectId) => {
+    const { result: releases } = await op('release.list', { projectId });
+    return releases[0];
+  };
+  const ran = await newest(staging.id);
+  // Promoting asks for the password again: it changes what production runs.
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const promoted = await op('staging.promote', { projectId: appId });
+  const shipped = await settled(promoted.plan.id, 600_000);
+  if (shipped.status !== 'applied') {
+    throw new Error(`promoting did not apply: ${JSON.stringify(shipped)}`);
+  }
+  const now = await newest(appId);
+  if (!ran?.image || now?.image !== ran.image) {
+    throw new Error(
+      `production is not running what staging ran: ${String(now?.image)} vs ${String(ran?.image)}`,
+    );
+  }
+  pass('promoted: production runs the image staging ran, not a rebuild', ran.image);
+}
+
+/**
+ * An integration with a declared capability (§26 M6, ADR 0023).
+ *
+ * The whole feature is the second half of this: a key that may call what
+ * it was allowed, and is refused everything else its role would permit.
+ */
+async function aPluginKey() {
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const { result: plugin } = await op('plugin.install', {
+    manifest: {
+      name: 'deploy-bot',
+      description: 'Lists projects and nothing else',
+      operations: ['project.list'],
+    },
+  });
+  const asPlugin = async (name) => {
+    const response = await fetch(`${API}/api/v1/operations/${name}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': plugin.key },
+      body: JSON.stringify({ input: {} }),
+    });
+    return response.status;
+  };
+  const allowed = await asPlugin('project.list');
+  if (allowed !== 200) throw new Error(`the plugin could not do what it was allowed: ${allowed}`);
+  const refused = await asPlugin('server.list');
+  if (refused !== 403) {
+    throw new Error(`the plugin was not stopped from listing servers: ${refused}`);
+  }
+  await op('plugin.uninstall', { pluginId: plugin.id });
+  const after = await asPlugin('project.list');
+  if (after !== 401) throw new Error(`the key still worked after removal: ${after}`);
+  pass('an integration did what it was allowed, and nothing else', 'then its key stopped');
 }
 
 /**
