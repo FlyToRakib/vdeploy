@@ -114,7 +114,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     publicUrl: config.PUBLIC_URL,
     breachedPasswordCheck: config.BREACHED_PASSWORD_CHECK,
     rateLimit: deps.authRateLimit ?? true,
-    production: config.NODE_ENV === 'production',
+    // From the address, not from NODE_ENV: https means Secure cookies,
+    // http means a browser would refuse to send them.
+    secureCookies: new URL(config.PUBLIC_URL).protocol === 'https:',
   });
 
   await app.register(healthRoutes(db));

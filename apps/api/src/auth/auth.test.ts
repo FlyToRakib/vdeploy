@@ -35,7 +35,13 @@ describe('first-run setup', () => {
     expect(res.statusCode).toBe(201);
     orgId = res.json<{ organizationId: string }>().organizationId;
     expect(orgId).toMatch(/^org_/);
-    expect(res.cookies.some((c) => c.httpOnly && c.sameSite === 'Lax')).toBe(true);
+    // Secure follows the address people type, not NODE_ENV: this test
+    // app's PUBLIC_URL is https, so the cookie says so. A plain-http
+    // install would get a cookie a browser will actually send, instead
+    // of bouncing everybody back here with nothing to read.
+    expect(res.cookies.some((c) => c.httpOnly && c.sameSite === 'Lax' && c.secure === true)).toBe(
+      true,
+    );
     const [created] = await t.database.db.select().from(session);
     expect(created).toMatchObject({ userAgent: browser.userAgent, ipAddress: browser.ip });
 

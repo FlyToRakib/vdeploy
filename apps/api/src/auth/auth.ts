@@ -69,7 +69,14 @@ export interface AuthDeps {
   breachedPasswordCheck: boolean;
   /** Better Auth's own per-IP limits; tests of the lockout turn them off. */
   rateLimit: boolean;
-  production: boolean;
+  /**
+   * Whether cookies are marked Secure — decided by the scheme of the
+   * address people type, not by NODE_ENV. A browser will not send a
+   * Secure cookie over http, so getting this from the wrong thing makes
+   * a plain-http install bounce everybody back to the sign-in page with
+   * nothing to read.
+   */
+  secureCookies: boolean;
 }
 
 export function createAuth(deps: AuthDeps) {
@@ -145,10 +152,10 @@ export function createAuth(deps: AuthDeps) {
       },
     },
     advanced: {
-      useSecureCookies: deps.production,
+      useSecureCookies: deps.secureCookies,
       database: { generateId },
       ipAddress: { ipAddressHeaders: ['x-forwarded-for'] },
-      defaultCookieAttributes: { httpOnly: true, sameSite: 'lax', secure: deps.production },
+      defaultCookieAttributes: { httpOnly: true, sameSite: 'lax', secure: deps.secureCookies },
     },
     plugins: [
       ssoPlugin({ db: deps.db }),
