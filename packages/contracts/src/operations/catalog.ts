@@ -901,7 +901,17 @@ export const OPERATIONS = [
     'human_only',
     'server',
     "Let this organization's other servers reach this one privately",
-    obj({ ...S, enabled: z.boolean() }),
+    obj({
+      ...S,
+      enabled: z.boolean(),
+      /**
+       * Where the others reach it, when that is not the address the
+       * internet uses: two servers in one datacentre usually talk over a
+       * private network, and a machine behind NAT has no public address at
+       * all. Absent means 'the address VDeploy already knows'.
+       */
+      address: z.string().max(255).optional(),
+    }),
     { stepUp: true },
   ),
   operation(

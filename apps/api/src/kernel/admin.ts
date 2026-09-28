@@ -334,17 +334,22 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
       await deps.db.transaction((tx) => bumpDesiredGeneration(tx, serverId));
       return { serverId, endpoint: null };
     }
-    const address = row.publicIpv4 ?? row.publicIpv6;
+    // Where the others reach it. Usually the address the internet uses,
+    // but two servers in one datacentre normally talk over a private
+    // network, and a machine behind NAT has no public address at all — so
+    // one can be given, and then nothing about it is guessed.
+    const given = typeof args.address === 'string' ? args.address.trim() : '';
+    const address = given === '' ? (row.publicIpv4 ?? row.publicIpv6) : given;
     if (!address) {
       throw new VDeployError(
         'conflict',
-        `VDeploy does not know an address for ${row.name} yet, so the others cannot be told where to find it. Set its address first.`,
+        `VDeploy does not know an address for ${row.name} yet, so the others cannot be told where to find it. Set its address first, or give one here.`,
       );
     }
-    const endpoint =
-      row.publicIpv6 && !row.publicIpv4
-        ? `[${address}]:${String(MESH_DEFAULT_PORT)}`
-        : `${address}:${String(MESH_DEFAULT_PORT)}`;
+    // An IPv6 address needs brackets before a port; a name or an IPv4 does not.
+    const endpoint = address.includes(':')
+      ? `[${address}]:${String(MESH_DEFAULT_PORT)}`
+      : `${address}:${String(MESH_DEFAULT_PORT)}`;
     await deps.db.update(servers).set({ meshEndpoint: endpoint }).where(eq(servers.id, serverId));
     // Every server in the organization: the peer list is built from this.
     const all = await deps.db

@@ -30,6 +30,13 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const vps = process.argv.includes('--vps');
 const walkthrough = process.argv.includes('--walkthrough');
 const TESTBED = vps ? 'vdeploy-test-testbed' : 'vdeploy-test-dind';
+/**
+ * A second machine, for everything M5 is about (§13, §14, §15): placing an
+ * app where there is room, moving one, building on one server and running
+ * on another, and one server reaching another privately. None of it can be
+ * shown on a single box, so the exit run has two.
+ */
+const TESTBED2 = `${TESTBED}-2`;
 const API = 'http://127.0.0.1:18090';
 // One origin for the dashboard, the API and the agents, as in production: the
 // same address from this machine (through the testbed's port) and from inside
@@ -68,10 +75,49 @@ function onHost(command, input) {
   return execFileSync(bin, args, { encoding: 'utf8', input, maxBuffer: 64 << 20 }).trim();
 }
 
-/** Runs a shell command inside the testbed (where the inner Docker lives). */
-function inTestbed(command, input) {
+/** Runs a shell command inside a testbed (where the inner Docker lives). */
+function inBed(bed, command, input) {
   const quoted = command.replace(/'/g, `'\\''`);
-  return onHost(`docker exec -i ${TESTBED} sh -c '${quoted}'`, input);
+  return onHost(`docker exec -i ${bed} sh -c '${quoted}'`, input);
+}
+
+function inTestbed(command, input) {
+  return inBed(TESTBED, command, input);
+}
+
+/** The address one testbed reaches the other on: they share the outer bridge. */
+function bedAddress(bed) {
+  return onHost(
+    `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${bed}`,
+  ).trim();
+}
+
+/**
+ * The second machine (§13, §14, §15). It is the same image with no ports
+ * published and a smaller share of the box: nothing has to reach it from
+ * outside, because the only things that talk to it are the control plane,
+ * which it dials, and the first testbed, over the outer bridge they both
+ * sit on.
+ */
+function ensureSecondTestbed() {
+  if (onHost(`docker ps -q -f name=^${TESTBED2}$`)) {
+    return log(`testbed ${TESTBED2} already running`);
+  }
+  const limits = vps ? '--memory=1500m --memory-swap=1500m --cpus=1' : '';
+  log(`creating testbed ${TESTBED2}`);
+  onHost(
+    `docker run -d --name ${TESTBED2} --privileged ${limits} --restart=no ` +
+      `-v ${TESTBED2}-docker:/var/lib/docker docker:27-dind --storage-driver=overlay2`,
+  );
+  for (let i = 0; i < 60; i++) {
+    try {
+      inBed(TESTBED2, 'docker info >/dev/null 2>&1 && echo ready');
+      return;
+    } catch {
+      execFileSync(process.execPath, ['-e', 'setTimeout(()=>{},1000)']);
+    }
+  }
+  throw new Error('the second testbed never became ready');
 }
 
 function verifyBaseline() {
@@ -456,6 +502,7 @@ async function run() {
   await fromTemplate(server.serverId);
   await composeRead();
   await statusPage(uploadsProject);
+  await secondServer(server.serverId);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
@@ -473,6 +520,220 @@ async function run() {
   if (!audit.verification.ok)
     throw new Error(`audit chain broken: ${JSON.stringify(audit.verification)}`);
   pass('every action is in the audit log, chain verified', `${audit.entries.length} entries`);
+}
+
+/**
+ * Everything M5 is about needs a second machine (§13, §14, §15): choosing
+ * where an app goes, building it somewhere it will never run, and one
+ * server reaching another privately. So the exit run brings up a second
+ * testbed and does all three for real.
+ */
+async function secondServer(firstServerId) {
+  ensureSecondTestbed();
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const { result: second } = await op('server.add', { name: 'testbed-2' });
+  const config = {
+    reconcileSeconds: 5,
+    storageScanSeconds: 5,
+    acmeServer: 'https://127.0.0.1:14000/dir',
+    allowUnsupportedOS: true,
+    // It serves nothing from outside, so it holds no web ports.
+    routing: false,
+  };
+  inBed(
+    TESTBED2,
+    `mkdir -p /etc/vdeploy && echo '${JSON.stringify(config)}' > /etc/vdeploy/agent.json`,
+  );
+  // The control plane is inside the first testbed; the second reaches it on
+  // the bridge they share, which is how two VPSes reach one.
+  const controlPlane = `http://${bedAddress(TESTBED)}:8080`;
+  inBed(
+    TESTBED2,
+    `wget -qO /usr/local/bin/vd-agent ${controlPlane}/api/v1/agent/download/vd-agent-linux-amd64 ` +
+      `&& chmod 755 /usr/local/bin/vd-agent ` +
+      `&& vd-agent enroll --url ${controlPlane} --token ${second.token}`,
+  );
+  inBed(TESTBED2, 'nohup vd-agent run > /var/log/vd-agent.log 2>&1 &');
+  await until('the second server is online', async () => {
+    const { result } = await op('server.status', { serverId: second.serverId });
+    return result.status === 'online';
+  });
+  pass('a second server, connected the same way as the first', second.serverId);
+
+  await placesWhereThereIsRoom(second.serverId);
+  await privateTrafficBetweenServers(firstServerId, second.serverId);
+  await buildsHereRunsThere(firstServerId, second.serverId);
+}
+
+/** The name of a project's running container, on whichever machine it is on. */
+function replicaOn(bed, projectId) {
+  const key = projectId.replace(/^prj_/, '').toLowerCase();
+  return inBed(bed, `docker ps --format '{{.Names}}' | grep '^vd-${key}-' | head -1`).trim();
+}
+
+/**
+ * Placing an app when nobody said where (§14 5.3a): the server with the
+ * most room left, decided in the plan rather than worked out later.
+ */
+async function placesWhereThereIsRoom(secondServerId) {
+  const { result: created } = await op('project.create', {
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'placed' },
+      source: { type: 'image', image: 'nginx:1.27-alpine' },
+      build: { strategy: 'image' },
+      network: { containerPort: 80 },
+    },
+  });
+  await settled(created.planId);
+  const { result: project } = await op('project.get', { projectId: created.projectId });
+  // The empty machine has the most room, so that is where it goes — and
+  // nobody was asked.
+  if (project.serverId !== secondServerId) {
+    throw new Error(`an app went to the busy server instead of the empty one: ${project.serverId}`);
+  }
+  if (!replicaOn(TESTBED2, created.projectId)) {
+    throw new Error('the app was recorded on the second server but is not running there');
+  }
+  pass('placed where there is the most room, without anybody choosing', 'testbed-2');
+
+  // And one that fits nowhere is refused when it is asked for, in a
+  // sentence that says how much was wanted and what the largest machine had.
+  let refusal = '';
+  try {
+    await op('project.create', {
+      spec: {
+        apiVersion: 'vdeploy/v1',
+        kind: 'Application',
+        metadata: { name: 'enormous' },
+        source: { type: 'image', image: 'nginx:1.27-alpine' },
+        build: { strategy: 'image' },
+        network: { containerPort: 80 },
+        runtime: { resources: { memory: { request: '64Gi', limit: '64Gi' } } },
+      },
+    });
+  } catch (err) {
+    refusal = String(err);
+  }
+  if (!/no server has that free|needs 64/.test(refusal)) {
+    throw new Error(`an app that fits nowhere was not refused clearly: ${refusal}`);
+  }
+  pass('an app that fits nowhere is refused when asked, naming what was free');
+}
+
+/**
+ * One server reaching another privately (§13 5.4b, ADR 0018): an app on one
+ * machine reading a database on the other, under the name it would use if
+ * the database were beside it.
+ */
+async function privateTrafficBetweenServers(firstServerId, secondServerId) {
+  const { result: made } = await op('database.create', {
+    serverId: firstServerId,
+    name: 'shared-db',
+    engine: 'postgres',
+    version: '18',
+  });
+  await settled(made.planId);
+  const { result: created } = await op('project.create', {
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'across' },
+      source: { type: 'image', image: 'nginx:1.27-alpine' },
+      build: { strategy: 'image' },
+      network: { containerPort: 80 },
+      placement: { server: secondServerId },
+    },
+  });
+  await settled(created.planId);
+
+  // Until the machine holding the data accepts private traffic this is
+  // refused, and the refusal names the machine and what to do about it.
+  let early = '';
+  try {
+    await op('database.link', { projectId: created.projectId, databaseId: made.databaseId });
+  } catch (err) {
+    early = String(err);
+  }
+  if (!/cannot reach privately|private traffic/i.test(early)) {
+    throw new Error(`linking across servers was allowed too early: ${early}`);
+  }
+  pass('an app cannot read a database on a server the others cannot reach', 'refused in words');
+
+  await call('POST', '/api/v1/auth/step-up', { password });
+  await op('server.set_private_traffic', {
+    serverId: firstServerId,
+    enabled: true,
+    address: bedAddress(TESTBED),
+  });
+  pass('private traffic turned on, deliberately, for one server');
+
+  const { result: linked } = await op('database.link', {
+    projectId: created.projectId,
+    databaseId: made.databaseId,
+  });
+  await settled(linked.planId);
+
+  // The proof: the app's own container opens that database, by the name it
+  // would use if it were beside it, on a machine it has never heard of.
+  await until('the app opens the database across the mesh', async () => {
+    const container = replicaOn(TESTBED2, created.projectId);
+    if (!container) return false;
+    const url = inBed(
+      TESTBED2,
+      `docker exec ${container} printenv DATABASE_URL 2>/dev/null || true`,
+    ).trim();
+    const at = /@([^:@]+):(\d+)\//.exec(url);
+    if (!at) return false;
+    const reached = inBed(
+      TESTBED2,
+      `docker exec ${container} sh -c 'nc -z -w 5 ${at[1]} ${at[2]} && echo open' 2>&1 || true`,
+    );
+    if (!/open/.test(reached)) return false;
+    pass(
+      'an app opened a database on another server, by the name it would use at home',
+      `${at[1]}:${at[2]}`,
+    );
+    return true;
+  });
+}
+
+/**
+ * Building where the app will never run (§15 5.4a): the image is made on
+ * one machine, carried to the other, checked, and only then is the build
+ * finished — so a transfer that failed is a build that failed.
+ */
+async function buildsHereRunsThere(firstServerId, secondServerId) {
+  const upload = await uploadArchive(nodeAppArchive('built elsewhere'));
+  const { result: created } = await op('project.create', {
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'elsewhere' },
+      source: { type: 'archive', uploadId: upload.uploadId },
+      // Built where the build images already are; run where it never was.
+      build: { strategy: 'railpack', builder: firstServerId },
+      network: { containerPort: 3000 },
+      placement: { server: secondServerId },
+    },
+  });
+  await settled(created.planId, 900_000);
+
+  // It was built on the first machine — which has the build images — and
+  // it runs on the second, which has never compiled anything.
+  const built = inBed(TESTBED, "docker images --format '{{.Repository}}' | grep -c '^vd-build/'");
+  if (Number(built) < 1) throw new Error('nothing was built on the builder');
+  const container = replicaOn(TESTBED2, created.projectId);
+  if (!container) throw new Error('the app is not running on the server it was placed on');
+  const answer = inBed(
+    TESTBED2,
+    `docker exec ${container} sh -c 'wget -qO- http://127.0.0.1:3000 || true'`,
+  );
+  if (!/built elsewhere/.test(answer)) {
+    throw new Error(`the app built elsewhere does not serve: ${answer}`);
+  }
+  pass('built on one server, carried to another, and serving there', 'image checked on arrival');
 }
 
 /**
@@ -1415,8 +1676,13 @@ try {
 } finally {
   tunnel?.kill();
   if (process.argv.includes('--teardown')) {
-    log(`removing testbed ${TESTBED} and its volume ${TESTBED}-docker`);
-    onHost(`docker rm -f ${TESTBED} >/dev/null && docker volume rm ${TESTBED}-docker >/dev/null`);
+    // Each by name, never by pattern: this runs on a machine with other
+    // people's containers on it.
+    for (const bed of [TESTBED2, TESTBED]) {
+      if (!onHost(`docker ps -aq -f name=^${bed}$`)) continue;
+      log(`removing testbed ${bed} and its volume ${bed}-docker`);
+      onHost(`docker rm -f ${bed} >/dev/null && docker volume rm ${bed}-docker >/dev/null`);
+    }
   }
   verifyBaseline();
 }
