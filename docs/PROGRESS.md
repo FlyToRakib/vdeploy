@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — every item on §26's list is built; next is exercising it
+**Task:** M6 — every item on §26's list is built; exercising it end to end
 **Status:** in progress
 **Updated:** 2026-09-30 08:15 UTC
 
@@ -515,6 +515,24 @@ GitHub.
 
 - The M6 exit: the e2e on two machines again, with what M6 added —
   a preview, a staging promote, and a plugin key that may call one thing
+- [x] **a way to actually run this** — nothing in the repository said how.
+  Two Dockerfiles and a restore runbook, and no file describing the
+  running arrangement, for a product whose whole premise is that you
+  host it yourself. `deploy/compose.yml` is now the arrangement the e2e
+  brings up and exercises on every run, written down: one origin for the
+  dashboard and the API, which they must share because cookies, CSRF and
+  the agent's websocket are all bound to it. **Writing it found a second
+  thing**: copying `.env.example` and filling in only the keys you need
+  made the process refuse to start, because Compose, systemd and
+  `--env-file` all pass a blank line through as an empty string and an
+  empty string is not a URL. A setting left blank is now a setting that
+  was not set
+- [x] **removing an integration revokes its key, not one with the same
+  name** — found reading the code back: uninstall matched on the key's
+  name and installer, so one person who had allowed `deploy-bot` in two
+  organizations lost both keys by removing either, and the other
+  organization's integration simply stopped working with nothing to read
+  that explained why
 - [x] the M6 screens opened in a real browser, against a throwaway stack
   with its own database (first run, all 39 migrations from empty): the
   sign-in page's company button, company sign-in with both protocols,

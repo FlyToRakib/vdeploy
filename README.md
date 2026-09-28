@@ -139,6 +139,50 @@ to the address people type. Keep a copy of `SECRETS_KEY` somewhere that
 is not that server and not its database backups: without it no stored
 secret can be opened by anybody, including you.
 
+### In production
+
+The arrangement [e2e] testbed vdeploy-test-dind already running
+[e2e] loading vdeploy-test/control-plane:e2e and vdeploy-test/web:e2e into the testbed
+[e2e] starting Postgres, the API and the worker inside the testbed
+[e2e] ✓ first-run setup — org_01M3MPZEZQE34YX1Z03C2FKDC9
+[e2e] ✓ dashboard and API on one origin, as in production — http://127.0.0.1:18090
+[e2e] ✓ server added — srv_01M3MPZFD3P3JQER858GM652YT
+[e2e] ✓ installer dry run checks the server and changes nothing — Alpine allowed only by config
+[e2e] ✓ one-command installer: checksummed agent, enrolled, safe to run again
+[e2e] ✓ agent connected over signed frames
+[e2e] ✓ deployed from a spec, pinned by digest — project.create: 2 replicas running
+[e2e] ✓ survived an agent restart — still 2 replicas, no duplicates
+[e2e] ✓ self-healed a killed container — vd-01m3mpzhz4k6fh668t2vj6mw13-v1-r0-1
+[e2e] ✓ blue/green switch, no request dropped — 127 requests, now nginx 1.28.3
+[e2e] ✓ instant URL: DNS verified first, then https with http redirected — https://hello.apps.vdeploy.test
+[e2e] ✓ secret delivered sealed: in the container, never in frames or on disk — vd-01m3mpzhz4k6fh668t2vj6mw13-v3-r0-1
+[e2e] ✓ failed release command: old version kept serving — the release command failed (exit 3): migration 042 failed: c
+[e2e] ✓ failed deploy told to a webhook, signed, saying why — pln_01M3MQ1FEMCDESKCNJ96A4YNMK → project.update_spec on hello failed
+[e2e] ✓ release command ran before the new version started
+[e2e] ✓ detection preview before deploying — node
+[e2e] ✓ built from uploaded source on the server and served — railpack ok
+[e2e] ✓ a .zip upload deployed as the next version in one step — zip v2 ok
+[e2e] ✓ build flagged a folder whose files a deploy would delete — /app/uploads
+[e2e] ✓ a restart that would delete unsaved files is held, naming them
+[e2e] ✓ made permanent in place: the same file kept — 1790622969359
+[e2e] ✓ a real app from GitHub: fetched, built on the server, served — 9108 bytes
+[e2e] ✓ a failed deploy says the cause in plain words — listening on localhost
+[e2e] ✓ recent logs through the agent channel — 73 lines
+[e2e] ✓ live log stream over server-sent events
+[e2e] ✓ deploy history with its build log and the event timeline — 21 events
+[e2e] ✓ a managed database runs, reachable only inside the server — postgres 18, vd-db-01m3mqaxybyma7w7f0hqybc968 exercises on every run is written down
+in : Postgres, the API, the worker, the dashboard,
+and one proxy so the dashboard and the API answer on **one origin** —
+which they must, because cookies, CSRF and the agent's websocket are all
+bound to it.
+
+\
+Terminate TLS in front of it, pointed at port 8080, and set
+ to the address people type. Keep a copy of
+ somewhere that is not that server and not its database
+backups: without it, no stored secret can be opened by anybody,
+including you.
+
 ## Reading further
 
 - `docs/vdeploy.md` — the specification this is built from
