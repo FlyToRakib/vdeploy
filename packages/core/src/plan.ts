@@ -40,6 +40,16 @@ export interface DatabaseState {
   engine: DatabaseEngine;
   /** How many apps would lose their data connection. */
   linkedProjects: number;
+  /** The server it runs on: a database is files on one machine's disk. */
+  serverId?: string;
+  /**
+   * The name of the server it is on, and whether that server can be
+   * reached privately by the organization's others (§13). Linking an app
+   * on another server needs both, and saying so when asked beats saying it
+   * at the last step of the apply.
+   */
+  serverName?: string;
+  reachable?: boolean;
 }
 
 export interface PlanContext {
@@ -686,6 +696,15 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'database.link': (args, context) => {
     const project = requireProject(context);
     const database = requireDatabase(context);
+    // A database is files on one machine's disk, so an app somewhere else
+    // reaches it only if that machine can be reached privately (§13).
+    const here = project.spec.placement.server;
+    if (here && database.serverId && here !== database.serverId && database.reachable === false) {
+      throw new VDeployError(
+        'conflict',
+        `${database.name} is on ${database.serverName ?? 'another server'}, which your other servers cannot reach privately yet. Turn on private traffic for it, or put them on the same server.`,
+      );
+    }
     const envKey = args.envKey ?? defaultEnvKey(database.engine);
     return {
       specHash: null,

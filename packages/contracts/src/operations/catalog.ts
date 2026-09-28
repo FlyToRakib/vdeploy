@@ -894,6 +894,14 @@ export const OPERATIONS = [
     { stepUp: true },
   ),
   operation(
+    'server.set_private_traffic',
+    'human_only',
+    'server',
+    "Let this organization's other servers reach this one privately",
+    obj({ ...S, enabled: z.boolean() }),
+    { stepUp: true },
+  ),
+  operation(
     'server.remove',
     'human_only',
     'server',

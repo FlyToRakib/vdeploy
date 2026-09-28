@@ -47,6 +47,8 @@ interface ServerStatus {
   addressManual: boolean;
   provider: string | null;
   reachability: Reachability | null;
+  /** Where this organization's other servers reach it privately (§13); null when off. */
+  meshEndpoint: string | null;
   /** What the agent last said the machine is made of (§18); absent until it has looked. */
   health: ServerHealth | null;
   using: ServerUsing | null;
@@ -166,6 +168,33 @@ export function ServerDetail({ serverId }: { serverId: string }) {
       setDrain(await query<Drain>('server.drain', { serverId }));
     } catch (err) {
       setError(message(err, 'That could not be worked out.'));
+    }
+  }
+
+  /**
+   * Letting this organization's other servers reach this one privately
+   * (§13). It is off until somebody turns it on, and what it opens is said
+   * here rather than in a document nobody reads: every server so far has
+   * only ever dialled out, and this is the one thing that listens.
+   */
+  async function setPrivateTraffic(enabled: boolean) {
+    setError(null);
+    try {
+      const outcome = await stepUp(() =>
+        runOperation<{ endpoint: string | null }>('server.set_private_traffic', {
+          serverId,
+          enabled,
+        }),
+      );
+      if (outcome.status === 'done') {
+        setServer((current) =>
+          current ? { ...current, meshEndpoint: outcome.result.endpoint } : current,
+        );
+      }
+    } catch (err) {
+      if (!(err instanceof OperationError && err.code === 'cancelled')) {
+        setError(message(err, 'That could not be changed.'));
+      }
     }
   }
 
@@ -364,7 +393,49 @@ export function ServerDetail({ serverId }: { serverId: string }) {
           <h2 className="font-medium">Room for apps</h2>
           <p className="text-sm">{capacity ?? 'Known once the agent connects.'}</p>
         </Card>
-        <Card className="grid content-start gap-3 md:col-span-2">
+        <Card className="grid content-start gap-3">
+          <h2 className="font-medium">Private traffic between your servers</h2>
+          <p className="text-sm text-muted-foreground">
+            An app on one of your servers can only use a database on another if those servers can
+            reach each other. Turning this on lets your <em>other</em> servers — and nothing else —
+            open a connection to this one.
+          </p>
+          {server.meshEndpoint === null ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                It is off. This server dials out and nothing dials in.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="justify-self-start"
+                onClick={() => void setPrivateTraffic(true)}
+              >
+                Turn it on
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <Status health="healthy">On</Status>
+                <span className="text-sm text-muted-foreground">{server.meshEndpoint}</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Your other servers prove who they are with the same key VDeploy knows them by.
+                Anything else that reaches this port is refused before it can ask for anything.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="justify-self-start"
+                onClick={() => void setPrivateTraffic(false)}
+              >
+                Turn it off
+              </Button>
+            </>
+          )}
+        </Card>
+        <Card className="grid content-start gap-3">
           <h2 className="font-medium">Emptying this server</h2>
           <p className="text-sm text-muted-foreground">
             Before you turn a machine off, or replace it. Each app moves on its own, and each move

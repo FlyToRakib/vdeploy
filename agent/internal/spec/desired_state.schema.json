@@ -1316,6 +1316,135 @@
         ],
         "additionalProperties": false
       }
+    },
+    "mesh": {
+      "type": "object",
+      "properties": {
+        "listen": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65535
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "peers": {
+          "default": [],
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "serverId": {
+                "type": "string",
+                "pattern": "^srv_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "publicKey": {
+                "type": "string",
+                "minLength": 32,
+                "maxLength": 128
+              },
+              "endpoint": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "serverId",
+              "publicKey",
+              "endpoint"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "forwards": {
+          "default": [],
+          "maxItems": 256,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string",
+                "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "alias": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "listenPort": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 65535
+              },
+              "toServerId": {
+                "type": "string",
+                "pattern": "^srv_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "databaseId": {
+                "type": "string",
+                "pattern": "^db_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "projectId",
+              "alias",
+              "listenPort",
+              "toServerId",
+              "databaseId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "grants": {
+          "default": [],
+          "maxItems": 256,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "databaseId": {
+                "type": "string",
+                "pattern": "^db_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "fromServerId": {
+                "type": "string",
+                "pattern": "^srv_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "databaseId",
+              "fromServerId",
+              "port"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "listen",
+        "peers",
+        "forwards",
+        "grants"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -1323,7 +1452,8 @@
     "serverId",
     "generation",
     "projects",
-    "databases"
+    "databases",
+    "mesh"
   ],
   "additionalProperties": false
 }

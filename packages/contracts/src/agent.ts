@@ -14,6 +14,7 @@ import { ReplicaEvidence } from './diagnosis.js';
 import { FileListResult } from './files.js';
 import { ReclaimResult, ServerHealth } from './health.js';
 import { LogLine } from './logs.js';
+import { Mesh } from './mesh.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
 import { Hostname } from './spec/sections.js';
@@ -86,6 +87,11 @@ export const DesiredState = z.strictObject({
   projects: z.array(DesiredProject).max(200),
   /** The managed databases this server runs (§17.3); absent for older agents. */
   databases: z.array(DesiredDatabase).max(64).default([]),
+  /**
+   * Private traffic to and from this organization's other servers (§13).
+   * Absent means none: an install with one server never sees it.
+   */
+  mesh: Mesh.prefault({}),
 });
 export type DesiredState = z.infer<typeof DesiredState>;
 

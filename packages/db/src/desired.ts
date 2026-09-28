@@ -3,10 +3,13 @@ import { memoryBytes } from '@vdeploy/contracts';
 import { deliveryContext, engineProfile, sealTo } from '@vdeploy/core';
 import { databasePassword, databasesOn, linksOf } from './databases.js';
 import type { Database } from './client.js';
+import type { Executor } from './audit.js';
 import { certificateHosts, verifiedHosts } from './domains.js';
+import { meshFor } from './mesh.js';
+import { notifyDesiredState } from './notify.js';
 import { readSecret } from './secrets.js';
 import { projects, releases, servers } from './schema/index.js';
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
 /**
  * Everything a server should run, assembled from the database. A project is
@@ -120,5 +123,23 @@ export async function desiredStateFor(
       };
     }),
     databases,
+    mesh: await meshFor(db, serverId, server?.orgId ?? ''),
   });
+}
+
+/**
+ * Moves a server to a new desired generation and wakes its gateway, inside
+ * tx. A generation that does not move leaves the agent converging on what
+ * it already holds, so anything that changes what a server should run ends
+ * here.
+ */
+export async function bumpDesiredGeneration(tx: Executor, serverId: string): Promise<number> {
+  const [row] = await tx
+    .update(servers)
+    .set({ desiredGeneration: sql`${servers.desiredGeneration} + 1` })
+    .where(eq(servers.id, serverId))
+    .returning({ generation: servers.desiredGeneration });
+  if (!row) throw new Error(`server ${serverId} disappeared`);
+  await notifyDesiredState(tx, serverId);
+  return row.generation;
 }

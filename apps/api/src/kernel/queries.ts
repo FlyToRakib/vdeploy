@@ -211,6 +211,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         addressManual: servers.addressManual,
         provider: servers.provider,
         reachability: servers.reachability,
+        meshEndpoint: servers.meshEndpoint,
         /** The last time disk was freed here, and what it actually freed. */
         lastReclaim: servers.lastReclaim,
       })

@@ -43,6 +43,7 @@ import {
   getDatabase,
   markDatabaseDeleted,
   newestGoodBackup,
+  pickMeshPort,
   linkedDatabases,
   projects,
   servers,
@@ -138,11 +139,29 @@ export async function linkDatabaseStep(
   if (!row) throw new VDeployError('not_found', 'The database no longer exists');
   const [app] = await deps.db.select().from(projects).where(eq(projects.id, state.projectId));
   if (!app) throw new VDeployError('not_found', 'The project no longer exists');
+  /*
+   * The app and the database on different servers (§13, ADR 0018).
+   *
+   * Until there was a mesh this was simply refused, and that refusal is
+   * why moving an app had to drag its database along. Now it is a port:
+   * the app's own server listens on its own project network under the
+   * name the database would have if it were there, and carries what
+   * arrives to the server that has it.
+   *
+   * Everything below this line is unchanged by it, which is the point —
+   * the connection string the app is handed names the same host it always
+   * did, and the app never learns that anything crossed a machine.
+   */
+  let meshPort: number | null = null;
   if (app.serverId && app.serverId !== row.serverId) {
-    throw new VDeployError(
-      'conflict',
-      'The app and the database are on different servers; a database is reachable only on its own server',
-    );
+    const [holder] = await deps.db.select().from(servers).where(eq(servers.id, row.serverId));
+    if (!holder?.meshEndpoint) {
+      throw new VDeployError(
+        'conflict',
+        `${app.name} and ${row.name} are on different servers, and ${holder?.name ?? 'that server'} is not reachable by your other servers yet. Turn on private traffic for it, or move one of them.`,
+      );
+    }
+    meshPort = await pickMeshPort(deps.db, app.serverId);
   }
   const envKey =
     typeof state.args.envKey === 'string' ? state.args.envKey : defaultEnvKey(row.engine);
@@ -160,7 +179,8 @@ export async function linkDatabaseStep(
     const url = connectionUrl({
       engine: row.engine,
       host: databaseHost(row.id),
-      port: row.port,
+      // The same name either way; only which port behind it answers moves.
+      port: meshPort ?? row.port,
       user: row.user,
       password: await databasePassword(tx, deps.secretsKey, row),
       dbName: row.dbName,
@@ -175,10 +195,10 @@ export async function linkDatabaseStep(
     });
     await tx
       .insert(databaseLinks)
-      .values({ databaseId, projectId, envKey, secretId })
+      .values({ databaseId, projectId, envKey, secretId, meshPort })
       .onConflictDoUpdate({
         target: [databaseLinks.databaseId, databaseLinks.projectId, databaseLinks.envKey],
-        set: { secretId },
+        set: { secretId, meshPort },
       });
     // The app reads it like any other setting; the value itself stays a secret.
     let spec = specAfter('env.set', { key: envKey, secretRef: secretId }, app.spec);
@@ -186,7 +206,7 @@ export async function linkDatabaseStep(
       const password = await databasePassword(tx, deps.secretsKey, row);
       const pieces: [string | undefined, string][] = [
         [parts.host, databaseHost(row.id)],
-        [parts.port, String(row.port)],
+        [parts.port, String(meshPort ?? row.port)],
         [parts.user, row.user],
         [parts.name, row.dbName ?? row.user],
       ];
@@ -210,8 +230,13 @@ export async function linkDatabaseStep(
       .set({ spec, specHash: hashOf(spec), updatedAt: deps.now() })
       .where(eq(projects.id, projectId));
     await bumpGeneration(tx, row.serverId);
+    if (app.serverId && app.serverId !== row.serverId) await bumpGeneration(tx, app.serverId);
   });
-  state.notes.push(`${app.name} now reads ${envKey} and finds ${row.name} there.`);
+  state.notes.push(
+    meshPort === null
+      ? `${app.name} now reads ${envKey} and finds ${row.name} there.`
+      : `${app.name} now reads ${envKey} and finds ${row.name} there, across from its own server.`,
+  );
 }
 
 /** Takes the database away from the app. The data stays where it is. */

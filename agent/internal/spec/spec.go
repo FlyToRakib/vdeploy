@@ -33,6 +33,53 @@ type DesiredState struct {
 	// database is not a project: it is never deployed blue/green, because two
 	// engines on one volume is how data is lost.
 	Databases []DesiredDatabase `json:"databases"`
+	// Mesh is private traffic to and from this organization's other servers
+	// (§13, ADR 0018). An install with one server never sees it.
+	Mesh Mesh `json:"mesh"`
+}
+
+// Mesh is this server's end of the private traffic between an
+// organization's own servers.
+type Mesh struct {
+	// Listen is the port to accept peers on; nil accepts nothing, which is
+	// the default and the common case. A server listens only because it
+	// holds something another of their servers reaches.
+	Listen *int `json:"listen"`
+	// Peers are the other servers this one may talk to, by the same signing
+	// key the control plane knows them by (ADR 0004).
+	Peers []MeshPeer `json:"peers"`
+	// Forwards are services on other servers, offered here under the name
+	// they would have if they were local.
+	Forwards []MeshForward `json:"forwards"`
+	// Grants are what this server hands out, and to whom. The answer lives
+	// with the server that owns the data, not the one that wants it.
+	Grants []MeshGrant `json:"grants"`
+}
+
+// MeshPeer is another server, and how to reach it.
+type MeshPeer struct {
+	ServerID  string `json:"serverId"`
+	PublicKey string `json:"publicKey"`
+	// Endpoint is host:port to dial, or nil for a peer that only accepts.
+	Endpoint *string `json:"endpoint"`
+}
+
+// MeshForward is one service on another server, offered on a project's own
+// network under the name it would have if it were local.
+type MeshForward struct {
+	ProjectID  string `json:"projectId"`
+	Alias      string `json:"alias"`
+	ListenPort int    `json:"listenPort"`
+	ToServerID string `json:"toServerId"`
+	DatabaseID string `json:"databaseId"`
+}
+
+// MeshGrant is one of this server's databases, and the server allowed to
+// reach it.
+type MeshGrant struct {
+	DatabaseID   string `json:"databaseId"`
+	FromServerID string `json:"fromServerId"`
+	Port         int    `json:"port"`
 }
 
 // DesiredDatabase is one managed database as the agent must run it.

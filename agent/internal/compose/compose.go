@@ -42,6 +42,12 @@ type Container struct {
 	StopTimeout   int
 	RestartPolicy string
 	Port          int
+	// ExtraHosts maps a name to an address inside this container, as
+	// `name:address` (§13). It is how a service on another server is reached
+	// under the name it would have if it were here: the app resolves it,
+	// finds its own server's agent on its own network, and never learns
+	// that anything crossed a machine.
+	ExtraHosts []string
 }
 
 // Mount attaches a named volume the agent owns.

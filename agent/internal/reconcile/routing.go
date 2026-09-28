@@ -181,3 +181,18 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 		p.event("failed", "", docker.TraefikName, err.Error())
 	}
 }
+
+// MeshRunner is this server's end of the private traffic between an
+// organization's own servers (§13).
+//
+// Apply runs on every pass because it is idempotent: a project's network
+// may not exist the first time one of its forwards appears, and a peer may
+// be unreachable for an hour. Both simply do not open this time, and are
+// tried again — there is no retry schedule here to get wrong.
+type MeshRunner interface {
+	Apply(ctx context.Context, mesh spec.Mesh)
+	// Hosts are the names a project's containers must be told, so a service
+	// on another server is reached under the name it would have if it were
+	// here.
+	Hosts(projectID string) []string
+}

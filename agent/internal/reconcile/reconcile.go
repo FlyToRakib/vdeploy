@@ -119,7 +119,10 @@ type Reconciler struct {
 	Traffic Traffic
 	// Inspector gathers evidence on replicas that are not serving; nil gathers none.
 	Inspector Inspector
-	Now       func() time.Time
+	// Mesh carries private traffic to this organization's other servers
+	// (§13); nil means every service an app uses is on its own machine.
+	Mesh MeshRunner
+	Now  func() time.Time
 
 	ready         map[string]*readiness
 	draining      map[string]time.Time
@@ -194,6 +197,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	p.report.Generation = state.Generation
 	for _, c := range listed {
 		p.existing[c.Name] = c
+	}
+	// Before anything is planned: a container is told the names of services
+	// on other servers when it is created, so the sockets that answer those
+	// names have to exist first.
+	if r.Mesh != nil {
+		r.Mesh.Apply(ctx, state.Mesh)
 	}
 	for _, project := range state.Projects {
 		p.desired[project.ProjectID] = project
@@ -278,6 +287,15 @@ func (p *pass) project(ctx context.Context, project spec.DesiredProject) Project
 		return result
 	}
 	containers, err := compose.Plan(project)
+	// Anything this app reads that lives on another server is reached under
+	// its ordinary name, pointed at this server's own agent (§13).
+	if err == nil && p.r.Mesh != nil {
+		if hosts := p.r.Mesh.Hosts(project.ProjectID); len(hosts) > 0 {
+			for i := range containers {
+				containers[i].ExtraHosts = hosts
+			}
+		}
+	}
 	if err == nil {
 		err = p.converge(ctx, project, containers)
 	}

@@ -165,6 +165,7 @@ type hostConfig struct {
 	Init          bool          `json:"Init"`
 	LogConfig     logConfig     `json:"LogConfig"`
 	RestartPolicy restartPolicy `json:"RestartPolicy"`
+	ExtraHosts    []string      `json:"ExtraHosts,omitempty"`
 	Mounts        []mount       `json:"Mounts"`
 	NetworkMode   string        `json:"NetworkMode"`
 }
@@ -212,6 +213,7 @@ func CreateRequest(ct compose.Container) CreateBody {
 				"max-size": compose.LogMaxSize, "max-file": compose.LogMaxFiles,
 			}},
 			RestartPolicy: restartPolicy{Name: ct.RestartPolicy},
+			ExtraHosts:    ct.ExtraHosts,
 			Mounts:        mounts,
 			NetworkMode:   ct.Network,
 		},
@@ -295,4 +297,29 @@ func (c *Client) DisconnectNetwork(ctx context.Context, id, network string) erro
 func (c *Client) RemoveWithVolumes(ctx context.Context, id string) error {
 	query := url.Values{"force": {"true"}, "v": {"1"}}
 	return c.do(ctx, http.MethodDelete, "/containers/"+url.PathEscape(id), query, nil, nil)
+}
+
+// NetworkGateway is the host's address on one of the agent's own networks.
+//
+// It is where a project's containers reach the agent, and nothing else
+// reaches it there: not the host's other services, not another project,
+// not the internet. That is what makes it the right place to offer a
+// service that lives on a different server (§13).
+func (c *Client) NetworkGateway(ctx context.Context, name string) (string, error) {
+	var out struct {
+		IPAM struct {
+			Config []struct {
+				Gateway string `json:"Gateway"`
+			} `json:"Config"`
+		} `json:"IPAM"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/networks/"+url.PathEscape(name), nil, nil, &out); err != nil {
+		return "", err
+	}
+	for _, config := range out.IPAM.Config {
+		if config.Gateway != "" {
+			return config.Gateway, nil
+		}
+	}
+	return "", fmt.Errorf("%s has no gateway address", name)
 }

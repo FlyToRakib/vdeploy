@@ -67,6 +67,15 @@ export const servers = pgTable('servers', {
   reachability: jsonb('reachability').$type<Reachability>(),
   /** The last time disk was freed here, and what it actually freed (§18). */
   lastReclaim: jsonb('last_reclaim').$type<ReclaimResult>(),
+  /**
+   * Where other servers in this organization reach this one privately
+   * (§13, ADR 0018): `host:port`, and null while the mesh is off here.
+   *
+   * It is the one inbound thing VDeploy ever asks for, which is why it is
+   * off until somebody turns it on and why what it opens is spelled out
+   * where they turn it on.
+   */
+  meshEndpoint: text('mesh_endpoint'),
   createdAt: createdAt(),
 });
 

@@ -149,6 +149,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'secret.read_value': { secretId: newId('secret') },
   'task.run': { command: ['node', 'migrate.js'] },
   'server.add': { name: 'server-02' },
+  'server.set_private_traffic': { enabled: true },
   'user.invite': { email: 'someone@example.com', role: 'developer' },
   'user.remove': { userId: newId('user') },
   'user.set_role': { userId: newId('user'), role: 'viewer' },

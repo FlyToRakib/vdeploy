@@ -1,6 +1,6 @@
-import { notifyDesiredState, observedState, servers, type Database } from '@vdeploy/db';
-import type { Executor } from '@vdeploy/db';
-import { eq, sql } from 'drizzle-orm';
+import { bumpDesiredGeneration, observedState, servers, type Database } from '@vdeploy/db';
+
+import { eq } from 'drizzle-orm';
 
 export interface Expectation {
   serverId: string;
@@ -15,16 +15,7 @@ export interface Expectation {
 export type Outcome = { ok: true } | { ok: false; reason: string };
 
 /** Moves the server to a new desired generation and wakes its gateway, inside tx. */
-export async function bumpGeneration(tx: Executor, serverId: string): Promise<number> {
-  const [row] = await tx
-    .update(servers)
-    .set({ desiredGeneration: sql`${servers.desiredGeneration} + 1` })
-    .where(eq(servers.id, serverId))
-    .returning({ generation: servers.desiredGeneration });
-  if (!row) throw new Error(`server ${serverId} disappeared`);
-  await notifyDesiredState(tx, serverId);
-  return row.generation;
-}
+export const bumpGeneration = bumpDesiredGeneration;
 
 /** Replica states the agent reports for a container that is up. Only ready takes traffic. */
 const LIVE = new Set(['running', 'starting', 'ready', 'unhealthy']);

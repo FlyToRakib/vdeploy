@@ -2,8 +2,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { newId, UrlSettings, VDeployError, type OperationName } from '@vdeploy/contracts';
 import {
   apikey,
+  bumpDesiredGeneration,
   auditLog,
   databases,
+  MESH_DEFAULT_PORT,
   instanceSettings,
   invitation,
   member,
@@ -303,6 +305,53 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
       role: context.args.role === 'builder' ? 'builder' : 'apps',
     });
     return enrollmentToken(context, serverId);
+  },
+  /**
+   * Turning private traffic on for one server (§13, ADR 0018).
+   *
+   * It is human-only and asks for a second factor, because it is the one
+   * inbound thing VDeploy ever opens: until now every server has only ever
+   * dialled out. What it opens is one port, which answers nothing without
+   * a certificate holding the signing key of another of this
+   * organization's own servers — but "nothing listens here" is a property
+   * worth having to give up deliberately.
+   *
+   * The address comes from what the control plane already knows the
+   * server by, so there is nothing to type and nothing to get wrong.
+   */
+  'server.set_private_traffic': async ({ deps, actor, args }) => {
+    const serverId = String(args.serverId);
+    const [row] = await deps.db
+      .select()
+      .from(servers)
+      .where(and(eq(servers.id, serverId), eq(servers.orgId, actor.orgId)));
+    if (!row) throw new VDeployError('not_found', 'That server is not one of yours');
+    if (!args.enabled) {
+      await deps.db.update(servers).set({ meshEndpoint: null }).where(eq(servers.id, serverId));
+      await deps.db.transaction((tx) => bumpDesiredGeneration(tx, serverId));
+      return { serverId, endpoint: null };
+    }
+    const address = row.publicIpv4 ?? row.publicIpv6;
+    if (!address) {
+      throw new VDeployError(
+        'conflict',
+        `VDeploy does not know an address for ${row.name} yet, so the others cannot be told where to find it. Set its address first.`,
+      );
+    }
+    const endpoint =
+      row.publicIpv6 && !row.publicIpv4
+        ? `[${address}]:${String(MESH_DEFAULT_PORT)}`
+        : `${address}:${String(MESH_DEFAULT_PORT)}`;
+    await deps.db.update(servers).set({ meshEndpoint: endpoint }).where(eq(servers.id, serverId));
+    // Every server in the organization: the peer list is built from this.
+    const all = await deps.db
+      .select({ id: servers.id })
+      .from(servers)
+      .where(eq(servers.orgId, actor.orgId));
+    await deps.db.transaction(async (tx) => {
+      for (const one of all) await bumpDesiredGeneration(tx, one.id);
+    });
+    return { serverId, endpoint };
   },
   'server.enrollment_token': async (context) => {
     const serverId = String(context.args.serverId);

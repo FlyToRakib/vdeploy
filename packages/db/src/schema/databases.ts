@@ -100,6 +100,13 @@ export const databaseLinks = pgTable(
     secretId: text('secret_id')
       .notNull()
       .references(() => secrets.id, { onDelete: 'cascade' }),
+    /**
+     * When the app and the database are on different servers (§13, ADR
+     * 0018): the port the app's own server listens on for this link. The
+     * app dials a name on its own network and never learns that the
+     * database is somewhere else.
+     */
+    meshPort: integer('mesh_port'),
     createdAt: createdAt(),
   },
   (t) => [

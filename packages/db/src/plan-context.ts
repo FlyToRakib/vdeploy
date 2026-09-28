@@ -114,6 +114,7 @@ async function requestedDatabase(
   const row = await getDatabase(db, args.databaseId);
   if (!row) return null;
   const links = await linksOf(db, row.id);
+  const [host] = await db.select().from(servers).where(eq(servers.id, row.serverId));
   return {
     serverId: row.serverId,
     state: {
@@ -121,6 +122,8 @@ async function requestedDatabase(
       name: row.name,
       engine: row.engine,
       linkedProjects: new Set(links.map((link) => link.projectId)).size,
+      serverId: row.serverId,
+      ...(host ? { serverName: host.name, reachable: host.meshEndpoint !== null } : {}),
     },
   };
 }

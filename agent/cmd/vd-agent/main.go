@@ -27,6 +27,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/identity"
 	"github.com/FlyToRakib/vdeploy/agent/internal/image"
 	"github.com/FlyToRakib/vdeploy/agent/internal/logs"
+	"github.com/FlyToRakib/vdeploy/agent/internal/mesh"
 	"github.com/FlyToRakib/vdeploy/agent/internal/metrics"
 	"github.com/FlyToRakib/vdeploy/agent/internal/preflight"
 	"github.com/FlyToRakib/vdeploy/agent/internal/reclaim"
@@ -240,6 +241,16 @@ func serve(configPath string, log *slog.Logger) error {
 			return err //nolint:wrapcheck // names the file already
 		}
 		reconciler.Secrets = sealed.Opener{Key: box, ServerID: id.ServerID}
+		// Private traffic to this organization's other servers (§13, ADR
+		// 0018), using the same signing identity the control plane knows
+		// this agent by: there is no new secret here to look after.
+		meshRunner := &mesh.Runner{
+			Identity: mesh.Identity{ServerID: id.ServerID, Key: key},
+			Engine:   engine,
+			Log:      log,
+		}
+		defer meshRunner.Close()
+		reconciler.Mesh = meshRunner
 		memoryCap, cpuCap := cfg.BuildCaps(policy)
 		builder := &build.Builder{
 			Engine: engine,
