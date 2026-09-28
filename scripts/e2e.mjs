@@ -544,9 +544,27 @@ async function secondServer(firstServerId) {
     TESTBED2,
     `mkdir -p /etc/vdeploy && echo '${JSON.stringify(config)}' > /etc/vdeploy/agent.json`,
   );
-  // The control plane is inside the first testbed; the second reaches it on
-  // the bridge they share, which is how two VPSes reach one.
-  const controlPlane = `http://${bedAddress(TESTBED)}:8080`;
+  /*
+   * The second machine has to reach the control plane at **the same
+   * address everybody else uses**, not just at some address of its own.
+   *
+   * That is not a detail of the testbed. Every URL the control plane hands
+   * an agent — where to fetch a build's source, where to collect an image
+   * another server built — is built from its one public address, because
+   * an address that is right from one machine and wrong from another is
+   * how you get a deploy that works on the first server and hangs on the
+   * second. In production that address is a domain. Here it is a loopback
+   * port, so the second testbed gets the same forwarder the first has, and
+   * the agent on it is none the wiser.
+   */
+  const first = bedAddress(TESTBED);
+  inBed(
+    TESTBED2,
+    `docker run -d --name cp-proxy -p 18090:8080 ${CADDY} ` +
+      `caddy reverse-proxy --from :8080 --to ${first}:8080 >/dev/null` +
+      ` && until wget -qO- http://127.0.0.1:18090/api/v1/setup >/dev/null 2>&1; do sleep 1; done`,
+  );
+  const controlPlane = PUBLIC_URL;
   inBed(
     TESTBED2,
     `wget -qO /usr/local/bin/vd-agent ${controlPlane}/api/v1/agent/download/vd-agent-linux-amd64 ` +
