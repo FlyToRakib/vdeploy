@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { applyPlan } from './apply.js';
 import { runAutoscaling } from './autoscale-loop.js';
 import { closeStalePreviews } from './preview-expiry.js';
+import { watchProvisioning } from './provisioning.js';
 import { runDueBackups, runDueVerifications } from './backup-schedule.js';
 import { runDueCrons } from './cron-schedule.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
@@ -194,6 +195,30 @@ const scaleTimer = setInterval(() => {
     });
 }, 60_000);
 
+// Machines VDeploy asked a provider for (§26 M6). Every twenty seconds
+// while one is being made, because the address it gets is the thing
+// somebody is watching the screen for, and a machine that never arrives
+// should be said out loud rather than left saying "pending".
+let watching = false;
+const provisioningTimer = setInterval(() => {
+  if (watching) return;
+  watching = true;
+  watchProvisioning({
+    db,
+    secretsKey: config.SECRETS_KEY,
+    now: () => new Date(),
+    logError: (err, serverId) => {
+      log.error({ err, serverId }, 'could not ask the provider about a new machine');
+    },
+  })
+    .catch((err: unknown) => {
+      log.error({ err }, 'provisioning round failed');
+    })
+    .finally(() => {
+      watching = false;
+    });
+}, 20_000);
+
 // Previews of pull requests nobody has pushed to (§26 M6). Once an hour
 // is often enough for something measured in days, and it is the sweep that
 // catches the webhook that never arrived rather than the ordinary way a
@@ -297,6 +322,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     clearInterval(cronTimer);
     clearInterval(scaleTimer);
     clearInterval(previewTimer);
+    clearInterval(provisioningTimer);
     clearInterval(pruneTimer);
     clearInterval(notifyTimer);
     clearInterval(offlineTimer);

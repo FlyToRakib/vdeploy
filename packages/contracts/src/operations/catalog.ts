@@ -123,6 +123,20 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'cloud.list',
+    'org',
+    'config',
+    'List the cloud accounts VDeploy can make servers in',
+    obj({}),
+  ),
+  query(
+    'cloud.offerings',
+    'org',
+    'config',
+    'Show the sizes and places a cloud account offers, with what each costs a month',
+    obj({ cloudAccountId: idSchema('cloudAccount') }),
+  ),
+  query(
     'plugin.list',
     'org',
     'config',
@@ -743,6 +757,46 @@ export const OPERATIONS = [
     'project',
     'Take down a preview and everything it made; the app it previews is untouched',
     obj(P),
+  ),
+  // A token that can make servers can also make a bill, so connecting
+  // one is tier 4 like every other pasted credential (ADR 0024).
+  operation(
+    'cloud.connect',
+    'human_only',
+    'org',
+    'Let VDeploy make servers in your account at a cloud provider',
+    obj({
+      provider: z.enum(['hetzner', 'digitalocean', 'vultr']),
+      name: ResourceName,
+      token: z.string().min(8).max(500),
+    }),
+    { minRole: 'owner', stepUp: true },
+  ),
+  operation(
+    'cloud.disconnect',
+    'sensitive',
+    'org',
+    'Forget a cloud account; the servers it made keep running',
+    obj({ cloudAccountId: idSchema('cloudAccount') }),
+    { minRole: 'admin' },
+  ),
+  // Making a machine spends somebody's money every month it exists, so
+  // it asks for the password again and says the price before it does.
+  operation(
+    'server.provision',
+    'sensitive',
+    'org',
+    'Make a new server at a cloud provider and connect it, all in one step',
+    obj({
+      cloudAccountId: idSchema('cloudAccount'),
+      name: ResourceName,
+      region: z.string().min(1).max(64),
+      size: z.string().min(1).max(64),
+      role: z.enum(['apps', 'builder', 'edge']).default('apps'),
+      /** Keys already at the provider, so a person is not locked out. */
+      sshKeys: z.array(z.string().min(1).max(128)).max(16).default([]),
+    }),
+    { minRole: 'admin', stepUp: true },
   ),
   // Allowing an integration is tier 4 because it hands out a key that
   // can call VDeploy. What makes that safe is that the list of what it

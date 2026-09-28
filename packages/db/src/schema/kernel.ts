@@ -63,6 +63,13 @@ export const servers = pgTable('servers', {
   desiredGeneration: integer('desired_generation').notNull().default(0),
   /** Where the internet reaches this server; backs its zero-domain URLs (§13.1). */
   publicIpv4: text('public_ipv4'),
+  /**
+   * The cloud account this machine was made in, when VDeploy made it
+   * (§26 M6, ADR 0024). Null for a machine somebody already had.
+   */
+  cloudAccountId: text('cloud_account_id'),
+  /** The provider's own id for the machine, which is how it is later destroyed. */
+  cloudMachineId: text('cloud_machine_id'),
   publicIpv6: text('public_ipv6'),
   /** Set by a person: detection never overwrites it. */
   addressManual: boolean('address_manual').notNull().default(false),

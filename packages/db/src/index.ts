@@ -16,6 +16,7 @@ export * from './terminal.js';
 export * from './metrics.js';
 export * from './fronting.js';
 export * from './mesh.js';
+export * from './clouds.js';
 export * from './plugins.js';
 export * from './previews.js';
 export * from './sources.js';

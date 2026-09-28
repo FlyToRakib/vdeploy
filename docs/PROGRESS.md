@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — next: servers VDeploy provisions itself
+**Task:** M6 — every item on §26's list is built; next is exercising it
 **Status:** in progress
-**Updated:** 2026-09-30 05:40 UTC
+**Updated:** 2026-09-30 08:15 UTC
 
 ## M6 — the ecosystem
 
@@ -155,6 +155,26 @@ kind of model, and a second and third place source can come from.
   leaving two things to revoke that can disagree. And the audit log says
   which plugin: an entry reading "the owner listed the servers" when a
   bot did it is worse than no entry
+
+- [x] **servers VDeploy makes for you** (ADR 0024) — Hetzner,
+  DigitalOcean and Vultr, and the decision is that provisioning is **a
+  way of reaching the existing first step, not a second one**. The
+  machine's cloud-init runs *the same one command* the dashboard shows
+  somebody adding a server by hand, with an ordinary enrollment token,
+  and its agent connects outbound exactly as every other agent does — so
+  there is no second installer to be wrong on a Tuesday, and no SSH
+  anywhere: VDeploy still never connects *to* a server. The row is
+  written **before** the machine is ordered, because a machine with
+  nowhere to enroll is the failure that costs money quietly, and a
+  provider that refuses leaves nothing behind. A watcher records the
+  address and says so after half an hour if nothing ever connects,
+  because "pending" with no explanation is the shape of a wasted
+  afternoon. Forgetting a cloud account does **not** delete servers, and
+  the answer says so. The three providers live in one file because the
+  differences are the content: Hetzner reports memory in gigabytes,
+  DigitalOcean hides the address in a list of networks, and Vultr wants
+  a numeric image id, a base64 boot script, and answers `0.0.0.0` while
+  it is still thinking
 
 Four bugs, all found by using the thing rather than by a test:
 
@@ -492,8 +512,10 @@ GitHub.
 
 ## Next
 
-- M6: servers VDeploy provisions itself (Hetzner, DigitalOcean, Vultr) —
-  the last item on the list
+- The M6 exit: the e2e on two machines again, with what M6 added —
+  a preview, a staging promote, and a plugin key that may call one thing
+- The dashboard screens M6 added have never been opened in a browser:
+  previews, staging, company sign-in, integrations, cloud accounts
 
 ## Known gaps (tracked, not forgotten)
 
@@ -520,6 +542,13 @@ GitHub.
   the app's afterwards, which is the point but is said only once. Staging
   gets no database of its own. Its dashboard card has not been opened in a
   browser; the apply path is covered by the worker tests.
+- Provisioning is written from each provider's documented API and tested
+  against a stand-in, not a live account: the image name, the encoding
+  and the placeholder address are asserted, but nobody has watched a real
+  Hetzner machine come up. Ubuntu 24.04 only. VDeploy will not destroy a
+  machine it made — removing a server here leaves it running at the
+  provider, and the dashboard says so. No SSH key creation: keys already
+  at the provider can be named, and VDeploy never needs to log in itself.
 - Plugins add nothing to VDeploy — no new operation, screen, deploy
   strategy or database engine; they can only use what is here, and the
   honest answer to "add Redis support as a plugin" is a pull request.
@@ -551,6 +580,7 @@ GitHub.
 
 ## Decisions made
 
+- 2026-09-30 Provisioning reaches the first step, it is not a second one — docs/adr/0024-provisioning-reaches-the-first-step.md
 - 2026-09-30 A plugin is a capability, not code — docs/adr/0023-a-plugin-is-a-capability.md
 - 2026-09-30 SSO: the protocol is borrowed, the authorization is ours — docs/adr/0022-sso-protocol-borrowed-authorization-owned.md
 - 2026-09-29 Staging owns its keys, and promoting moves the image — docs/adr/0021-staging-promotes-an-image.md

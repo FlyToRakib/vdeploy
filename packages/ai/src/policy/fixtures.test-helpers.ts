@@ -158,6 +158,15 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
     },
   },
   'plugin.uninstall': { pluginId: newId('plugin') },
+  'cloud.connect': { provider: 'hetzner', name: 'main', token: 'not-a-real-token' },
+  'cloud.disconnect': { cloudAccountId: newId('cloudAccount') },
+  'cloud.offerings': { cloudAccountId: newId('cloudAccount') },
+  'server.provision': {
+    cloudAccountId: newId('cloudAccount'),
+    name: 'web-1',
+    region: 'fsn1',
+    size: 'cx22',
+  },
   'preview.open': {
     pullRequest: {
       provider: 'github',

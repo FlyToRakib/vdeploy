@@ -50,6 +50,8 @@ export const ID_PREFIXES = {
   ssoProvider: 'sso',
   /** A narrow, revocable capability given to somebody's integration (§26 M6). */
   plugin: 'plg',
+  /** A cloud account VDeploy can make servers in (§26 M6). */
+  cloudAccount: 'cld',
   notificationChannel: 'nch',
   notification: 'ntf',
 } as const;

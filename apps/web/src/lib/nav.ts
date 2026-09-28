@@ -1,4 +1,5 @@
 import {
+  Cloud,
   Puzzle,
   Building2,
   Activity,
@@ -68,6 +69,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Git',
     icon: GitBranch,
     keywords: ['github', 'gitlab', 'bitbucket', 'repository', 'connect', 'push'],
+  },
+  {
+    href: '/settings/clouds',
+    label: 'Cloud accounts',
+    icon: Cloud,
+    keywords: ['hetzner', 'digitalocean', 'vultr', 'provision', 'vps', 'server'],
   },
   {
     href: '/settings/plugins',
