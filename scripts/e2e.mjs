@@ -747,14 +747,26 @@ async function buildsHereRunsThere(firstServerId, secondServerId) {
   if (Number(built) < 1) throw new Error('nothing was built on the builder');
   const container = replicaOn(TESTBED2, created.projectId);
   if (!container) throw new Error('the app is not running on the server it was placed on');
-  const answer = inBed(
-    TESTBED2,
-    `docker exec ${container} sh -c 'wget -qO- http://127.0.0.1:3000 || true'`,
+  // Asked from the machine, not from inside the container: what a built
+  // image happens to carry is the app's business, and `wget` being absent
+  // from it would say nothing about whether it serves.
+  const answer = await until(
+    'the app built elsewhere serves',
+    () => {
+      const ip = inBed(
+        TESTBED2,
+        `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${container}`,
+      ).trim();
+      if (!ip) return null;
+      const out = inBed(TESTBED2, `wget -q -O - -T 3 http://${ip}:3000/ 2>/dev/null || true`);
+      return out.includes('built elsewhere') ? out : null;
+    },
+    120_000,
   );
-  if (!/built elsewhere/.test(answer)) {
-    throw new Error(`the app built elsewhere does not serve: ${answer}`);
-  }
-  pass('built on one server, carried to another, and serving there', 'image checked on arrival');
+  pass(
+    'built on one server, carried to another, and serving there',
+    `${answer.trim()} — the image was checked on arrival`,
+  );
 }
 
 /**
