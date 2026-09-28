@@ -70,11 +70,13 @@ export function SignInForm() {
     setBusy(false);
     const url = res.ok ? (body as { url?: string }).url : undefined;
     if (!url) {
+      // Nobody has connected that domain. Better Auth says "no provider
+      // found for the issuer", which is true and is not a sentence to
+      // show somebody who has just typed their work email.
       setError(
-        messageOf(
-          body,
-          'No company sign-in is set up for that address. Use your email and password instead.',
-        ),
+        res.status === 404 || res.status === 400
+          ? 'No company sign-in is set up for that address. Use your email and password instead.'
+          : messageOf(body, 'That did not work. Try your email and password instead.'),
       );
       return;
     }
