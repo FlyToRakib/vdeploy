@@ -194,21 +194,31 @@ const APP_IMAGES = [
 ];
 
 function loadAppImages(beds = [TESTBED]) {
-  for (const image of APP_IMAGES) {
-    try {
-      execFileSync('docker', ['image', 'inspect', '-f', '{{.Id}}', image], { stdio: 'ignore' });
-    } catch {
-      log(`fetching ${image} once, on this machine`);
-      execFileSync('docker', ['pull', '-q', image], { stdio: 'ignore' });
-    }
-  }
   for (const bed of beds) {
     const missing = APP_IMAGES.filter(
       (image) =>
         !inBed(bed, `docker image inspect -f '{{.Id}}' ${image} 2>/dev/null || true`).trim(),
     );
     if (missing.length === 0) continue;
-    log(`loading ${String(missing.length)} app images into ${bed}`);
+    log(
+      `${bed}: making sure it has ${String(missing.length)} app images before anything needs them`,
+    );
+    if (vps) {
+      // The VPS fetches its own: it is in a datacentre and this machine is
+      // not, so sending them up the link from here would be the slow way
+      // round. What matters is only that it happens now rather than in the
+      // middle of a check.
+      inBed(bed, missing.map((image) => `docker pull -q ${image} >/dev/null`).join(' && '));
+      continue;
+    }
+    for (const image of missing) {
+      try {
+        execFileSync('docker', ['image', 'inspect', '-f', '{{.Id}}', image], { stdio: 'ignore' });
+      } catch {
+        log(`fetching ${image} once, on this machine`);
+        execFileSync('docker', ['pull', '-q', image], { stdio: 'ignore' });
+      }
+    }
     inBed(
       bed,
       'docker load -q',
