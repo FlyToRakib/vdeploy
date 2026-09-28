@@ -515,8 +515,16 @@ GitHub.
 
 - The M6 exit: the e2e on two machines again, with what M6 added —
   a preview, a staging promote, and a plugin key that may call one thing
-- The dashboard screens M6 added have never been opened in a browser:
-  previews, staging, company sign-in, integrations, cloud accounts
+- [x] the M6 screens opened in a real browser, against a throwaway stack
+  with its own database (first run, all 39 migrations from empty): the
+  sign-in page's company button, company sign-in with both protocols,
+  integrations end to end — pasted a manifest, was asked for the
+  password, got the key once, and the key then did `project.list` and
+  was refused `server.list` with "this integration was not allowed to
+  server.list" — cloud accounts, and the staging and previews sections
+  on a project's Config screen. **One bug, and it was the kind only a
+  browser finds**: a work email at a domain nobody has connected showed
+  Better Auth's own sentence, "No provider found for the issuer"
 
 ## Known gaps (tracked, not forgotten)
 
@@ -529,8 +537,9 @@ GitHub.
   rather than type a path. Bitbucket Data Center is not supported, only
   Bitbucket Cloud: it answers a different API at a different path, and the
   connect form says so rather than failing later. The dashboard panel for
-  these has not been opened in a browser (same gap as the private-traffic
-  card); its data path is covered by the API tests.
+  these is checked in a browser; its data path is covered by the API
+  tests. No GitLab or Bitbucket has ever answered one of these calls,
+  though: the provider shapes are exercised against stand-ins.
 - Previews: an app that reads a managed database cannot have one until a
   database is copied per preview (the refusal says so). Nothing is written
   back to the pull request — no status check, no comment with the link;
@@ -557,8 +566,13 @@ GitHub.
   catalogue is a trust decision nobody has made. The `enabled` column has
   no operation on it yet, so the dashboard removes a plugin rather than
   pausing one. Its screen has not been opened in a browser; the API path
-  is tested, including that a granted key cannot call anything else.
-- SSO: no SCIM, so somebody who leaves the company keeps their VDeploy
+  is tested, including that a granted key cannot call anything else —
+  and that refusal has now been seen in a browser against a running
+  system rather than only in a test.
+- SSO: the two dashboard screens are now checked, but no identity
+  provider has ever answered one: OIDC discovery and SAML assertions are
+  exercised against stand-ins, not against Entra, Okta or Google. No
+  SCIM, so somebody who leaves the company keeps their VDeploy
   membership until an admin removes it — disconnecting a provider takes
   the door away, not the room. No group-to-role mapping: everybody
   arrives as a viewer and is promoted by hand. The SAML form asks for the

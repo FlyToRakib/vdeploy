@@ -498,7 +498,28 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'network.middleware': sectionEdit('network.middleware'),
   'loadbalancer.configure': sectionEdit('loadbalancer.configure'),
   'volume.create': sectionEdit('volume.create'),
-  'preview.configure': sectionEdit('preview.configure'),
+  /**
+   * Turning previews on must not restart somebody's site.
+   *
+   * Every other spec edit changes how the app runs, so it pins a release
+   * and deploys. This one describes what happens to *other* projects
+   * when a pull request is opened: nothing about the running container
+   * changes, and the agent does nothing with it. Writing the spec is the
+   * whole of the work — found by watching it rebuild an app from source
+   * because somebody ticked a box.
+   */
+  'preview.configure': (args, context) => {
+    const project = requireProject(context);
+    const next = specAfter('preview.configure', args, project.spec);
+    const specHash = hashOf(next);
+    return {
+      specHash,
+      changes: diffSpecs(project.spec, next),
+      steps: [{ kind: 'update_spec', specHash }],
+      tier: 'sensitive',
+      blastRadius: radius(next, { downtime: 'none', dataAtRisk: [] }),
+    };
+  },
   /**
    * Which machine compiles this app (§15). The spec edit is ordinary; the
    * part worth checking is the machine, because a build queued on a server

@@ -1732,9 +1732,8 @@ async function previewOfAPullRequest(appId) {
     throw new Error(`expected one preview: ${JSON.stringify(previews)}`);
   }
   const preview = await projectNamed('from-github-pr-1');
-  const containers = managedContainers().filter(([name]) =>
-    name.includes(preview.id.toLowerCase()),
-  );
+  const key = preview.id.replace(/^prj_/, '').toLowerCase();
+  const containers = managedContainers().filter(([name]) => name.includes(key));
   if (containers.length !== 1) {
     throw new Error(`the preview is not running: ${JSON.stringify(managedContainers())}`);
   }
@@ -1745,8 +1744,7 @@ async function previewOfAPullRequest(appId) {
   if (gone.status !== 'applied') throw new Error(`the preview did not close: ${gone.status}`);
   await until(
     'preview gone',
-    () =>
-      managedContainers().filter(([name]) => name.includes(preview.id.toLowerCase())).length === 0,
+    () => managedContainers().filter(([name]) => name.includes(key)).length === 0,
     60_000,
   );
   const { result: after } = await op('preview.list', { projectId: appId });

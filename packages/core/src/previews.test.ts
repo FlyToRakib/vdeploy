@@ -1,5 +1,6 @@
 import { ApplicationSpec, VDeployError } from '@vdeploy/contracts';
 import { describe, expect, it } from 'vitest';
+import { buildPlan } from './plan.js';
 import { previewName, previewRefusal, previewSpec, type PullRequest } from './previews.js';
 
 const app = (over: Record<string, unknown> = {}): ApplicationSpec =>
@@ -129,5 +130,39 @@ describe('when a preview is not made', () => {
 
   it('answers the fork first, since that one is about somebody else code', () => {
     expect(previewRefusal(app(), { ...pr, fromFork: true }, 99, true)).toMatch(/fork/);
+  });
+});
+
+describe('turning previews on', () => {
+  const project = {
+    id: 'prj_01M3MMZZZZZZZZZZZZZZZZZZZZ' as const,
+    // Off, so that turning it on is a change there is something to say about.
+    spec: app({ preview: { enabled: false } }),
+    currentReleaseId: 'rel_01M3MMZZZZZZZZZZZZZZZZZZZZ' as const,
+    running: true,
+  };
+
+  it('writes the spec and nothing else', () => {
+    // It describes what happens to other projects when a pull request is
+    // opened. Nothing about this container changes, and deploying would
+    // rebuild an app from source because somebody ticked a box.
+    const plan = buildPlan(
+      'preview.configure',
+      { projectId: project.id, preview: { enabled: true } },
+      { project },
+    );
+    expect(plan.steps.map((step) => step.kind)).toEqual(['update_spec']);
+    expect(plan.blastRadius.downtime).toBe('none');
+    expect(plan.tier).toBe('sensitive');
+  });
+
+  it('still says what it changed', () => {
+    const plan = buildPlan(
+      'preview.configure',
+      { projectId: project.id, preview: { enabled: true, max: 3 } },
+      { project },
+    );
+    expect(plan.changes).toContainEqual({ path: 'preview.enabled', before: false, after: true });
+    expect(plan.changes).toContainEqual({ path: 'preview.max', before: 5, after: 3 });
   });
 });
