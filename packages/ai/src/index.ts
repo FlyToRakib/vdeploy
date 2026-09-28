@@ -13,6 +13,7 @@ export * from './context/system-prompt.js';
 export * from './model/types.js';
 export * from './model/cost.js';
 export * from './model/anthropic.js';
+export * from './model/openai.js';
 export * from './model/scripted.js';
 export * from './eval/scenarios.js';
 export * from './eval/score.js';

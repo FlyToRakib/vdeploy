@@ -1,6 +1,6 @@
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { anthropicModel, type ModelClient } from '@vdeploy/ai';
+import { anthropicModel, openAiModel, type ModelClient } from '@vdeploy/ai';
 import type { Database } from '@vdeploy/db';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -134,13 +134,31 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.addHook('onClose', () => gateway.stop());
   await app.register(agentRoutes(gateway, gatewayDeps));
 
-  const model = config.ANTHROPIC_API_KEY
-    ? anthropicModel({
-        apiKey: config.ANTHROPIC_API_KEY,
+  /*
+   * Which model answers (§26 M6).
+   *
+   * An OpenAI-compatible base URL picks that adapter, which covers the
+   * hosted services and the runtimes somebody puts on their own server;
+   * otherwise it is Anthropic, and with neither key the assistant is
+   * simply off and the platform works without it.
+   */
+  const model = config.OPENAI_BASE_URL
+    ? openAiModel({
+        apiKey: config.OPENAI_API_KEY ?? 'none',
+        baseUrl: config.OPENAI_BASE_URL,
         model: config.AI_MODEL,
-        ...(config.ANTHROPIC_BASE_URL ? { baseURL: config.ANTHROPIC_BASE_URL } : {}),
+        label: new URL(config.OPENAI_BASE_URL).host,
+        ...(config.OPENAI_PRICE_INPUT !== undefined && config.OPENAI_PRICE_OUTPUT !== undefined
+          ? { price: { input: config.OPENAI_PRICE_INPUT, output: config.OPENAI_PRICE_OUTPUT } }
+          : {}),
       })
-    : deps.model;
+    : config.ANTHROPIC_API_KEY
+      ? anthropicModel({
+          apiKey: config.ANTHROPIC_API_KEY,
+          model: config.AI_MODEL,
+          ...(config.ANTHROPIC_BASE_URL ? { baseURL: config.ANTHROPIC_BASE_URL } : {}),
+        })
+      : deps.model;
 
   const kernel = {
     db,

@@ -43,6 +43,22 @@ export const ApiConfig = z.object({
   /** The key for the assistant's model (§26, bring your own key). Without it the assistant is off. */
   ANTHROPIC_API_KEY: z.string().min(8).optional(),
   ANTHROPIC_BASE_URL: z.url().optional(),
+  /**
+   * Or any provider that answers the OpenAI chat shape (§26 M6) — the
+   * hosted ones, and the runtimes somebody puts on their own server,
+   * which is the interesting case for a platform about owning your
+   * servers. Giving a base URL chooses it; Anthropic is used otherwise.
+   */
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  OPENAI_BASE_URL: z.url().optional(),
+  /**
+   * What a million tokens costs there, when the operator knows. The spend
+   * cap counts money (§8 L7) and VDeploy cannot know a third party's
+   * prices — least of all a model running on the operator's own hardware,
+   * where the honest answer is nothing.
+   */
+  OPENAI_PRICE_INPUT: z.coerce.number().min(0).optional(),
+  OPENAI_PRICE_OUTPUT: z.coerce.number().min(0).optional(),
   AI_MODEL: z.string().min(1).default(DEFAULT_MODEL),
   /** Where the agent binaries for the one-command installer are (vd-agent-linux-amd64, -arm64). */
   AGENT_BINARIES_DIR: z.string().default('/app/agent'),
