@@ -82,7 +82,7 @@ func (r *Runner) Hosts(projectID string) []string {
 	defer r.mu.Unlock()
 	var out []string
 	for _, f := range r.forwards {
-		if f.spec.ProjectID == projectID && f.address != "" {
+		if f.spec.ProjectID == projectID && f.address != "" && f.spec.Alias != "" {
 			out = append(out, f.spec.Alias+":"+f.address)
 		}
 	}
@@ -189,7 +189,7 @@ func (r *Runner) serve(ctx context.Context, conn net.Conn) {
 	if err := readJSON(conn, &req); err != nil {
 		return
 	}
-	target, err := r.granted(ctx, from, req.DatabaseID)
+	target, err := r.granted(ctx, from, req)
 	if err != nil {
 		_ = writeJSON(conn, Reply{Error: err.Error()})
 		return
@@ -226,28 +226,59 @@ func (r *Runner) who(conn *tls.Conn) (string, error) {
 	return "", errors.New("that server is not one this one has been told about")
 }
 
-// granted says where to connect, or refuses in words. The database is
-// reached at its address on its **own** network — the one nothing else
-// joins — so nothing here makes it any more reachable than it was.
-func (r *Runner) granted(ctx context.Context, from, databaseID string) (string, error) {
+/*
+granted says where to connect, or refuses in words.
+
+A database is reached at its address on its **own** network — the one
+nothing else joins — so nothing here makes it any more reachable than it
+was. A router is reached on this host, where it already listens for the
+internet; the machine in front of it is simply another caller.
+
+Routing an edge's traffic to a server's own router rather than to its
+replicas is the whole reason that second kind exists. That router already
+knows which replicas are ready, what share a canary is taking and where a
+sticky visitor belongs. None of it should be worked out twice, in two
+places, from two views of the world that can disagree.
+*/
+func (r *Runner) granted(ctx context.Context, from string, req Request) (string, error) {
+	kind := req.Kind
+	if kind == "" {
+		kind = subjectDatabase
+	}
 	r.mu.Lock()
 	port := 0
 	for _, grant := range r.config.Grants {
-		if grant.DatabaseID == databaseID && grant.FromServerID == from {
-			port = grant.Port
-			break
+		if grant.FromServerID != from || subjectOf(grant.Kind) != kind {
+			continue
 		}
+		if kind == subjectDatabase && grant.DatabaseID != req.DatabaseID {
+			continue
+		}
+		port = grant.Port
+		break
 	}
 	r.mu.Unlock()
 	if port == 0 {
-		return "", errors.New("that server has not been given this database")
+		return "", errors.New("that server has not been given this")
 	}
-	name := compose.DatabaseName(databaseID)
-	address, err := r.Engine.ContainerIP(ctx, name, compose.DatabaseNetwork(databaseID))
+	if kind == subjectRouter {
+		return net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), nil
+	}
+	name := compose.DatabaseName(req.DatabaseID)
+	address, err := r.Engine.ContainerIP(ctx, name, compose.DatabaseNetwork(req.DatabaseID))
 	if err != nil {
 		return "", errors.New("that database is not running on its server")
 	}
 	return net.JoinHostPort(address, strconv.Itoa(port)), nil
+}
+
+// subjectOf defaults a missing kind to a database, so a peer running an
+// older agent still means what it used to mean.
+func subjectOf(kind string) string {
+	if kind == "" {
+		return subjectDatabase
+	}
+	return kind
 }
 
 // ── offering: the server whose app needs it ────────────────────────────
@@ -280,6 +311,13 @@ func forwardKey(f spec.MeshForward) string {
 	return f.ProjectID + "|" + f.Alias + "|" + strconv.Itoa(f.ListenPort)
 }
 
+// Routes is what this server should put in front of, when it is an edge.
+func (r *Runner) Routes() []spec.EdgeRoute {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]spec.EdgeRoute(nil), r.config.Routes...)
+}
+
 /*
 open starts listening for one remote service, on the gateway address of the
 project's own network.
@@ -292,12 +330,19 @@ one character shorter and would have published somebody's database to the
 world.
 */
 func (r *Runner) open(ctx context.Context, key string, want spec.MeshForward) {
-	network := compose.NetworkName(want.ProjectID)
-	gateway, err := r.Engine.NetworkGateway(ctx, network)
-	if err != nil {
-		// The network may simply not exist yet: the next pass tries again.
-		return
+	gateway := "127.0.0.1"
+	if subjectOf(want.Kind) == subjectDatabase {
+		// An app reaches it, so it is offered on that app's own network.
+		found, err := r.Engine.NetworkGateway(ctx, compose.NetworkName(want.ProjectID))
+		if err != nil {
+			// The network may simply not exist yet: the next pass tries again.
+			return
+		}
+		gateway = found
 	}
+	// A router's forward is reached by this machine's own Traefik, which is
+	// on this machine: the loopback is as far as it needs to go, and any
+	// wider a binding would publish another server's router to the world.
 	address := net.JoinHostPort(gateway, strconv.Itoa(want.ListenPort))
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -358,7 +403,7 @@ func (r *Runner) reach(ctx context.Context, want spec.MeshForward) (net.Conn, er
 		return nil, fmt.Errorf("reach %s: %w", want.ToServerID, err)
 	}
 	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
-	if err := writeJSON(conn, Request{DatabaseID: want.DatabaseID}); err != nil {
+	if err := writeJSON(conn, Request{Kind: subjectOf(want.Kind), DatabaseID: want.DatabaseID}); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}

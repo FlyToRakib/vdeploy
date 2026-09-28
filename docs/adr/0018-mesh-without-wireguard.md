@@ -104,3 +104,29 @@ addresses — a real L3 mesh becomes the right answer, and this decision
 should be revisited rather than extended. The seam is narrow: the peer
 list, the forwards and the grants are the whole of the contract, and what
 carries the bytes between two agents is one package.
+
+## Addendum: the edge tier rides on this (2026-09-28)
+
+§13's other half is "an optional dedicated **edge server** running only
+Traefik that load-balances across app servers". It is built on exactly the
+machinery above, with one addition: a second kind of thing that crosses,
+alongside a database — a server's **own router**.
+
+An edge routes to the app server's router, not to that server's replicas.
+That router already knows which replicas are ready, what share a canary is
+taking and where a sticky visitor belongs. Sending traffic to it keeps one
+answer to those questions instead of two that can disagree, and it means
+every deploy strategy, health check and canary keeps working exactly as it
+did with a second machine in front making no difference to any of them.
+
+Two consequences worth stating:
+
+- **The edge is the machine DNS points at**, so it is the machine a DNS
+  check is made against, and therefore the only one that requests
+  certificates. The app servers behind it stop asking for any. Everything
+  that follows from "which machine answers for this hostname" now asks one
+  function, `frontingServer`.
+- **An edge needs the servers behind it to accept private traffic**, and
+  until they do it routes *nothing* to them. A route it cannot serve is
+  worse than no route: DNS already points at the edge, so the visitor gets
+  an error from the right address rather than going somewhere else.

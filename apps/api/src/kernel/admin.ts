@@ -302,7 +302,10 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
       // What the machine is for, decided when it is added and not after:
       // a server that has been running apps for a month cannot become a
       // builder without moving them off first (§15).
-      role: context.args.role === 'builder' ? 'builder' : 'apps',
+      role:
+        context.args.role === 'builder' || context.args.role === 'edge'
+          ? context.args.role
+          : 'apps',
     });
     return enrollmentToken(context, serverId);
   },

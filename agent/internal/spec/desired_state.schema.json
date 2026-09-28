@@ -1393,6 +1393,14 @@
                 "type": "string",
                 "pattern": "^srv_[0-9A-HJKMNP-TV-Z]{26}$"
               },
+              "kind": {
+                "default": "database",
+                "type": "string",
+                "enum": [
+                  "database",
+                  "router"
+                ]
+              },
               "databaseId": {
                 "type": "string",
                 "pattern": "^db_[0-9A-HJKMNP-TV-Z]{26}$"
@@ -1403,7 +1411,7 @@
               "alias",
               "listenPort",
               "toServerId",
-              "databaseId"
+              "kind"
             ],
             "additionalProperties": false
           }
@@ -1415,6 +1423,14 @@
           "items": {
             "type": "object",
             "properties": {
+              "kind": {
+                "default": "database",
+                "type": "string",
+                "enum": [
+                  "database",
+                  "router"
+                ]
+              },
               "databaseId": {
                 "type": "string",
                 "pattern": "^db_[0-9A-HJKMNP-TV-Z]{26}$"
@@ -1430,9 +1446,330 @@
               }
             },
             "required": [
-              "databaseId",
+              "kind",
               "fromServerId",
               "port"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "routes": {
+          "default": [],
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "projectId": {
+                "type": "string",
+                "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "network": {
+                "type": "object",
+                "properties": {
+                  "containerPort": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "protocol": {
+                    "default": "http",
+                    "type": "string",
+                    "enum": [
+                      "http",
+                      "tcp"
+                    ]
+                  },
+                  "domains": {
+                    "default": [],
+                    "maxItems": 32,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "host": {
+                          "type": "string",
+                          "maxLength": 253,
+                          "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                        },
+                        "tls": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "default": "letsencrypt",
+                              "type": "string",
+                              "enum": [
+                                "letsencrypt",
+                                "none"
+                              ]
+                            },
+                            "challenge": {
+                              "default": "http-01",
+                              "type": "string",
+                              "enum": [
+                                "http-01",
+                                "dns-01"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "challenge"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "paths": {
+                          "default": [
+                            "/"
+                          ],
+                          "minItems": 1,
+                          "maxItems": 16,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^\\/[\\w\\-./]*$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "host",
+                        "tls",
+                        "paths"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "middleware": {
+                    "type": "object",
+                    "properties": {
+                      "rateLimit": {
+                        "type": "object",
+                        "properties": {
+                          "average": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "burst": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "average",
+                          "burst"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "compression": {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      "ipAllowList": {
+                        "default": [],
+                        "maxItems": 256,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "cidrv4",
+                              "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\/([0-9]|[1-2][0-9]|3[0-2])$"
+                            },
+                            {
+                              "type": "string",
+                              "format": "cidrv6",
+                              "pattern": "^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))\\/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$"
+                            },
+                            {
+                              "type": "string",
+                              "format": "ipv4",
+                              "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+                            },
+                            {
+                              "type": "string",
+                              "format": "ipv6",
+                              "pattern": "^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$"
+                            }
+                          ]
+                        }
+                      },
+                      "headers": {
+                        "type": "object",
+                        "properties": {
+                          "hsts": {
+                            "default": true,
+                            "type": "boolean"
+                          },
+                          "frameDeny": {
+                            "default": true,
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "hsts",
+                          "frameDeny"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "compression",
+                      "ipAllowList",
+                      "headers"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "loadBalancer": {
+                    "type": "object",
+                    "properties": {
+                      "algorithm": {
+                        "default": "wrr",
+                        "type": "string",
+                        "enum": [
+                          "wrr"
+                        ]
+                      },
+                      "sticky": {
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "default": false,
+                            "type": "boolean"
+                          },
+                          "cookie": {
+                            "default": "vd-sticky",
+                            "type": "string",
+                            "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+                          }
+                        },
+                        "required": [
+                          "enabled",
+                          "cookie"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "healthCheck": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "default": "/",
+                            "type": "string",
+                            "pattern": "^\\/"
+                          },
+                          "interval": {
+                            "default": "10s",
+                            "type": "string",
+                            "pattern": "^([1-9]\\d{0,6})(ms|s|m|h)$"
+                          },
+                          "timeout": {
+                            "default": "3s",
+                            "type": "string",
+                            "pattern": "^([1-9]\\d{0,6})(ms|s|m|h)$"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "interval",
+                          "timeout"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "circuitBreaker": {
+                        "type": "string",
+                        "pattern": "^NetworkErrorRatio\\(\\) > 0\\.\\d{1,2}$"
+                      },
+                      "retry": {
+                        "type": "object",
+                        "properties": {
+                          "attempts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5
+                          }
+                        },
+                        "required": [
+                          "attempts"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "algorithm",
+                      "sticky"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "containerPort",
+                  "protocol",
+                  "domains",
+                  "middleware",
+                  "loadBalancer"
+                ],
+                "additionalProperties": false
+              },
+              "hosts": {
+                "type": "object",
+                "properties": {
+                  "instant": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 253,
+                        "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "redirects": {
+                    "default": [],
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 253,
+                      "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                    }
+                  },
+                  "verified": {
+                    "default": [],
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 253,
+                      "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                    }
+                  }
+                },
+                "required": [
+                  "instant",
+                  "redirects",
+                  "verified"
+                ],
+                "additionalProperties": false
+              },
+              "toServerId": {
+                "type": "string",
+                "pattern": "^srv_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "listenPort": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 65535
+              }
+            },
+            "required": [
+              "projectId",
+              "network",
+              "hosts",
+              "toServerId",
+              "listenPort"
             ],
             "additionalProperties": false
           }
@@ -1442,7 +1779,8 @@
         "listen",
         "peers",
         "forwards",
-        "grants"
+        "grants",
+        "routes"
       ],
       "additionalProperties": false
     }

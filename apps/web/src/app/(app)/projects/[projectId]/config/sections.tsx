@@ -396,10 +396,14 @@ export function ServerSection() {
   useEffect(() => {
     void query<ServerSummary[]>('server.list').then(
       (list) => {
-        // A builder runs nothing, so it is not somewhere an app can go.
+        // A builder compiles and an edge routes; neither runs an app, so
+        // neither is somewhere an app can be moved to.
         setServers(
           list.filter(
-            (s) => s.status !== 'pending' && s.id !== row.serverId && s.role !== 'builder',
+            (s) =>
+              s.status !== 'pending' &&
+              s.id !== row.serverId &&
+              (s.role === undefined || s.role === 'apps'),
           ),
         );
       },

@@ -888,8 +888,11 @@ export const OPERATIONS = [
     'Create a server enrollment token',
     obj({
       name: ResourceName,
-      /** A builder compiles for the others and runs nothing itself (§15). */
-      role: z.enum(['apps', 'builder']).default('apps'),
+      /**
+       * A builder compiles for the others and runs nothing (§15); an edge
+       * answers the internet for the others and runs nothing (§13).
+       */
+      role: z.enum(['apps', 'builder', 'edge']).default('apps'),
     }),
     { stepUp: true },
   ),

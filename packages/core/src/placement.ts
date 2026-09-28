@@ -23,8 +23,8 @@ export interface Candidate {
   budget: ServerBudget;
   /** False while its agent has never connected: nothing can be placed there. */
   connected: boolean;
-  /** A builder compiles and serves nothing, so nothing is ever placed on it (§15). */
-  role?: 'apps' | 'builder';
+  /** A builder compiles and an edge routes; neither ever runs an app (§13, §15). */
+  role?: 'apps' | 'builder' | 'edge';
 }
 
 export interface Placed {
@@ -41,7 +41,7 @@ export interface Placed {
  * considered and what the largest one had left.
  */
 export function place(spec: ApplicationSpec, candidates: readonly Candidate[]): Placed {
-  const serving = candidates.filter((c) => c.role !== 'builder');
+  const serving = candidates.filter((c) => c.role === undefined || c.role === 'apps');
   const usable = serving.filter((c) => c.connected && c.budget.capacity);
   if (usable.length === 0) {
     // A builder is a machine on purpose empty of apps, so "you have servers
@@ -50,7 +50,7 @@ export function place(spec: ApplicationSpec, candidates: readonly Candidate[]): 
     if (serving.length === 0 && candidates.length > 0) {
       throw new VDeployError(
         'conflict',
-        'Every server you have is a builder, and a builder never runs apps. Connect one to run them on.',
+        'None of your servers runs apps — they are all builders or edges. Connect one to run them on.',
       );
     }
     throw new VDeployError(

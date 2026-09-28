@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
+import { Network as EdgeNetwork, Hostname } from './spec/sections.js';
 
 /**
  * Private traffic between an organization's own servers (§13, ADR 0018).
@@ -34,6 +35,20 @@ export const MeshPeer = z.strictObject({
 export type MeshPeer = z.infer<typeof MeshPeer>;
 
 /**
+ * What is being reached across the mesh.
+ *
+ * Two things, and the second is what makes an edge server possible: a
+ * **database**, which is why the mesh exists, and a **router**, which is
+ * one server's Traefik as seen by the machine sitting in front of it.
+ * Routing to a server's own router rather than to its individual replicas
+ * is deliberate — that router already knows which replicas are ready, what
+ * share a canary is taking and where a sticky visitor belongs, and none of
+ * that should be worked out twice.
+ */
+export const MeshSubject = z.enum(['database', 'router']);
+export type MeshSubject = z.infer<typeof MeshSubject>;
+
+/**
  * One service on another server, offered here under a name of its own.
  *
  * The agent listens on the project's **own network gateway** — an address
@@ -50,18 +65,47 @@ export const MeshForward = z.strictObject({
   /** The server that actually has it. */
   toServerId: idSchema('server'),
   /** What to ask that server for: it decides whether this server may have it. */
-  databaseId: idSchema('database'),
+  kind: MeshSubject.default('database'),
+  /** Which database, when that is what is being asked for. */
+  databaseId: idSchema('database').optional(),
 });
 export type MeshForward = z.infer<typeof MeshForward>;
 
 /** A service of this server's that another server may reach. */
 export const MeshGrant = z.strictObject({
-  databaseId: idSchema('database'),
+  kind: MeshSubject.default('database'),
+  databaseId: idSchema('database').optional(),
   fromServerId: idSchema('server'),
   /** What to connect to on this side, which the asking server never sees. */
   port: z.number().int().min(1).max(65535),
 });
 export type MeshGrant = z.infer<typeof MeshGrant>;
+
+/**
+ * One app, as the machine in front of it needs to know it (§13).
+ *
+ * An edge server runs a router and nothing else: no images, no volumes,
+ * no secrets, and no container of anybody's app. So it is told the least
+ * that will let it route — the hostnames, what they want doing to them,
+ * and which of the app servers to hand the request to. It is never told
+ * what the app is or what it is holding.
+ */
+export const EdgeRoute = z.strictObject({
+  projectId: idSchema('project'),
+  /** Domains, middleware and load-balancer settings: the routing half of a spec. */
+  network: EdgeNetwork,
+  hosts: z.strictObject({
+    instant: Hostname.nullable(),
+    redirects: z.array(Hostname).max(8).default([]),
+    /** Hosts whose DNS points *here*: the only ones a certificate is asked for. */
+    verified: z.array(Hostname).max(64).default([]),
+  }),
+  /** The app server that actually runs it. */
+  toServerId: idSchema('server'),
+  /** The local port that reaches that server's own router, through the mesh. */
+  listenPort: z.number().int().min(1024).max(65535),
+});
+export type EdgeRoute = z.infer<typeof EdgeRoute>;
 
 export const Mesh = z.strictObject({
   /**
@@ -79,5 +123,10 @@ export const Mesh = z.strictObject({
    * it, because a grant checked only by the asker is not a grant.
    */
   grants: z.array(MeshGrant).max(256).default([]),
+  /**
+   * The apps this server fronts, when it is an edge (§13). Empty on every
+   * other server, which is every server in most installations.
+   */
+  routes: z.array(EdgeRoute).max(200).default([]),
 });
 export type Mesh = z.infer<typeof Mesh>;

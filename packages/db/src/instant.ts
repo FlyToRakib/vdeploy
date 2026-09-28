@@ -2,6 +2,7 @@ import { DEFAULT_URL_SETTINGS, UrlSettings } from '@vdeploy/contracts';
 import { instantHost, withSuffix } from '@vdeploy/core';
 import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { Executor } from './audit.js';
+import { frontingServer } from './fronting.js';
 import { notifyDesiredState } from './notify.js';
 import { projects, servers, urlSettings } from './schema/index.js';
 
@@ -67,11 +68,19 @@ export async function refreshInstantHosts(
     .leftJoin(servers, eq(servers.id, projects.serverId))
     .where(and(...filters))
     .orderBy(projects.createdAt);
+  // With an edge server, every app's URL points at the edge: it is the
+  // machine the internet reaches, whichever machine actually runs the app
+  // (§13). That is what lets an app move between servers without its
+  // address changing.
+  const edge = await frontingServer(tx, scope.orgId);
   const taken = await takenHosts(tx, new Set(rows.map((r) => r.project.id)));
   const changed = new Set<string>();
 
   for (const { project, serverIpv4 } of rows) {
-    const base = instantHost(settings, { project: project.name, serverIpv4 });
+    const base = instantHost(settings, {
+      project: project.name,
+      serverIpv4: edge ? edge.publicIpv4 : serverIpv4,
+    });
     let next: string | null = null;
     if (base) {
       const current = project.instantHost;

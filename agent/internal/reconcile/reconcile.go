@@ -214,7 +214,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	p.databases(ctx, state)
 	// Traffic moves to new replicas only once all of them are ready, and old
 	// ones are retired only after that, once they have drained.
-	p.route(ctx, state)
+	//
+	// An edge routes to other servers' routers instead of to containers of
+	// its own, and it has none: its desired state carries no projects, so
+	// the ordinary pass above did nothing and this one does all of it.
+	if edging := p.edgeRoutes(); len(edging) > 0 {
+		p.edge(ctx, edging)
+	} else {
+		p.route(ctx, state)
+	}
 	p.watchUnsaved(ctx, state)
 	for i := range p.report.Projects {
 		p.report.Projects[i].Unsaved = r.unsaved[p.report.Projects[i].ProjectID]
@@ -313,6 +321,14 @@ func (p *pass) project(ctx context.Context, project spec.DesiredProject) Project
 	p.settled[project.ProjectID] = settled
 	p.gatherEvidence(ctx, project, &result)
 	return result
+}
+
+// edgeRoutes is what this server fronts, when it is an edge (§13).
+func (p *pass) edgeRoutes() []spec.EdgeRoute {
+	if p.r.Mesh == nil {
+		return nil
+	}
+	return p.r.Mesh.Routes()
 }
 
 // old lists the containers of a project that are not in its desired set.

@@ -54,6 +54,21 @@ type Mesh struct {
 	// Grants are what this server hands out, and to whom. The answer lives
 	// with the server that owns the data, not the one that wants it.
 	Grants []MeshGrant `json:"grants"`
+	// Routes are the apps this server fronts, when it is an edge (§13).
+	// Empty on every other server, which is most of them.
+	Routes []EdgeRoute `json:"routes"`
+}
+
+// EdgeRoute is one app as the machine in front of it needs to know it: the
+// hostnames, what they want doing to them, and which app server to hand
+// the request to. Never what the app is, and never anything it holds.
+type EdgeRoute struct {
+	ProjectID  string  `json:"projectId"`
+	Network    Network `json:"network"`
+	Hosts      Hosts   `json:"hosts"`
+	ToServerID string  `json:"toServerId"`
+	// ListenPort reaches that server's own router, through the mesh.
+	ListenPort int `json:"listenPort"`
 }
 
 // MeshPeer is another server, and how to reach it.
@@ -65,19 +80,24 @@ type MeshPeer struct {
 }
 
 // MeshForward is one service on another server, offered on a project's own
-// network under the name it would have if it were local.
+// network under the name it would have if it were local. An edge's forward
+// carries no alias and joins no project network: it is reached by the
+// router on this machine, not by an app.
 type MeshForward struct {
 	ProjectID  string `json:"projectId"`
 	Alias      string `json:"alias"`
 	ListenPort int    `json:"listenPort"`
 	ToServerID string `json:"toServerId"`
-	DatabaseID string `json:"databaseId"`
+	// Kind is what is being asked for: a database, or a server's own router.
+	Kind       string `json:"kind"`
+	DatabaseID string `json:"databaseId,omitempty"`
 }
 
-// MeshGrant is one of this server's databases, and the server allowed to
-// reach it.
+// MeshGrant is one thing this server hands out, and the server allowed to
+// have it.
 type MeshGrant struct {
-	DatabaseID   string `json:"databaseId"`
+	Kind         string `json:"kind"`
+	DatabaseID   string `json:"databaseId,omitempty"`
 	FromServerID string `json:"fromServerId"`
 	Port         int    `json:"port"`
 }

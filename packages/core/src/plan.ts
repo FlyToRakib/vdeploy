@@ -940,10 +940,12 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     if (project.spec.placement.server === args.serverId) {
       throw new VDeployError('conflict', 'It is already on that server');
     }
-    if (context.server?.role === 'builder') {
+    if (context.server?.role === 'builder' || context.server?.role === 'edge') {
       throw new VDeployError(
         'conflict',
-        `${context.server.name} is a build server: it compiles for your other servers and runs nothing itself.`,
+        context.server.role === 'builder'
+          ? `${context.server.name} is a build server: it compiles for your other servers and runs nothing itself.`
+          : `${context.server.name} is an edge server: it answers the internet for your other servers and runs nothing itself.`,
       );
     }
     checkFits(context.server, footprint(project.spec, project.running));

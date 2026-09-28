@@ -59,13 +59,21 @@ const handshakeTimeout = 15 * time.Second
 // tiny; the limit is there because the sender is not trusted until it is.
 const maxRequestBytes = 4096
 
+// The two things that cross the mesh: the data an app reads, and the
+// router of the server that runs it.
+const (
+	subjectDatabase = "database"
+	subjectRouter   = "router"
+)
+
 // Request is what a connecting agent asks for: one service, by name.
 //
 // It does not say who is asking, on purpose. The certificate already
 // answered that, and a second answer beside it would be one an attacker
 // gets to write.
 type Request struct {
-	DatabaseID string `json:"databaseId"`
+	Kind       string `json:"kind"`
+	DatabaseID string `json:"databaseId,omitempty"`
 }
 
 // Reply says whether the far side will carry it, before any bytes flow.

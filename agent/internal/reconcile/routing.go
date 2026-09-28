@@ -195,4 +195,7 @@ type MeshRunner interface {
 	// on another server is reached under the name it would have if it were
 	// here.
 	Hosts(projectID string) []string
+	// Routes are the apps this server should put in front of, when it is an
+	// edge (§13); empty on every other server.
+	Routes() []spec.EdgeRoute
 }

@@ -15,8 +15,8 @@ export interface ServerBudget {
   name: string;
   capacity: { memoryBytes: number; cpus: number } | null;
   committed: Footprint;
-  /** A builder compiles and runs nothing, so nothing is ever put on it (§15). */
-  role?: 'apps' | 'builder';
+  /** A builder compiles and an edge routes; neither ever runs an app (§13, §15). */
+  role?: 'apps' | 'builder' | 'edge';
 }
 
 export const NO_FOOTPRINT: Footprint = { memoryBytes: 0, cpu: 0 };

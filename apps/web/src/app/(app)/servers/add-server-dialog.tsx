@@ -33,7 +33,7 @@ export function AddServerDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(false);
-  const [role, setRole] = useState<'apps' | 'builder'>('apps');
+  const [role, setRole] = useState<'apps' | 'builder' | 'edge'>('apps');
 
   // While the command is shown, ask every few seconds whether the server has connected.
   useEffect(() => {
@@ -118,6 +118,11 @@ export function AddServerDialog({
                   'builder',
                   'Building only',
                   'It compiles for your other servers and serves nothing, so a build never slows down a live site.',
+                ],
+                [
+                  'edge',
+                  'Answering the internet',
+                  'Every site’s address points here and it passes requests to your other servers. One place holds the certificates, and you can change the servers behind it without touching any DNS.',
                 ],
               ] as const
             ).map(([value, title, what]) => (

@@ -2,6 +2,7 @@ import type { ApplicationSpec, DomainCheck, DomainStatus } from '@vdeploy/contra
 import type { DnsAssessment, DnsObservation } from '@vdeploy/core';
 import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
+import { frontingServer } from './fronting.js';
 import { notifyDesiredState } from './notify.js';
 import { domainChecks, projects, servers } from './schema/index.js';
 
@@ -47,6 +48,7 @@ export async function syncDomainChecks(tx: Executor, now: Date): Promise<void> {
   const rows = await tx
     .select({
       id: projects.id,
+      orgId: projects.orgId,
       serverId: projects.serverId,
       spec: projects.spec,
       instantHost: projects.instantHost,
@@ -57,8 +59,14 @@ export async function syncDomainChecks(tx: Executor, now: Date): Promise<void> {
   const wanted = new Map<string, { serverId: string; projectId: string }>();
   for (const row of rows) {
     if (!row.serverId) continue;
+    // A check asks "does this name point at the machine that will answer
+    // for it", so with an edge server it is asked of the edge — and the
+    // edge is therefore the machine that may request the certificate. The
+    // app servers behind it never ask for one.
+    const edge = await frontingServer(tx, row.orgId);
+    const answering = edge && edge.id !== row.serverId ? edge.id : row.serverId;
     for (const host of certificateHosts(row)) {
-      wanted.set(host, { serverId: row.serverId, projectId: row.id });
+      wanted.set(host, { serverId: answering, projectId: row.id });
     }
   }
   const existing = await tx.select().from(domainChecks);

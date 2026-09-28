@@ -130,9 +130,9 @@ describe('a builder runs nothing (§15)', () => {
     expect(place(spec, [candidate(runner, 'server-01'), roomier]).serverId).toBe(runner);
   });
 
-  it('says so when a builder is the only server there is', () => {
+  it('says so when nothing you have runs apps at all', () => {
     expect(() => place(spec, [candidate(builderId, 'builder-01', { role: 'builder' })])).toThrow(
-      /Every server you have is a builder/,
+      /None of your servers runs apps/,
     );
   });
 });

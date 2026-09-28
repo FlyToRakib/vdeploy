@@ -43,12 +43,16 @@ export const servers = pgTable('servers', {
   agentBoxKey: text('agent_box_key'),
   agentVersion: text('agent_version'),
   /**
-   * What this machine is for (§15). A builder compiles and serves nothing:
-   * no app is ever placed on it, so a build that eats the box takes down
-   * nothing anybody visits. Apps servers do both, which is right until a
-   * build and a busy evening land together.
+   * What this machine is for (§13, §15).
+   *
+   * A **builder** compiles and serves nothing: no app is ever placed on
+   * it, so a build that eats the box takes down nothing anybody visits.
+   * An **edge** serves and runs nothing: it answers the internet for every
+   * app on every other server, so DNS has one address and one machine
+   * holds the certificates. **Apps** servers do all of it, which is right
+   * until a build and a busy evening land together.
    */
-  role: text('role', { enum: ['apps', 'builder'] })
+  role: text('role', { enum: ['apps', 'builder', 'edge'] })
     .notNull()
     .default('apps'),
   arch: text('arch'),
