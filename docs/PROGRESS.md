@@ -3,7 +3,79 @@
 **Milestone:** M5 — scale and balance (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27)
 **Task:** the M5 exit on the VPS testbed
 **Status:** in progress
-**Updated:** 2026-09-28 13:40 UTC
+**Updated:** 2026-09-28 18:05 UTC
+
+## M5 — what the two-machine run has proved so far
+
+Every M5 feature is built, and the end-to-end run now brings up **three
+machines** — a control plane and app server, a second app server, and an
+edge — because none of M5 means anything on one box. In the run of
+2026-09-28 all eight M5 checks passed:
+
+- a second server, connected exactly the way the first one is;
+- an app **placed on a server nobody named**, and running on the machine
+  its record names;
+- an app that fits nowhere **refused when it is asked for**, naming what
+  the roomiest machine had free;
+- a database on another server **refused** to an app while that server
+  accepts no private traffic, in words that say which machine and what to
+  do about it;
+- private traffic turned on, deliberately, for one server;
+- an app **speaking to a database on another server** — eight bytes of the
+  Postgres handshake out, the answer back — under the name it would use if
+  the database were beside it;
+- an image **built on one machine and served from another**, checked on
+  arrival;
+- a visitor reaching an **edge** and being answered by an app on a machine
+  they never addressed.
+
+**Seven real bugs, every one of them in code that had unit tests and had
+never run on two machines.** They are worth listing, because the pattern is
+the point:
+
+1. **An app placed where there was room could never be deployed.** Applying
+   re-plans and refuses anything that no longer matches, but it loaded that
+   world without the organization — so the planner saw no servers, a plan
+   that chose one came back as a plan that could choose none, and went
+   stale. Every time, on the only path the feature exists for. A test was
+   passing *because* of this.
+2. **The placement was then thrown away**: the apply rebuilt the spec from
+   the original request and refused because nothing named a server. What
+   was approved now names the machine, on the step.
+3. **An arriving image was refused on its name** — Docker takes no
+   upper-case letter in a reference, and an id is upper-case.
+4. **The image's name was spelled out on two machines** that disagreed; a
+   `docker save` tarball carries its name inside it, so the receiver has to
+   ask for that exact string.
+5. **Nothing told the edge an app had appeared.** It runs none of the
+   organization's apps, so nothing bumped its generation: it routed
+   whatever existed when it connected and 404'd the rest.
+6. **The mesh's sockets died with the reconcile pass that opened them**, so
+   every later connection was dialled with a context cancelled minutes
+   earlier — the request reached the listener and went nowhere. **The
+   end-to-end check passed it twice**, because a bare `nc` connect only
+   proves the *local* socket accepted; it now speaks Postgres and waits for
+   the byte that comes back.
+7. **A forward bound an address only the host could reach.** Whatever
+   reaches a forward is a container, and a container's `127.0.0.1` is its
+   own — so from a shell on the host it looked perfectly fine while the
+   edge answered 502 for everything.
+8. **A database was joined to a network on another machine.** Joining a
+   network is a local act; the agent made a network for a project it does
+   not run, attached the database, pruned the network on the next pass, and
+   left the database holding a dangling reference. It ran until something
+   restarted it, and then it did not.
+
+Each is fixed with a test that was **checked against the old behaviour**
+and fails on it. Still outstanding: one clean pass with all of them in (the
+attempt after the last fix stalled on image-layer downloads, which is this
+machine's network rather than the code), and then the exit run on the VPS
+testbed with the baseline verified before and after.
+
+Two things are honestly not covered. The dashboard card for private
+traffic has not been exercised in a browser. And the edge tier needs a
+third Docker daemon, so it runs locally by default and on the VPS only when
+asked for, with `--edge`.
 
 ## M4 exit — met 2026-09-27
 
