@@ -112,7 +112,7 @@ function ensureSecondTestbed() {
   if (onHost(`docker ps -q -f name=^${TESTBED2}$`)) {
     return log(`testbed ${TESTBED2} already running`);
   }
-  const limits = vps ? '--memory=1500m --memory-swap=1500m --cpus=1' : '';
+  const limits = vps ? '--memory=1500m --memory-swap=1500m --cpus=2' : '';
   log(`creating testbed ${TESTBED2}`);
   onHost(
     `docker run -d --name ${TESTBED2} --privileged ${limits} --restart=no ` +
@@ -834,7 +834,7 @@ async function placesWhereThereIsRoom() {
  */
 async function privateTrafficBetweenServers(firstServerId, secondServerId) {
   const madeAnswer = await op('database.create', {
-    serverId: firstServerId,
+    serverId: secondServerId,
     name: 'shared-db',
     engine: 'postgres',
     version: '18',
@@ -856,7 +856,7 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
       source: { type: 'image', image: 'nginx:1.27-alpine' },
       build: { strategy: 'image' },
       network: { containerPort: 80 },
-      placement: { server: secondServerId },
+      placement: { server: firstServerId },
     },
   });
   await settled(planOf(acrossAnswer), 600_000);
@@ -877,9 +877,9 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
 
   await call('POST', '/api/v1/auth/step-up', { password });
   await op('server.set_private_traffic', {
-    serverId: firstServerId,
+    serverId: secondServerId,
     enabled: true,
-    address: bedAddress(TESTBED),
+    address: bedAddress(TESTBED2),
   });
   pass('private traffic turned on, deliberately, for one server');
 
@@ -892,10 +892,10 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
   // The proof: the app's own container opens that database, by the name it
   // would use if it were beside it, on a machine it has never heard of.
   await until('the app opens the database across the mesh', async () => {
-    const container = replicaOn(TESTBED2, created.id);
+    const container = replicaOn(TESTBED, created.id);
     if (!container) return false;
     const url = inBed(
-      TESTBED2,
+      TESTBED,
       `docker exec ${container} printenv DATABASE_URL 2>/dev/null || true`,
     ).trim();
     const at = /@([^:@]+):(\d+)\//.exec(url);
@@ -912,7 +912,7 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
      * came home.
      */
     const spoke = inBed(
-      TESTBED2,
+      TESTBED,
       `docker exec ${container} sh -c ` +
         `'printf "\\000\\000\\000\\010\\004\\322\\026\\057" | timeout 5 nc ${at[1]} ${at[2]} | head -c 1' 2>&1 || true`,
     ).trim();
