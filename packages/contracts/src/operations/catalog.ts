@@ -780,11 +780,14 @@ export const OPERATIONS = [
     obj({ cloudAccountId: idSchema('cloudAccount') }),
     { minRole: 'admin' },
   ),
-  // Making a machine spends somebody's money every month it exists, so
-  // it asks for the password again and says the price before it does.
+  // Making a machine spends somebody's money every month it exists.
+  // Tier 4, like 'server.add' beside it, which only adds a machine
+  // somebody already has and pays for: a platform whose assistant can
+  // order servers is one whose assistant can run up a bill, and no
+  // grant in §8 counts money that is not tokens.
   operation(
     'server.provision',
-    'sensitive',
+    'human_only',
     'org',
     'Make a new server at a cloud provider and connect it, all in one step',
     obj({
