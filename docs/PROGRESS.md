@@ -515,6 +515,16 @@ GitHub.
 
 - The M6 exit: the e2e on two machines again, with what M6 added —
   a preview, a staging promote, and a plugin key that may call one thing
+- [x] **the compose file starts, and serves, and was checked that way**
+  — the stack came up, every service healthy, the dashboard and the API
+  on one origin, and first-run setup completed in a browser over plain
+  http. The first attempt crash-looped on exactly the blank-setting bug
+  above, in an image built before the fix, which is as direct a
+  confirmation as that bug will ever get. It also found a second one:
+  **a cookie was marked Secure from NODE_ENV rather than from the
+  address**, so a plain-http install handed out cookies a browser will
+  not send back — sign-in appears to work, the cookie is dropped, and
+  you land on the sign-in page again with nothing to read
 - [x] **a way to actually run this** — nothing in the repository said how.
   Two Dockerfiles and a restore runbook, and no file describing the
   running arrangement, for a product whose whole premise is that you
