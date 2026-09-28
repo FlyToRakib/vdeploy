@@ -2077,8 +2077,20 @@ try {
 } catch (error) {
   console.error(`[e2e] FAILED: ${error instanceof Error ? error.message : error}`);
   try {
+    // What the testbed had left, too: a failure that reads only
+    // 'fetch failed' is the control plane having gone away, and the
+    // reason is almost always memory or disk rather than anything
+    // VDeploy did.
     console.error(
-      inTestbed('tail -20 /var/log/vd-agent.log; docker logs --tail 20 cp-worker 2>&1'),
+      inTestbed(
+        [
+          'echo "--- what is running ---"; docker ps -a --format "{{.Names}} {{.Status}}"',
+          'echo "--- memory ---"; free -m 2>/dev/null || true',
+          'echo "--- disk ---"; df -h /var/lib/docker 2>/dev/null || true',
+          'echo "--- agent ---"; tail -20 /var/log/vd-agent.log',
+          'echo "--- worker ---"; docker logs --tail 20 cp-worker 2>&1',
+        ].join('; '),
+      ),
     );
   } catch {
     // diagnostics are best effort
