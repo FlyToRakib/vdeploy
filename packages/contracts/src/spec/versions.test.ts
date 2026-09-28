@@ -69,3 +69,38 @@ describe('readSpec', () => {
     }
   });
 });
+
+describe('a spec stored before a section existed (§26 M6)', () => {
+  /**
+   * Every release ever written is re-read through this on its way to an
+   * agent. A section added later must therefore arrive filled in, or an
+   * upgrade would make every agent refuse the whole desired state —
+   * which is the kind of thing nobody notices until it is everybody's
+   * outage at once.
+   */
+  const asStored = {
+    apiVersion: 'vdeploy/v1',
+    kind: 'Application',
+    metadata: { name: 'shop' },
+    // No `preview` block: it did not exist when this was written.
+    source: { type: 'git', repo: 'acme/shop', branch: 'main' },
+    build: { strategy: 'dockerfile' },
+  };
+
+  it('arrives with the new section at its default', () => {
+    const spec = readSpec(asStored);
+    expect(spec.preview).toEqual({
+      enabled: false,
+      fromForks: false,
+      max: 5,
+      expireAfterDays: 7,
+    });
+  });
+
+  it('still knows which provider it came from, without having been told', () => {
+    // `provider` was added with GitLab and Bitbucket; everything stored
+    // before that is GitHub, and says so rather than failing to parse.
+    const spec = readSpec(asStored);
+    expect(spec.source).toMatchObject({ type: 'git', provider: 'github', repo: 'acme/shop' });
+  });
+});
