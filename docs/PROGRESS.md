@@ -523,6 +523,22 @@ GitHub.
   address**, so a plain-http install handed out cookies a browser will
   not send back — sign-in appears to work, the cookie is dropped, and
   you land on the sign-in page again with nothing to read
+- [x] **a control plane whose binaries were not ready yet recovers** —
+  chasing a test that only ever failed in the workspace-wide run found a
+  real one. `AgentBinaries` remembered a *failure*: if the agent
+  binaries were briefly unreadable at the first request — the image
+  still unpacking, a mount not ready, a filesystem stalling under load —
+  the installer answered 503 for the rest of that process's life, to
+  everybody, until somebody thought to restart it. Only a success is
+  remembered now
+- [x] **ordering a server somebody pays for is a person's job** — found
+  reading the catalog against itself. `server.add` is tier 4 and only
+  adds a machine somebody already has; `server.provision` asks a
+  provider for a new one, which starts a monthly bill, and was tier 2 —
+  so an assistant in autopilot with the right grants could order
+  servers. The AI's spend cap counts tokens, and nothing in §8 counts
+  money that is not tokens, so this is a blast radius the grant matrix
+  has no answer for
 - [x] **a way to actually run this** — nothing in the repository said how.
   Two Dockerfiles and a restore runbook, and no file describing the
   running arrangement, for a product whose whole premise is that you
