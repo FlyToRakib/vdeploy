@@ -1,4 +1,5 @@
 import { ApplicationSpec, newId, type PreviewRef } from '@vdeploy/contracts';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { previewFor, previewParents, previewsOf, secretsOwner, stalePreviews } from './previews.js';
 import { organization, projects } from './schema/index.js';
@@ -165,5 +166,30 @@ describe('whose secrets a project reads', () => {
   it('is its own, unless it is a preview', () => {
     expect(secretsOwner({ id: 'prj_app', previewOf: null })).toBe('prj_app');
     expect(secretsOwner({ id: 'prj_preview', previewOf: 'prj_app' })).toBe('prj_app');
+  });
+});
+
+describe('reopening a pull request', () => {
+  it('can make a preview with the name the closed one had', async () => {
+    const app = await addApp('shop', { preview: { enabled: true } });
+    const first = await addPreview(app, ref());
+    // Closing one soft-deletes it, the way every project is deleted.
+    await t.db.update(projects).set({ deletedAt: now }).where(eq(projects.id, first));
+
+    // The unique index on (org, name) is partial on deletedAt, so the
+    // name is free again — a pull request that is reopened must not be
+    // refused by a row nobody can see.
+    const again = newId('project');
+    await t.db.insert(projects).values({
+      id: again,
+      orgId,
+      name: `p-${ref().number}-${first.slice(-4)}`,
+      spec: spec('preview'),
+      specHash: 'x'.repeat(64),
+      previewOf: app,
+      previewRef: ref(),
+    });
+    expect((await previewsOf(t.db, app)).map((p) => p.id)).toEqual([again]);
+    expect((await previewFor(t.db, app, ref()))?.id).toBe(again);
   });
 });
