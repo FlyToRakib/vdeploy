@@ -13,6 +13,15 @@ export interface EditableSpec {
     resources: { memory: { limit: string; request?: string }; [key: string]: unknown };
     [key: string]: unknown;
   };
+  /** Where the code comes from; only a repository can have previews. */
+  source?: { type: string; [key: string]: unknown };
+  /** A copy of this app per pull request (§26 M6). */
+  preview?: {
+    enabled: boolean;
+    fromForks: boolean;
+    max: number;
+    expireAfterDays: number;
+  };
   /** Scheduled jobs (§17.6): each runs once when its time comes. */
   schedule?: {
     crons: { name: string; command: string[]; expr: string; timezone: string }[];

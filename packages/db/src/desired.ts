@@ -7,6 +7,7 @@ import type { Executor } from './audit.js';
 import { certificateHosts, verifiedHosts } from './domains.js';
 import { meshFor } from './mesh.js';
 import { notifyDesiredState } from './notify.js';
+import { secretsOwner } from './previews.js';
 import { readSecret } from './secrets.js';
 import { projects, releases, servers } from './schema/index.js';
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
@@ -40,20 +41,27 @@ export async function desiredStateFor(
    * agent's box key (an older agent) nothing is sent, and the agent refuses
    * the project rather than start it with values missing.
    */
-  async function sealed(projectId: string, versions: Record<string, number>) {
+  async function sealed(
+    project: { id: string; previewOf: string | null },
+    versions: Record<string, number>,
+  ) {
     const boxKey = server?.agentBoxKey;
     if (!boxKey || !options.secretsKey) return [];
     const out = [];
     for (const [secretId, version] of Object.entries(versions)) {
-      const { value } = await readSecret(db, options.secretsKey, projectId, secretId, version);
-      const context = deliveryContext(serverId, projectId, secretId, version);
+      // A preview's env names the app's secrets (ADR 0020), so the value
+      // is read from the app — and sealed to the preview, which is where
+      // it is being delivered and the only container allowed to open it.
+      const owner = secretsOwner(project);
+      const { value } = await readSecret(db, options.secretsKey, owner, secretId, version);
+      const context = deliveryContext(serverId, project.id, secretId, version);
       out.push({ id: secretId, version, sealed: sealTo(boxKey, value, context) });
     }
     return out;
   }
   const secrets = new Map<string, Awaited<ReturnType<typeof sealed>>>();
   for (const { project, release } of rows) {
-    secrets.set(project.id, await sealed(project.id, release.secretVersions));
+    secrets.set(project.id, await sealed(project, release.secretVersions));
   }
 
   /**

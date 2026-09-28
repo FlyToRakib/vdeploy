@@ -1,13 +1,13 @@
-import type { HumanActor } from '@vdeploy/ai';
-import { VDeployError, type Id, type Role } from '@vdeploy/contracts';
-import { pathMatcher, verifyGithubSignature } from '@vdeploy/core';
+import { VDeployError } from '@vdeploy/contracts';
+import { DEFAULT_HOST, pathMatcher, verifyGithubSignature } from '@vdeploy/core';
 import { installationById, installationChanged, projectsForPush } from '@vdeploy/db';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { resolveActor, roleIn } from '../http/actor.js';
+import { resolveActor } from '../http/actor.js';
 import type { KernelDeps } from '../kernel/context.js';
 import { readState, signState, STATE_TTL_MS } from '../kernel/install-link.js';
 import { runOperation } from '../kernel/pipeline.js';
+import { handlePullRequest, webhookActor } from './pull-requests.js';
 
 const Push = z.object({
   ref: z.string(),
@@ -25,6 +25,35 @@ const Push = z.object({
     )
     .default([]),
 });
+
+/**
+ * A pull request, as GitHub describes one (§26 M6). Only the parts a
+ * preview needs: which branch, aimed at which, at what commit, and
+ * whether the branch is on somebody else's copy of the repository.
+ */
+const PullRequestEvent = z.object({
+  action: z.string(),
+  number: z.number().int().positive(),
+  pull_request: z.object({
+    title: z.string().default(''),
+    html_url: z.url().optional(),
+    head: z.object({
+      ref: z.string(),
+      sha: z.string(),
+      repo: z.object({ full_name: z.string() }).nullable().default(null),
+    }),
+    base: z.object({ ref: z.string(), repo: z.object({ full_name: z.string() }) }),
+  }),
+  installation: z.object({ id: z.number() }),
+});
+
+/** What each action means for a preview; anything else means nothing. */
+const PULL_REQUEST_ACTIONS: Record<string, 'open' | 'closed'> = {
+  opened: 'open',
+  reopened: 'open',
+  synchronize: 'open',
+  closed: 'closed',
+};
 
 const InstallationEvent = z.object({
   action: z.string(),
@@ -134,6 +163,32 @@ export const githubRoutes =
         }
         return reply.status(204).send();
       }
+      if (event === 'pull_request') {
+        const parsed = PullRequestEvent.safeParse(payload);
+        const state = parsed.success ? PULL_REQUEST_ACTIONS[parsed.data.action] : undefined;
+        if (!parsed.success || !state) return reply.status(204).send();
+        const linked = await installationById(deps.db, parsed.data.installation.id);
+        if (!linked || linked.suspended) return reply.status(204).send();
+        const who = await webhookActor(deps.db, linked.linkedBy, linked.orgId);
+        if (!who) return reply.status(202).send({ previews: [] });
+        const pr = parsed.data.pull_request;
+        const previews = await handlePullRequest(deps, who, {
+          provider: 'github',
+          host: DEFAULT_HOST.github,
+          repo: pr.base.repo.full_name,
+          number: parsed.data.number,
+          branch: pr.head.ref,
+          base: pr.base.ref,
+          commit: pr.head.sha,
+          title: pr.title,
+          ...(pr.html_url ? { url: pr.html_url } : {}),
+          // A head on another repository is a fork, and a fork is
+          // somebody else's code (ADR 0020).
+          fromFork: pr.head.repo?.full_name !== pr.base.repo.full_name,
+          state,
+        });
+        return reply.status(202).send({ previews });
+      }
       if (event !== 'push') return reply.status(204).send();
 
       const push = Push.safeParse(payload);
@@ -147,24 +202,14 @@ export const githubRoutes =
       const complete = push.data.commits.length < PUSH_COMMIT_LIMIT;
 
       // A push deploys as the person who connected the account, never above their role.
-      let role: Role;
-      try {
-        role = await roleIn(deps.db, installation.linkedBy, installation.orgId);
-      } catch {
+      const actor = await webhookActor(deps.db, installation.linkedBy, installation.orgId);
+      if (!actor) {
         req.log.warn(
           { installation: installation.installationId },
           'push from an account connected by a former member',
         );
         return reply.status(202).send({ deployed: [] });
       }
-      const actor: HumanActor = {
-        kind: 'human',
-        origin: 'webhook',
-        userId: installation.linkedBy as Id<'user'>,
-        orgId: installation.orgId as Id<'organization'>,
-        role,
-        stepUpAt: null,
-      };
       const deployed = [];
       for (const project of await projectsForPush(
         deps.db,

@@ -11,8 +11,10 @@ import {
   DEFAULT_HOST,
   gitWebhookSecret,
   headUrl,
+  isPullRequestEvent,
   isPushEvent,
   readHead,
+  readPullRequest,
   readPush,
   type GitConnection,
 } from './sources.js';
@@ -237,5 +239,110 @@ describe('checking a token before it is stored', () => {
     const unreachable = await refusal(checkToken({ ...own, token: 't' }, dead));
     expect(unreachable.code).toBe('unavailable');
     expect(unreachable.message).toMatch(/could not be reached/);
+  });
+});
+
+describe('reading a pull request', () => {
+  it('counts only the headers that mean one', () => {
+    expect(isPullRequestEvent('gitlab', 'Merge Request Hook')).toBe(true);
+    expect(isPullRequestEvent('gitlab', 'Push Hook')).toBe(false);
+    expect(isPullRequestEvent('bitbucket', 'pullrequest:created')).toBe(true);
+    expect(isPullRequestEvent('bitbucket', 'repo:push')).toBe(false);
+    expect(isPullRequestEvent('gitlab', undefined)).toBe(false);
+  });
+
+  const merge = (over: Record<string, unknown> = {}) => ({
+    object_attributes: {
+      iid: 7,
+      title: 'Fix the thing',
+      url: 'https://gitlab.com/acme/shop/-/merge_requests/7',
+      action: 'open',
+      source_branch: 'fix-the-thing',
+      target_branch: 'main',
+      last_commit: { id: 'abc1234' },
+      source: { path_with_namespace: 'acme/shop' },
+      target: { path_with_namespace: 'acme/shop' },
+      ...over,
+    },
+  });
+
+  it('takes what GitLab calls a merge request', () => {
+    expect(readPullRequest('gitlab', 'Merge Request Hook', merge())).toEqual({
+      repo: 'acme/shop',
+      number: 7,
+      branch: 'fix-the-thing',
+      base: 'main',
+      commit: 'abc1234',
+      title: 'Fix the thing',
+      url: 'https://gitlab.com/acme/shop/-/merge_requests/7',
+      fromFork: false,
+      state: 'open',
+    });
+  });
+
+  it('knows a GitLab branch on another repository is a fork', () => {
+    const forked = merge({ source: { path_with_namespace: 'someone/shop' } });
+    expect(readPullRequest('gitlab', 'Merge Request Hook', forked)?.fromFork).toBe(true);
+  });
+
+  it('closes on both the ways GitLab ends one', () => {
+    for (const action of ['close', 'merge']) {
+      expect(readPullRequest('gitlab', 'Merge Request Hook', merge({ action }))?.state).toBe(
+        'closed',
+      );
+    }
+  });
+
+  it('ignores a label changing, which did not happen to the code', () => {
+    expect(
+      readPullRequest('gitlab', 'Merge Request Hook', merge({ action: 'approved' })),
+    ).toBeNull();
+    expect(readPullRequest('gitlab', 'Merge Request Hook', { object_attributes: {} })).toBeNull();
+    expect(readPullRequest('gitlab', 'Merge Request Hook', null)).toBeNull();
+  });
+
+  const bitbucket = (over: Record<string, unknown> = {}) => ({
+    pullrequest: {
+      id: 9,
+      title: 'Fix the thing',
+      links: { html: { href: 'https://bitbucket.org/acme/shop/pull-requests/9' } },
+      source: {
+        branch: { name: 'fix-the-thing' },
+        commit: { hash: 'def5678' },
+        repository: { full_name: 'acme/shop' },
+      },
+      destination: { branch: { name: 'main' }, repository: { full_name: 'acme/shop' } },
+      ...over,
+    },
+  });
+
+  it('takes Bitbucket, whose header is the only thing that says what happened', () => {
+    expect(readPullRequest('bitbucket', 'pullrequest:created', bitbucket())).toEqual({
+      repo: 'acme/shop',
+      number: 9,
+      branch: 'fix-the-thing',
+      base: 'main',
+      commit: 'def5678',
+      title: 'Fix the thing',
+      url: 'https://bitbucket.org/acme/shop/pull-requests/9',
+      fromFork: false,
+      state: 'open',
+    });
+    for (const event of ['pullrequest:fulfilled', 'pullrequest:rejected']) {
+      expect(readPullRequest('bitbucket', event, bitbucket())?.state).toBe('closed');
+    }
+    expect(readPullRequest('bitbucket', 'pullrequest:comment_created', bitbucket())).toBeNull();
+    expect(readPullRequest('bitbucket', undefined, bitbucket())).toBeNull();
+  });
+
+  it('knows a Bitbucket branch on another repository is a fork', () => {
+    const forked = bitbucket({
+      source: {
+        branch: { name: 'fix' },
+        commit: { hash: 'aaa' },
+        repository: { full_name: 'someone/shop' },
+      },
+    });
+    expect(readPullRequest('bitbucket', 'pullrequest:created', forked)?.fromFork).toBe(true);
   });
 });

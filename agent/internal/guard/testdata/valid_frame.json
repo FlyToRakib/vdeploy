@@ -103,6 +103,7 @@
           "crons": []
         },
         "placement": {},
+        "preview": { "enabled": false, "fromForks": false, "max": 5, "expireAfterDays": 7 },
         "ai": {
           "managed": true,
           "autoApply": [

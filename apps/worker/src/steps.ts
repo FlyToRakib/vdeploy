@@ -7,6 +7,7 @@ import {
   VDeployError,
   type ApplicationSpec,
   type Id,
+  type PreviewRef,
   type PlanStep,
 } from '@vdeploy/contracts';
 import {
@@ -29,6 +30,7 @@ import {
 import {
   abandonBuild,
   connectionFor,
+  secretsOwner,
   currentSecretVersions,
   diagnoseProject,
   deployments,
@@ -181,38 +183,55 @@ const SPEC_EDITS = new Set([
   'cron.create',
   'cron.update',
   'cron.delete',
+  'preview.open',
   ...SECTION_EDITS,
 ]);
 
-async function updateSpec(deps: StepDeps, state: ApplyState, placed?: string) {
+async function updateSpec(
+  deps: StepDeps,
+  state: ApplyState,
+  placed?: string,
+  preview?: { of: Id<'project'>; ref: PreviewRef },
+) {
   if (!SPEC_EDITS.has(state.operation)) {
     throw new VDeployError('internal', `${state.operation} does not change the spec`);
   }
-  const current = state.projectId === null ? null : (await project(deps, state)).spec;
-  const spec = specAfter(state.operation as Parameters<typeof specAfter>[0], state.args, current);
-  // Refuse a reference to a missing secret before the spec is written, not after.
-  if (state.projectId !== null) {
-    await pinSecrets(deps, state.projectId, spec);
+  const row = state.projectId === null ? null : await project(deps, state);
+  const spec = specAfter(
+    state.operation as Parameters<typeof specAfter>[0],
+    state.args,
+    row?.spec ?? null,
+  );
+  // Refuse a reference to a missing secret before the spec is written, not
+  // after. A preview's env names the app's secrets, not its own (ADR 0020),
+  // so the check — and the pinning it stands in for — asks the app.
+  if (row) {
+    await pinSecrets(deps, secretsOwner(row), spec);
   } else if (spec.runtime.env.some((e) => 'secretRef' in e)) {
     throw new VDeployError(
       'invalid_input',
       'A new project has no secrets yet; create it first, then add its secrets',
     );
   }
-  if (state.projectId === null) {
+  if (state.projectId === null || preview) {
     const id = newId('project');
-    const serverId = await chooseServer(deps, state, spec, placed);
+    // A preview runs beside the app it previews: the same machine, so
+    // nothing it is allowed to reach has to cross one.
+    const serverId = preview ? (row?.serverId ?? null) : null;
+    const chosen = serverId ?? (await chooseServer(deps, state, spec, placed));
     await deps.db.transaction(async (tx) => {
       await tx.insert(projects).values({
         id,
         orgId: state.orgId,
-        serverId,
+        serverId: chosen,
         name: spec.metadata.name,
         spec,
         specHash: hashOf(spec),
+        ...(preview ? { previewOf: preview.of, previewRef: preview.ref } : {}),
       });
       await refreshInstantHosts(tx, { orgId: state.orgId, projectId: id });
     });
+    // Everything after this step acts on the preview, not on the app.
     state.projectId = id;
     return;
   }
@@ -592,7 +611,7 @@ async function newRelease(deps: StepDeps, state: ApplyState) {
     version: (latest?.version ?? 0) + 1,
     spec: row.spec,
     image,
-    secretVersions: await pinSecrets(deps, row.id, row.spec),
+    secretVersions: await pinSecrets(deps, secretsOwner(row), row.spec),
     now: deps.now(),
   });
   await deps.db
@@ -725,7 +744,14 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
     case 'snapshot_volumes':
       return snapshotVolumesStep(deps, state, step.volumes);
     case 'update_spec':
-      return updateSpec(deps, state, step.server);
+      return updateSpec(
+        deps,
+        state,
+        step.server,
+        step.previewOf && step.previewRef
+          ? { of: step.previewOf, ref: step.previewRef }
+          : undefined,
+      );
     case 'create_release':
       return newRelease(deps, state);
     case 'activate_release':

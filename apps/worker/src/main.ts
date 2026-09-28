@@ -18,6 +18,7 @@ import { pino } from 'pino';
 import { z } from 'zod';
 import { applyPlan } from './apply.js';
 import { runAutoscaling } from './autoscale-loop.js';
+import { closeStalePreviews } from './preview-expiry.js';
 import { runDueBackups, runDueVerifications } from './backup-schedule.js';
 import { runDueCrons } from './cron-schedule.js';
 import { publicDns, runDomainChecks } from './dns-check.js';
@@ -193,6 +194,30 @@ const scaleTimer = setInterval(() => {
     });
 }, 60_000);
 
+// Previews of pull requests nobody has pushed to (§26 M6). Once an hour
+// is often enough for something measured in days, and it is the sweep that
+// catches the webhook that never arrived rather than the ordinary way a
+// preview goes, which is the pull request closing.
+let sweeping = false;
+const previewTimer = setInterval(() => {
+  if (sweeping) return;
+  sweeping = true;
+  closeStalePreviews({
+    db,
+    queue: applyQueue,
+    now: () => new Date(),
+    logError: (err, projectId) => {
+      log.error({ err, projectId }, 'a preview past its time could not be closed');
+    },
+  })
+    .catch((err: unknown) => {
+      log.error({ err }, 'preview sweep failed');
+    })
+    .finally(() => {
+      sweeping = false;
+    });
+}, 60 * 60_000);
+
 // Proving those backups by putting them back (§17.5). Checked every ten
 // minutes: a weekly check does not need a closer watch than that.
 let verifying = false;
@@ -271,6 +296,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     clearInterval(verifyTimer);
     clearInterval(cronTimer);
     clearInterval(scaleTimer);
+    clearInterval(previewTimer);
     clearInterval(pruneTimer);
     clearInterval(notifyTimer);
     clearInterval(offlineTimer);

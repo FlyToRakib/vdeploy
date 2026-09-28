@@ -23,6 +23,8 @@ export interface ProjectSnapshot {
   spec: ApplicationSpec;
   currentReleaseId: Id<'release'> | null;
   running: boolean;
+  /** The app this one previews, when it is a preview (§26 M6). */
+  previewOf: Id<'project'> | null;
 }
 
 export interface PlanWorld {
@@ -210,6 +212,7 @@ export async function loadPlanWorld(
       spec: readSpec(row.spec),
       currentReleaseId: row.currentReleaseId as Id<'release'> | null,
       running: row.running,
+      previewOf: row.previewOf as Id<'project'> | null,
     },
     // The server the plan is *about*. For everything but a move that is
     // the one the app is on; a move names another, and checking the app

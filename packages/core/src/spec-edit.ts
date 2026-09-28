@@ -4,6 +4,7 @@ import {
   describeIssues,
   type OperationArgs,
 } from '@vdeploy/contracts';
+import { previewSpec, type PullRequest } from './previews.js';
 import { templateSpec } from './templates.js';
 
 /** A volume name for a folder: its last part, made into a resource name, never clashing. */
@@ -127,6 +128,7 @@ export function specAfter(
     | 'cron.update'
     | 'cron.delete'
     | 'storage.make_persistent'
+    | 'preview.open'
     | SectionEdit,
   args: Record<string, unknown>,
   current: ApplicationSpec | null,
@@ -143,6 +145,11 @@ export function specAfter(
     return valid(args.spec);
   }
   if (!current) throw new VDeployError('not_found', 'Project not found');
+  if (name === 'preview.open') {
+    // Derived from the app, never from what the caller sent: a webhook
+    // names a pull request and nothing else about what will run.
+    return previewSpec(current, { ...(args.pullRequest as PullRequest), fromFork: false });
+  }
   if (name === 'storage.make_persistent') {
     return makePersistent(current, String(args.mountPath));
   }
@@ -185,7 +192,8 @@ export type SectionEdit =
   | 'network.middleware'
   | 'loadbalancer.configure'
   | 'volume.create'
-  | 'build.configure';
+  | 'build.configure'
+  | 'preview.configure';
 
 export const SECTION_EDITS: readonly SectionEdit[] = [
   'domain.add',
@@ -199,6 +207,7 @@ export const SECTION_EDITS: readonly SectionEdit[] = [
   'loadbalancer.configure',
   'volume.create',
   'build.configure',
+  'preview.configure',
 ];
 
 export function isSectionEdit(name: string): name is SectionEdit {
@@ -222,6 +231,8 @@ function editSection(
   current: ApplicationSpec,
 ): ApplicationSpec {
   switch (name) {
+    case 'preview.configure':
+      return valid({ ...current, preview: args.preview });
     case 'domain.add': {
       const host = String(args.host);
       const net = network(current);

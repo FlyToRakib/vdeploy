@@ -7,6 +7,7 @@ import {
   EnvKey,
   Health,
   Network,
+  Preview,
   ResourceName,
   Runtime,
   Scaling,
@@ -18,6 +19,7 @@ import { RestoreMode } from '../backups.js';
 import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { FolderPath } from '../files.js';
 import { ChannelConfig, NotificationTrigger } from '../notifications.js';
+import { PreviewRef } from '../previews.js';
 import { MAX_SECRET_BYTES, SecretName } from '../secrets.js';
 import { UrlSettings } from '../urls.js';
 import { operation, query, Role, type OperationDefinition } from './define.js';
@@ -118,6 +120,13 @@ export const OPERATIONS = [
   query('server.resources', 'server', 'metrics', 'Show server CPU, memory and disk usage', obj(S)),
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
+  query(
+    'preview.list',
+    'project',
+    'config',
+    'List the previews of this app, one per open pull request',
+    obj(P),
+  ),
   query(
     'git.connections',
     'org',
@@ -663,6 +672,35 @@ export const OPERATIONS = [
     // returns, which is the proof.
     obj({ provider: z.enum(['github']) }),
     { minRole: 'admin' },
+  ),
+  operation(
+    'preview.configure',
+    'sensitive',
+    'project',
+    'Turn previews on or off for this app, and set how many and for how long',
+    obj({ ...P, preview: Preview }),
+  ),
+  // Opening and closing a preview is what a pull request does to itself.
+  // They are operations rather than something the webhook does directly so
+  // that a preview is planned, gated and audited like every other change —
+  // and so a person can make or remove one by hand.
+  operation(
+    'preview.open',
+    'sensitive',
+    'project',
+    'Create the preview of one pull request of this app',
+    obj({ ...P, pullRequest: PreviewRef }),
+  ),
+  // Closing a preview is not deleting an app: nobody put anything in it,
+  // it was created automatically, and reopening the pull request makes it
+  // again. So it is sensitive, and can happen without waking anybody, which
+  // is the only way a preview ever actually goes away.
+  operation(
+    'preview.close',
+    'sensitive',
+    'project',
+    'Take down a preview and everything it made; the app it previews is untouched',
+    obj(P),
   ),
   // GitLab and Bitbucket have no app to install: they take an access token
   // the person makes themselves, which is why connecting them is one call

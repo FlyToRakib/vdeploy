@@ -763,3 +763,124 @@ export function ScheduleSection() {
     </Section>
   );
 }
+
+interface PreviewView {
+  id: string;
+  name: string;
+  pullRequest: { number: number; title: string; branch: string; url?: string };
+  url: string | null;
+  running: boolean;
+}
+
+/**
+ * A copy of this app per pull request (§26 M6, ADR 0020).
+ *
+ * Off until somebody turns it on, because it builds and runs code on your
+ * servers every time somebody opens a pull request. The two settings that
+ * matter are here and nothing else is: how many at once, and previews
+ * from forks — which is the one that hands this app's settings to
+ * somebody else's code, so it says exactly that.
+ */
+export function PreviewsSection() {
+  const { projectId, act } = useProject();
+  const spec = useSpec();
+  const [previews, setPreviews] = useState<PreviewView[] | null>(null);
+  const preview = spec.preview ?? { enabled: false, fromForks: false, max: 5, expireAfterDays: 7 };
+
+  useEffect(() => {
+    void query<PreviewView[]>('preview.list', { projectId }).then(setPreviews, () => {
+      setPreviews([]);
+    });
+  }, [projectId, spec]);
+
+  const configure = (next: Record<string, unknown>, what: string) =>
+    void act('preview.configure', { projectId, preview: { ...preview, ...next } }, what);
+
+  const fromGit = spec.source?.type === 'git';
+  return (
+    <Section
+      title="Previews"
+      hint="A copy of this app for every pull request, at its own address, gone when the pull request closes."
+    >
+      {!fromGit ? (
+        <p className="text-sm text-muted-foreground">
+          Previews follow pull requests, so they need an app that deploys from a repository.
+        </p>
+      ) : (
+        <>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={preview.enabled}
+              onChange={(event) => {
+                configure(
+                  { enabled: event.target.checked },
+                  event.target.checked ? 'Turning previews on' : 'Turning previews off',
+                );
+              }}
+            />
+            Build a preview for every pull request
+          </label>
+          {preview.enabled && (
+            <>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={preview.fromForks}
+                  onChange={(event) => {
+                    configure(
+                      { fromForks: event.target.checked },
+                      'Changing what previews are built for',
+                    );
+                  }}
+                />
+                Also for pull requests from forks
+              </label>
+              <p className="text-xs text-muted-foreground">
+                A preview runs with this app's settings, its API keys included. A pull request from
+                a fork is somebody else's code, so turning this on is handing them over.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                At most {preview.max} at once; one nobody pushes to for {preview.expireAfterDays}{' '}
+                days is taken down.
+              </p>
+            </>
+          )}
+          {previews === null && <Skeleton className="h-10" />}
+          {previews?.length === 0 && preview.enabled && (
+            <p className="text-sm text-muted-foreground">No pull requests are open.</p>
+          )}
+          <ul className="grid gap-2 text-sm">
+            {previews?.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">#{row.pullRequest.number}</span>
+                <span>{row.pullRequest.title}</span>
+                <Status health={row.running ? 'healthy' : 'warning'}>
+                  {row.running ? 'Running' : 'Stopped'}
+                </Status>
+                {row.url && (
+                  <a className="text-accent underline" href={row.url}>
+                    Open
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="text-accent underline"
+                  onClick={() =>
+                    void act(
+                      'preview.close',
+                      { projectId: row.id },
+                      `Taking down the preview of #${String(row.pullRequest.number)}`,
+                    )
+                  }
+                >
+                  Take down
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Section>
+  );
+}

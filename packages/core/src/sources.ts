@@ -249,6 +249,138 @@ export function gitWebhookSecret(key: Buffer, connectionId: string): string {
   return createHmac('sha256', key).update(`git-webhook:${connectionId}`).digest('hex');
 }
 
+/** Whether the header naming the event says this was about a pull request. */
+export function isPullRequestEvent(provider: GitProvider, event: string | undefined): boolean {
+  if (!event) return false;
+  return provider === 'gitlab' ? event === 'Merge Request Hook' : event.startsWith('pullrequest:');
+}
+
+/**
+ * A pull request as each provider describes one, in the shape a preview
+ * needs (§26 M6, ADR 0020).
+ *
+ * GitLab calls it a merge request and puts everything in one object.
+ * Bitbucket nests it and names the target `destination`. Neither says
+ * "fork" — what they say is which repository the source branch is on, and
+ * a different one is a fork, which is the fact that actually matters.
+ */
+export interface PullRequestUpdate {
+  repo: string;
+  number: number;
+  branch: string;
+  base: string;
+  commit: string;
+  title: string;
+  url?: string;
+  fromFork: boolean;
+  state: 'open' | 'closed';
+}
+
+export function readPullRequest(
+  provider: GitProvider,
+  event: string | undefined,
+  payload: unknown,
+): PullRequestUpdate | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  return provider === 'gitlab' ? gitlabMergeRequest(payload) : bitbucketPullRequest(payload, event);
+}
+
+/** GitLab's own words for where a merge request has got to. */
+const GITLAB_CLOSED = new Set(['close', 'merge']);
+const GITLAB_OPEN = new Set(['open', 'reopen', 'update']);
+
+function gitlabMergeRequest(payload: object): PullRequestUpdate | null {
+  const body = payload as {
+    object_attributes?: {
+      iid?: unknown;
+      title?: unknown;
+      url?: unknown;
+      action?: unknown;
+      state?: unknown;
+      source_branch?: unknown;
+      target_branch?: unknown;
+      last_commit?: { id?: unknown };
+      source?: { path_with_namespace?: unknown };
+      target?: { path_with_namespace?: unknown };
+    };
+  };
+  const mr = body.object_attributes;
+  if (!mr) return null;
+  const repo = str(mr.target?.path_with_namespace);
+  const branch = str(mr.source_branch);
+  const base = str(mr.target_branch);
+  const commit = str(mr.last_commit?.id);
+  const number = typeof mr.iid === 'number' ? mr.iid : 0;
+  const action = str(mr.action);
+  if (!repo || !branch || !base || !commit || number < 1 || !action) return null;
+  // An action that is neither opening nor closing — an assignee changed,
+  // a label added — is not a thing that happened to the code.
+  const state = GITLAB_CLOSED.has(action) ? 'closed' : GITLAB_OPEN.has(action) ? 'open' : null;
+  if (!state) return null;
+  const url = str(mr.url);
+  return {
+    repo,
+    number,
+    branch,
+    base,
+    commit,
+    title: str(mr.title) ?? `Merge request !${String(number)}`,
+    ...(url ? { url } : {}),
+    fromFork: str(mr.source?.path_with_namespace) !== repo,
+    state,
+  };
+}
+
+/** Bitbucket says what happened in the header, not in the body. */
+const BITBUCKET_CLOSED = new Set(['pullrequest:fulfilled', 'pullrequest:rejected']);
+const BITBUCKET_OPEN = new Set(['pullrequest:created', 'pullrequest:updated']);
+
+function bitbucketPullRequest(
+  payload: object,
+  event: string | undefined,
+): PullRequestUpdate | null {
+  const state = event
+    ? BITBUCKET_CLOSED.has(event)
+      ? 'closed'
+      : BITBUCKET_OPEN.has(event)
+        ? 'open'
+        : null
+    : null;
+  if (!state) return null;
+  const pr = (payload as { pullrequest?: unknown }).pullrequest as
+    | {
+        id?: unknown;
+        title?: unknown;
+        links?: { html?: { href?: unknown } };
+        source?: {
+          branch?: { name?: unknown };
+          commit?: { hash?: unknown };
+          repository?: { full_name?: unknown };
+        };
+        destination?: { branch?: { name?: unknown }; repository?: { full_name?: unknown } };
+      }
+    | undefined;
+  if (!pr) return null;
+  const repo = str(pr.destination?.repository?.full_name);
+  const branch = str(pr.source?.branch?.name);
+  const base = str(pr.destination?.branch?.name);
+  const commit = str(pr.source?.commit?.hash);
+  const number = typeof pr.id === 'number' ? pr.id : 0;
+  if (!repo || !branch || !base || !commit || number < 1) return null;
+  const url = str(pr.links?.html?.href);
+  return {
+    repo,
+    number,
+    branch,
+    base,
+    commit,
+    title: str(pr.title) ?? `Pull request #${String(number)}`,
+    ...(url ? { url } : {}),
+    fromFork: str(pr.source?.repository?.full_name) !== repo,
+    state,
+  };
+}
+
 /** Whether the header naming the event says this was a push. */
 export function isPushEvent(provider: GitProvider, event: string | undefined): boolean {
   if (!event) return false;

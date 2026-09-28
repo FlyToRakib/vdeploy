@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — next: preview environments per pull request
+**Task:** M6 — next: a staging environment
 **Status:** in progress
-**Updated:** 2026-09-29 21:35 UTC
+**Updated:** 2026-09-29 23:10 UTC
 
 ## M6 — the ecosystem
 
@@ -72,6 +72,31 @@ kind of model, and a second and third place source can come from.
   encoded segment (subgroups are why a repository name is no longer two
   parts), and Bitbucket serves downloads and answers questions on **two
   different hosts**
+
+- [x] **a preview of every pull request** (ADR 0020) — a copy of the app
+  at that branch, at its own address, gone when the pull request closes.
+  A preview **is a project**: same build, same release, same router, same
+  health checks, same governor, same audit entry — because a second kind
+  of running thing is a second implementation of every one of those, and
+  the differences would only ever show up on the copy nobody is watching.
+  What the derivation takes away it takes away for a reason that would
+  otherwise bite exactly once: no permanent folders (twenty previews is
+  twenty folders nobody deletes), no scheduled jobs (a preview that sends
+  the nightly invoice has charged somebody), no custom domains, one
+  replica, and no previews of its own. Its env names the app's secrets and
+  it **reads them rather than owning copies** — one fact in one place,
+  which is safe only because of the rule underneath the whole feature: **a
+  pull request from a fork gets no preview** unless somebody turns that on
+  deliberately, because it is somebody else's code and a preview would run
+  it with this app's API keys. Closing one is tier 2, not tier 3: a
+  preview that needed a human woken up to remove it is a preview that
+  never actually goes away, and the hourly sweep that catches the webhook
+  which never arrived would be useless. GitHub, GitLab and Bitbucket each
+  describe a pull request differently and each call it something else; by
+  the time it reaches the handler it is one shape. **Not yet**: an app
+  that reads a managed database is refused in words, because a preview
+  pointed at the real one would run the pull request's migrations against
+  production data
 
 Four bugs, all found by using the thing rather than by a test:
 
@@ -409,9 +434,8 @@ GitHub.
 
 ## Next
 
-- M6, in order: preview environments per pull request, a staging
-  environment, SSO/SAML, a plugin system, and servers VDeploy provisions
-  itself (Hetzner, DigitalOcean, Vultr)
+- M6, in order: a staging environment, SSO/SAML, a plugin system, and
+  servers VDeploy provisions itself (Hetzner, DigitalOcean, Vultr)
 
 ## Known gaps (tracked, not forgotten)
 
@@ -426,6 +450,12 @@ GitHub.
   connect form says so rather than failing later. The dashboard panel for
   these has not been opened in a browser (same gap as the private-traffic
   card); its data path is covered by the API tests.
+- Previews: an app that reads a managed database cannot have one until a
+  database is copied per preview (the refusal says so). Nothing is written
+  back to the pull request — no status check, no comment with the link;
+  the webhook's answer and the dashboard carry the outcome. The previews
+  panel on a project's Config screen has not been opened in a browser; its
+  data path is covered by the API and worker tests.
 - Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
@@ -440,6 +470,7 @@ GitHub.
 
 ## Decisions made
 
+- 2026-09-29 A preview is a project, and it reads the app's secrets — docs/adr/0020-a-preview-is-a-project.md
 - 2026-09-29 GitLab and Bitbucket connect with a token, not an app — docs/adr/0019-gitlab-and-bitbucket-by-token.md
 - 2026-09-27 The firewall is read, never written — docs/adr/0016-firewall-read-only.md
 - 2026-09-27 The file browser reads the folder on the host, confined by the kernel rather than by a check — docs/adr/0015-file-browser.md

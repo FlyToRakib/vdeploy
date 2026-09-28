@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema } from './ids.js';
 import { OperationNameSchema } from './operations/catalog.js';
+import { PreviewRef } from './previews.js';
 import { RiskTier } from './operations/define.js';
 import { ApplicationSpec } from './spec/application.js';
 
@@ -53,6 +54,13 @@ export const PlanStep = z.discriminatedUnion('kind', [
      * from the one somebody read and agreed to.
      */
     server: idSchema('server').optional(),
+    /**
+     * The app this project previews (§26 M6). It is on the step because
+     * it decides two things the apply cannot work out from the spec: that
+     * the new row is a preview, and whose secrets its env refers to.
+     */
+    previewOf: idSchema('project').optional(),
+    previewRef: PreviewRef.optional(),
   }),
   z.strictObject({ kind: z.literal('create_release') }),
   z.strictObject({

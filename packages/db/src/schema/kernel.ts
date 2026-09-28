@@ -6,6 +6,7 @@ import type {
   DomainStatus,
   ObservedReport,
   Plan,
+  PreviewRef,
   Reachability,
   ReclaimResult,
   UrlSettings,
@@ -111,6 +112,14 @@ export const projects = pgTable(
     instantHost: text('instant_host'),
     /** Earlier instant hosts, newest first; each redirects to the current one. */
     previousHosts: jsonb('previous_hosts').$type<string[]>().notNull().default([]),
+    /**
+     * The project this one previews, when it is a preview (§26 M6).
+     * A preview has no secrets of its own: it reads the app's, which is
+     * why a preview is never made for a fork unless somebody says so.
+     */
+    previewOf: text('preview_of'),
+    /** Which pull request it belongs to; null unless previewOf is set. */
+    previewRef: jsonb('preview_ref').$type<PreviewRef>(),
     /** Flagged folders a person marked as only temporary (§17.2). */
     ignoredPaths: jsonb('ignored_paths').$type<string[]>().notNull().default([]),
     createdAt: createdAt(),

@@ -28,6 +28,8 @@ import { specAfter } from './spec-edit.js';
 export interface ProjectState {
   id: Id<'project'>;
   spec: ApplicationSpec;
+  /** The app this one previews, when it is a preview (§26 M6). */
+  previewOf?: Id<'project'> | null;
   currentReleaseId: Id<'release'> | null;
   /** False while stopped: a stopped project holds no capacity. */
   running?: boolean;
@@ -314,6 +316,65 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     steps.splice(at + 1, 0, { kind: 'generate_secrets', keys });
     return { ...draft, steps };
   },
+  /**
+   * A preview is a new project derived from this one (ADR 0020), so the
+   * plan is a creation rather than an edit: it is diffed against nothing,
+   * and the `update_spec` step carries the parent, which is what tells
+   * the apply to insert a row instead of writing over the app.
+   */
+  'preview.open': (args, context) => {
+    const parent = requireProject(context);
+    if (parent.previewOf) {
+      throw new VDeployError('conflict', 'A preview does not have previews of its own');
+    }
+    if (!parent.spec.preview.enabled) {
+      throw new VDeployError(
+        'conflict',
+        `Previews are off for ${parent.spec.metadata.name}; turn them on first`,
+      );
+    }
+    const spec = specAfter('preview.open', args, parent.spec);
+    const draft = specChange(null, spec, 'sensitive', context);
+    return {
+      ...draft,
+      steps: draft.steps.map((step) =>
+        step.kind === 'update_spec'
+          ? {
+              ...step,
+              previewOf: parent.id,
+              previewRef: args.pullRequest,
+              // A preview runs beside the app it previews: same machine,
+              // so a database it is later allowed to read is reachable
+              // without crossing anything.
+              ...(spec.placement.server ? { server: spec.placement.server } : {}),
+            }
+          : step,
+      ),
+    };
+  },
+  /**
+   * Taking a preview down is not deleting an app, which is why it is not
+   * tier 3: nobody put anything in it, it was made by opening a pull
+   * request, and opening that pull request again makes it back. A preview
+   * that needed somebody woken up to remove it is a preview that never
+   * actually goes away.
+   */
+  'preview.close': (_args, context) => {
+    const preview = requireProject(context);
+    if (!preview.previewOf) {
+      throw new VDeployError(
+        'conflict',
+        `${preview.spec.metadata.name} is an app, not a preview. Deleting an app is project.delete, and it asks first.`,
+      );
+    }
+    return {
+      specHash: null,
+      changes: [],
+      steps: [{ kind: 'delete_project', keepData: false }],
+      tier: 'sensitive',
+      blastRadius: radius(preview.spec, { downtime: 'permanent', dataAtRisk: [] }),
+    };
+  },
   'project.update_spec': (args, context) => {
     const project = requireProject(context);
     return specChange(
@@ -350,6 +411,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
   'network.middleware': sectionEdit('network.middleware'),
   'loadbalancer.configure': sectionEdit('loadbalancer.configure'),
   'volume.create': sectionEdit('volume.create'),
+  'preview.configure': sectionEdit('preview.configure'),
   /**
    * Which machine compiles this app (§15). The spec edit is ordinary; the
    * part worth checking is the machine, because a build queued on a server

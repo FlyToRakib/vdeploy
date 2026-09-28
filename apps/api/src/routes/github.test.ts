@@ -1,9 +1,9 @@
 import { createHmac, generateKeyPairSync } from 'node:crypto';
 import { ApplicationSpec, newId } from '@vdeploy/contracts';
 import { hashOf } from '@vdeploy/core';
-import { githubInstallations, plans, projects } from '@vdeploy/db';
+import { githubInstallations, plans, projects, user } from '@vdeploy/db';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Browser, ORIGIN, startTestApp, type TestApp } from '../test-helpers.js';
 
 let t: TestApp;
@@ -66,13 +66,14 @@ const push = (files: string[], ref = 'refs/heads/main') => ({
   commits: [{ added: [], modified: files, removed: [] }],
 });
 
-async function gitProject(name: string, paths: string[] = []) {
+async function gitProject(name: string, paths: string[] = [], over: Record<string, unknown> = {}) {
   const spec = ApplicationSpec.parse({
     apiVersion: 'vdeploy/v1',
     kind: 'Application',
     metadata: { name },
     source: { type: 'git', provider: 'github', repo: 'acme/site', branch: 'main', paths },
     build: { strategy: 'dockerfile' },
+    ...over,
   });
   const id = newId('project');
   await t.database.db.insert(projects).values({
@@ -189,5 +190,100 @@ describe('connecting GitHub', () => {
       .from(githubInstallations)
       .where(eq(githubInstallations.installationId, 501));
     expect(rows).toEqual([]);
+  });
+});
+
+describe('a pull request', () => {
+  const previews = { enabled: true, fromForks: false, max: 2, expireAfterDays: 7 };
+
+  // Each of these asks what one pull request does to the apps that exist,
+  // so the apps the one before it made must not still be here.
+  beforeEach(async () => {
+    await t.database.db.delete(plans);
+    await t.database.db.delete(projects);
+  });
+
+  // The block before this one removes the installation on purpose.
+  beforeAll(async () => {
+    await t.database.db.insert(githubInstallations).values({
+      installationId: 501,
+      orgId,
+      accountLogin: 'Acme',
+      accountType: 'Organization',
+      repositorySelection: 'selected',
+      linkedBy: (await t.database.db.select().from(user))[0]!.id,
+    });
+  });
+
+  const event = (over: Record<string, unknown> = {}, head: Record<string, unknown> = {}) => ({
+    action: 'opened',
+    number: 42,
+    pull_request: {
+      title: 'Fix the thing',
+      html_url: 'https://github.com/acme/site/pull/42',
+      head: {
+        ref: 'fix-the-thing',
+        sha: 'a'.repeat(40),
+        repo: { full_name: 'acme/site' },
+        ...head,
+      },
+      base: { ref: 'main', repo: { full_name: 'acme/site' } },
+    },
+    installation: { id: 501 },
+    ...over,
+  });
+
+  it('makes a preview, planned like every other change', async () => {
+    const id = await gitProject('preview-me', [], { preview: previews });
+    const res = await hook('pull_request', event());
+    expect(res.statusCode).toBe(202);
+    const opened = res.json<{ previews: { projectId: string; status: string; plan?: string }[] }>()
+      .previews;
+    expect(opened).toMatchObject([{ projectId: id, status: 'opened' }]);
+    expect(typeof opened[0]?.plan).toBe('string');
+    const [plan] = await t.database.db
+      .select()
+      .from(plans)
+      .where(eq(plans.operation, 'preview.open'));
+    expect(plan?.args).toMatchObject({
+      pullRequest: {
+        number: 42,
+        branch: 'fix-the-thing',
+        url: 'https://github.com/acme/site/pull/42',
+      },
+    });
+  });
+
+  it('will not run a fork with this app settings', async () => {
+    const id = await gitProject('no-forks', [], { preview: previews });
+    const res = await hook('pull_request', event({}, { repo: { full_name: 'someone/site' } }));
+    const answered = res.json<{
+      previews: { projectId: string; status: string; reason: string }[];
+    }>().previews;
+    expect(answered).toMatchObject([{ projectId: id, status: 'refused' }]);
+    expect(answered[0]?.reason).toMatch(/comes from a fork/);
+  });
+
+  it('treats a pull request from a deleted fork as a fork', async () => {
+    // GitHub sends head.repo as null once the fork is gone; that is not
+    // this repository, so it is not somebody this app trusts.
+    const id = await gitProject('deleted-fork', [], { preview: previews });
+    const res = await hook('pull_request', event({}, { repo: null }));
+    const answered = res.json<{
+      previews: { projectId: string; status: string; reason: string }[];
+    }>().previews;
+    expect(answered).toMatchObject([{ projectId: id, status: 'refused' }]);
+    expect(answered[0]?.reason).toMatch(/fork/);
+  });
+
+  it('ignores an action that did not happen to the code', async () => {
+    await gitProject('labelled', [], { preview: previews });
+    expect((await hook('pull_request', event({ action: 'labeled' }))).statusCode).toBe(204);
+  });
+
+  it('is not signed differently from any other webhook', async () => {
+    await gitProject('unsigned', [], { preview: previews });
+    const res = await hook('pull_request', event(), 'not-the-secret');
+    expect(res.statusCode).toBe(401);
   });
 });

@@ -1,18 +1,19 @@
-import type { HumanActor } from '@vdeploy/ai';
-import { VDeployError, type Id, type Role } from '@vdeploy/contracts';
+import { VDeployError } from '@vdeploy/contracts';
 import {
   gitWebhookSecret,
+  isPullRequestEvent,
   isPushEvent,
   pathMatcher,
+  readPullRequest,
   readPush,
   verifyGithubSignature,
 } from '@vdeploy/core';
 import { connectionById, projectsForPush } from '@vdeploy/db';
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
-import { roleIn } from '../http/actor.js';
 import type { KernelDeps } from '../kernel/context.js';
 import { runOperation } from '../kernel/pipeline.js';
+import { handlePullRequest, webhookActor } from './pull-requests.js';
 
 /** Five megabytes is more than either provider sends for a push. */
 const MAX_BODY = 5 * 1024 * 1024;
@@ -69,7 +70,9 @@ export const gitRoutes =
             ? req.headers['x-gitlab-event']
             : req.headers['x-event-key'],
         );
-        if (!isPushEvent(connection.provider, event)) return reply.status(204).send();
+        const isPush = isPushEvent(connection.provider, event);
+        const isPullRequest = isPullRequestEvent(connection.provider, event);
+        if (!isPush && !isPullRequest) return reply.status(204).send();
 
         let payload: unknown;
         try {
@@ -77,27 +80,29 @@ export const gitRoutes =
         } catch {
           return await reply.status(400).send({ error: 'That body is not JSON' });
         }
-        const pushes = readPush(connection.provider, payload);
-        if (pushes.length === 0) return reply.status(204).send();
 
-        let role: Role;
-        try {
-          role = await roleIn(deps.db, connection.connectedBy, connection.orgId);
-        } catch {
+        const actor = await webhookActor(deps.db, connection.connectedBy, connection.orgId);
+        if (!actor) {
           req.log.warn(
             { connection: connection.id },
-            'push from a host connected by a former member',
+            'a webhook from a host connected by a former member',
           );
           return await reply.status(202).send({ deployed: [] });
         }
-        const actor: HumanActor = {
-          kind: 'human',
-          origin: 'webhook',
-          userId: connection.connectedBy as Id<'user'>,
-          orgId: connection.orgId as Id<'organization'>,
-          role,
-          stepUpAt: null,
-        };
+
+        if (isPullRequest) {
+          const at = readPullRequest(connection.provider, event, payload);
+          if (!at) return await reply.status(204).send();
+          const previews = await handlePullRequest(deps, actor, {
+            ...at,
+            provider: connection.provider,
+            host: connection.host,
+          });
+          return await reply.status(202).send({ previews });
+        }
+
+        const pushes = readPush(connection.provider, payload);
+        if (pushes.length === 0) return reply.status(204).send();
 
         const deployed = [];
         for (const push of pushes) {

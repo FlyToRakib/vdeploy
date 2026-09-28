@@ -7,7 +7,7 @@ import {
   type Id,
   type OperationName,
 } from '@vdeploy/contracts';
-import { buildPlan } from '@vdeploy/core';
+import { boxKeyPair, buildPlan } from '@vdeploy/core';
 import {
   approvals,
   auditLog,
@@ -35,7 +35,7 @@ import {
 } from '@vdeploy/db';
 import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyPlan, type WorkerDeps } from './apply.js';
 import type { RegistryAccess } from './registry.js';
 
@@ -743,5 +743,111 @@ describe('building from uploaded source', () => {
     expect(await applyPlan(deps, row.id)).toBe('failed');
     const [failed] = await t.db.select().from(plans).where(eq(plans.id, row.id));
     expect(failed?.error?.message).toMatch(/needs a secret called npm_token/);
+  });
+});
+
+describe('previews', () => {
+  const pullRequest = {
+    provider: 'github' as const,
+    host: 'https://github.com',
+    repo: 'acme/blog',
+    number: 42,
+    branch: 'fix-the-thing',
+    title: 'Fix the thing',
+  };
+
+  /** A stand-in for the repository: any branch is one small tarball. */
+  beforeEach(() => {
+    deps.fetch = () =>
+      Promise.resolve(new Response(new Uint8Array([0x1f, 0x8b, 1, 2]), { status: 200 }));
+  });
+  afterEach(() => {
+    delete deps.fetch;
+  });
+
+  /** An app with previews on, a secret, and a domain of its own. */
+  async function previewable() {
+    const created = await createProject();
+    const secret = await t.db.transaction((tx) =>
+      putSecret(tx, SECRETS, {
+        orgId,
+        projectId: created.id,
+        name: 'stripe_key',
+        value: 'sk_live_the_real_one',
+        actor: { userId, origin: 'dashboard' },
+      }),
+    );
+    const next = spec({
+      source: { type: 'git', provider: 'github', repo: 'acme/blog', branch: 'main' },
+      build: { strategy: 'dockerfile' },
+      network: { containerPort: 3000, domains: [{ host: 'blog.example.com' }] },
+      runtime: { env: [{ key: 'STRIPE_KEY', secretRef: secret.secretId }] },
+      preview: { enabled: true, max: 2, fromForks: false, expireAfterDays: 7 },
+    });
+    await t.db
+      .update(projects)
+      .set({ spec: next, specHash: 'b'.repeat(64) })
+      .where(eq(projects.id, created.id));
+    return { app: created, secretId: secret.secretId };
+  }
+
+  it('makes a new project rather than writing over the app it previews', async () => {
+    const { app, secretId } = await previewable();
+    const row = await plan('preview.open', { projectId: app.id, pullRequest });
+    const status = await applyPlan(deps, row.id);
+    const [after] = await t.db.select().from(plans).where(eq(plans.id, row.id));
+    expect([status, after?.error]).toEqual(['applied', null]);
+
+    const [preview] = await t.db.select().from(projects).where(eq(projects.previewOf, app.id));
+    expect(preview?.name).toBe('blog-pr-42');
+    expect(preview?.previewRef).toMatchObject({ number: 42, branch: 'fix-the-thing' });
+    // Beside the app it previews, on the same machine.
+    expect(preview?.serverId).toBe(app.serverId);
+    // And the app itself is exactly as it was.
+    const [unchanged] = await t.db.select().from(projects).where(eq(projects.id, app.id));
+    expect(unchanged?.name).toBe('blog');
+    expect(unchanged?.previewOf).toBeNull();
+
+    // Its release pins the app's secret, which it has none of its own.
+    const [release] = await t.db.select().from(releases).where(eq(releases.projectId, preview!.id));
+    expect(Object.keys(release?.secretVersions ?? {})).toEqual([secretId]);
+  });
+
+  it('hands the app secret to the preview, sealed to the preview', async () => {
+    const { app, secretId } = await previewable();
+    const row = await plan('preview.open', { projectId: app.id, pullRequest });
+    expect(await applyPlan(deps, row.id)).toBe('applied');
+    const [preview] = await t.db.select().from(projects).where(eq(projects.previewOf, app.id));
+
+    // Sealing needs the agent's box key, as a real delivery would.
+    await t.db
+      .update(servers)
+      .set({ agentBoxKey: boxKeyPair().publicKey })
+      .where(eq(servers.id, serverId));
+    const desired = await desiredStateFor(t.db, serverId, { secretsKey: SECRETS });
+    const shipped = desired.projects.find((p) => p.projectId === preview?.id);
+    expect(shipped?.secrets).toHaveLength(1);
+    expect(shipped?.secrets[0]?.id).toBe(secretId);
+    // The value itself is nowhere in the frame, sealed or not.
+    expect(JSON.stringify(shipped)).not.toContain('sk_live_the_real_one');
+  });
+
+  it('takes a preview down without waking anybody, and leaves the app alone', async () => {
+    const { app } = await previewable();
+    const opened = await plan('preview.open', { projectId: app.id, pullRequest });
+    expect(await applyPlan(deps, opened.id)).toBe('applied');
+    const [preview] = await t.db.select().from(projects).where(eq(projects.previewOf, app.id));
+
+    const closed = await plan('preview.close', { projectId: preview!.id });
+    expect(await applyPlan(deps, closed.id)).toBe('applied');
+    const [gone] = await t.db.select().from(projects).where(eq(projects.id, preview!.id));
+    expect(gone?.deletedAt).not.toBeNull();
+    const [still] = await t.db.select().from(projects).where(eq(projects.id, app.id));
+    expect(still?.deletedAt).toBeNull();
+  });
+
+  it('refuses to close an app that is not a preview', async () => {
+    const { app } = await previewable();
+    await expect(plan('preview.close', { projectId: app.id })).rejects.toThrow(/is an app/);
   });
 });

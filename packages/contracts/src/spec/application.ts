@@ -7,6 +7,7 @@ import {
   Health,
   Network,
   Placement,
+  Preview,
   ResourceName,
   Runtime,
   Scaling,
@@ -39,6 +40,7 @@ const ApplicationSpecShape = z.strictObject({
   scaling: Scaling.prefault({}),
   schedule: Schedule.prefault({}),
   placement: Placement.prefault({}),
+  preview: Preview.prefault({}),
   ai: AiSettings.prefault({}),
 });
 

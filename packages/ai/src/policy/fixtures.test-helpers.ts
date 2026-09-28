@@ -137,6 +137,17 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'backup.download': { backupId: newId('backup') },
   'backup.restore': { backupId: newId('backup') },
   'git.connect': { provider: 'github' },
+  'preview.configure': { preview: { enabled: true } },
+  'preview.open': {
+    pullRequest: {
+      provider: 'github',
+      host: 'https://github.com',
+      repo: 'acme/blog',
+      number: 42,
+      branch: 'fix-the-thing',
+      title: 'Fix the thing',
+    },
+  },
   'git.connect_token': { provider: 'gitlab', token: 'not-a-real-token' },
   'git.disconnect': { connectionId: newId('gitConnection') },
   'volume.delete': { volume: 'uploads' },

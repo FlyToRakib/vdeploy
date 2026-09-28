@@ -257,3 +257,27 @@ export const AiSettings = z.strictObject({
     .max(2)
     .default(['safe']),
 });
+
+/**
+ * A copy of this app per pull request (§26 M6).
+ *
+ * Off until somebody turns it on, because a preview builds and runs code
+ * on your servers every time somebody opens a pull request, and that is a
+ * thing to agree to rather than to discover.
+ */
+export const Preview = z.strictObject({
+  enabled: z.boolean().default(false),
+  /**
+   * A pull request from a fork is somebody else's code, and a preview runs
+   * it with this app's settings — its API keys included. That is handing
+   * them over, so it is off, and turning it on is saying exactly that.
+   */
+  fromForks: z.boolean().default(false),
+  /**
+   * How many previews may be open at once. The newest is refused rather
+   * than the oldest evicted: somebody is looking at the old one.
+   */
+  max: z.number().int().min(1).max(20).default(5),
+  /** A preview nobody has pushed to in this many days is taken down. */
+  expireAfterDays: z.number().int().min(1).max(90).default(7),
+});

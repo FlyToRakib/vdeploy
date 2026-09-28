@@ -14,6 +14,7 @@ export * from './agent.js';
 export * from './pipeline.js';
 export * from './urls.js';
 export * from './dns.js';
+export * from './previews.js';
 export * from './secrets.js';
 export * from './builds.js';
 export * from './logs.js';

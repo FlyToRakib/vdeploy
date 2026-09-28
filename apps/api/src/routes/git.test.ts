@@ -35,13 +35,18 @@ async function connect(token = TOKEN, host?: string) {
   });
 }
 
-async function gitProject(name: string, source: Record<string, unknown> = {}) {
+async function gitProject(
+  name: string,
+  source: Record<string, unknown> = {},
+  over: Record<string, unknown> = {},
+) {
   const spec = ApplicationSpec.parse({
     apiVersion: 'vdeploy/v1',
     kind: 'Application',
     metadata: { name },
     source: { type: 'git', provider: 'gitlab', repo: 'acme/team/site', branch: 'main', ...source },
     build: { strategy: 'dockerfile' },
+    ...over,
   });
   const id = newId('project');
   await t.database.db.insert(projects).values({
@@ -276,5 +281,155 @@ describe('a Bitbucket push', () => {
     });
     expect(real.statusCode).toBe(202);
     expect(real.json<{ deployed: unknown[] }>().deployed).toHaveLength(1);
+  });
+});
+
+describe('a merge request', () => {
+  const merge = (over: Record<string, unknown> = {}) => ({
+    object_attributes: {
+      iid: 7,
+      title: 'Fix the thing',
+      action: 'open',
+      source_branch: 'fix-the-thing',
+      target_branch: 'main',
+      last_commit: { id: 'a'.repeat(40) },
+      source: { path_with_namespace: 'acme/team/site' },
+      target: { path_with_namespace: 'acme/team/site' },
+      ...over,
+    },
+  });
+
+  const hookMr = (payload: unknown) =>
+    hook({ 'x-gitlab-event': 'Merge Request Hook', 'x-gitlab-token': webhookSecret }, payload);
+
+  async function addPreview(parentId: string, number: number) {
+    const spec = ApplicationSpec.parse({
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: `site-pr-${String(number)}` },
+      source: {
+        type: 'git',
+        provider: 'gitlab',
+        repo: 'acme/team/site',
+        branch: 'fix-the-thing',
+      },
+      build: { strategy: 'dockerfile' },
+    });
+    const id = newId('project');
+    await t.database.db.insert(projects).values({
+      id,
+      orgId,
+      name: spec.metadata.name,
+      spec,
+      specHash: hashOf(spec),
+      previewOf: parentId,
+      previewRef: {
+        provider: 'gitlab',
+        host: 'https://gitlab.com',
+        repo: 'acme/team/site',
+        number,
+        branch: 'fix-the-thing',
+        title: 'Fix the thing',
+      },
+    });
+    return id;
+  }
+
+  const previews = { enabled: true, fromForks: false, max: 2, expireAfterDays: 7 };
+
+  it('makes a preview of the app the branch is aimed at', async () => {
+    const id = await gitProject('site', {}, { preview: previews });
+    const res = await hookMr(merge());
+    expect(res.statusCode).toBe(202);
+    const opened = res.json<{ previews: { projectId: string; status: string; plan?: string }[] }>()
+      .previews;
+    expect(opened).toMatchObject([{ projectId: id, status: 'opened' }]);
+    expect(typeof opened[0]?.plan).toBe('string');
+    const [plan] = await t.database.db.select().from(plans);
+    expect(plan?.operation).toBe('preview.open');
+    // The step carries the app, which is what makes the apply insert a new
+    // project rather than write over the one being previewed.
+    expect(plan?.plan.steps).toContainEqual(
+      expect.objectContaining({ kind: 'update_spec', previewOf: id }),
+    );
+    expect(t.queued).toHaveLength(1);
+  });
+
+  it('is not made for an app the pull request is not aimed at', async () => {
+    await gitProject('site', { branch: 'develop' }, { preview: previews });
+    const res = await hookMr(merge());
+    expect(res.json<{ previews: unknown[] }>().previews).toEqual([]);
+    expect(t.queued).toEqual([]);
+  });
+
+  it('is not made at all unless somebody turned previews on', async () => {
+    await gitProject('site');
+    const res = await hookMr(merge());
+    expect(res.json<{ previews: unknown[] }>().previews).toEqual([]);
+    expect(t.queued).toEqual([]);
+  });
+
+  it('will not run a fork with this app settings, and says so', async () => {
+    const id = await gitProject('site', {}, { preview: previews });
+    const res = await hookMr(merge({ source: { path_with_namespace: 'someone/site' } }));
+    const answered = res.json<{
+      previews: { projectId: string; status: string; reason: string }[];
+    }>().previews;
+    expect(answered).toMatchObject([{ projectId: id, status: 'refused' }]);
+    expect(answered[0]?.reason).toMatch(/comes from a fork/);
+    expect(t.queued).toEqual([]);
+  });
+
+  it('deploys the preview it already has rather than making another', async () => {
+    const id = await gitProject('site', {}, { preview: previews });
+    const preview = await addPreview(id, 7);
+    const res = await hookMr(merge({ action: 'update' }));
+    expect(res.json<{ previews: { status: string; preview: string }[] }>().previews).toEqual([
+      { projectId: id, status: 'deployed', preview },
+    ]);
+    const [plan] = await t.database.db.select().from(plans);
+    expect(plan?.operation).toBe('project.deploy_commit');
+    expect(plan?.projectId).toBe(preview);
+  });
+
+  it('stops at the limit rather than filling the machine', async () => {
+    const id = await gitProject('site', {}, { preview: previews });
+    await addPreview(id, 101);
+    await addPreview(id, 102);
+    const res = await hookMr(merge());
+    const answered = res.json<{
+      previews: { projectId: string; status: string; reason: string }[];
+    }>().previews;
+    expect(answered).toMatchObject([{ projectId: id, status: 'refused' }]);
+    expect(answered[0]?.reason).toMatch(/already has 2 previews/);
+  });
+
+  it('takes the preview down when the merge request ends, however it ends', async () => {
+    for (const action of ['close', 'merge']) {
+      await t.database.db.delete(plans);
+      await t.database.db.delete(projects);
+      t.queued.length = 0;
+      const id = await gitProject('site', {}, { preview: previews });
+      const preview = await addPreview(id, 7);
+      const res = await hookMr(merge({ action }));
+      expect(res.json<{ previews: { status: string }[] }>().previews).toEqual([
+        { projectId: id, status: 'closed', preview },
+      ]);
+      const [plan] = await t.database.db.select().from(plans);
+      // Sensitive, not destructive: a preview that needed somebody woken
+      // up to remove it is a preview that never goes away.
+      expect(plan?.operation).toBe('preview.close');
+      expect(plan?.tier).toBe('sensitive');
+      expect(t.queued).toHaveLength(1);
+    }
+  });
+
+  it('says nothing happened when a merge request it never previewed closes', async () => {
+    const id = await gitProject('site', {}, { preview: previews });
+    const res = await hookMr(merge({ action: 'close' }));
+    expect(res.json<{ previews: { status: string }[] }>().previews).toEqual([
+      { projectId: id, status: 'unchanged' },
+    ]);
+    expect(t.queued).toEqual([]);
   });
 });
