@@ -39,6 +39,18 @@ export const DesiredProject = z.strictObject({
   releaseVersion: z.number().int().positive(),
   spec: ApplicationSpec,
   image: PinnedImage,
+  /**
+   * The project this release's image was built for, when that is not this
+   * one (§26 M6, ADR 0021 and ADR 0008).
+   *
+   * An agent runs a local image id only if its own records say it built
+   * those bytes. Promoting a staging copy hands production an image
+   * built for the staging project, which is the same bytes and a
+   * different name — so the control plane says whose build it was, and
+   * the agent widens its check by exactly that one project. What it
+   * never does is accept an id it has no record of building.
+   */
+  imageFrom: idSchema('project').optional(),
   /** False keeps the project defined but stopped (`project.stop`). */
   running: z.boolean(),
   /**

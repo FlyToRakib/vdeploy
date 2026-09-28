@@ -408,8 +408,15 @@ func (p *pass) ensureRunning(ctx context.Context, project spec.DesiredProject, c
 		return nil
 	}
 	if strings.HasPrefix(c.Image, "sha256:") {
-		// A local image ID could name anything on this host: run it only if we built it.
-		if p.r.Built == nil || !p.r.Built(c.Image, projectID) {
+		// A local image ID could name anything on this host: run it only if
+		// we built it. Promoting a staging copy asks us to run bytes we
+		// built for that copy, so the control plane names it and we widen
+		// by exactly that one project — never to an id we never built.
+		built := p.r.Built != nil && p.r.Built(c.Image, projectID)
+		if !built && project.ImageFrom != "" && p.r.Built != nil {
+			built = p.r.Built(c.Image, project.ImageFrom)
+		}
+		if !built {
 			return fmt.Errorf("image %s was not built by this agent for this project", c.Image)
 		}
 	} else if err := engine.EnsureImage(ctx, c.Image); err != nil {

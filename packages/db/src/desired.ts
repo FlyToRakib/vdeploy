@@ -9,7 +9,7 @@ import { meshFor } from './mesh.js';
 import { notifyDesiredState } from './notify.js';
 import { secretsOwner } from './previews.js';
 import { readSecret } from './secrets.js';
-import { projects, releases, servers } from './schema/index.js';
+import { builds, projects, releases, servers } from './schema/index.js';
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
 /**
@@ -26,9 +26,14 @@ export async function desiredStateFor(
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
   const verified = await verifiedHosts(db, serverId);
   const rows = await db
-    .select({ project: projects, release: releases })
+    // The build a release came from, so the agent can be told when the
+    // bytes it is being asked to run were built for another project
+    // (ADR 0021): promoting a staging copy is the case, and the agent
+    // refuses a local image id it has no record of building.
+    .select({ project: projects, release: releases, builtFor: builds.projectId })
     .from(projects)
     .innerJoin(releases, eq(releases.id, projects.currentReleaseId))
+    .leftJoin(builds, eq(builds.id, releases.buildId))
     .where(
       and(
         eq(projects.serverId, serverId),
@@ -128,7 +133,7 @@ export async function desiredStateFor(
     protocol: AGENT_PROTOCOL,
     serverId,
     generation: server?.desiredGeneration ?? 0,
-    projects: rows.map(({ project, release }) => {
+    projects: rows.map(({ project, release, builtFor }) => {
       const spec = readSpec(release.spec);
       const live = readSpec(project.spec);
       return {
@@ -137,6 +142,7 @@ export async function desiredStateFor(
         releaseVersion: release.version,
         spec: { ...spec, runtime: { ...spec.runtime, replicas: live.runtime.replicas } },
         image: release.image,
+        ...(builtFor && builtFor !== project.id ? { imageFrom: builtFor } : {}),
         running: project.running,
         revision: project.revision,
         hosts: {

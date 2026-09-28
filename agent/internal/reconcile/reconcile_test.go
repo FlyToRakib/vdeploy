@@ -908,3 +908,46 @@ func TestANetworkGoesWithTheLastContainerOfItsProject(t *testing.T) {
 		t.Fatalf("networks = %v", engine.networks)
 	}
 }
+
+// Promoting a staging copy asks production to run bytes this agent built
+// for the staging project (ADR 0021). The control plane says whose build
+// it was; the agent widens by exactly that one project and no further.
+func TestAPromotedImageRunsWhenTheControlPlaneNamesWhoBuiltIt(t *testing.T) {
+	built := "sha256:" + strings.Repeat("d", 64)
+	staging := "prj_" + idB
+	p := testProject(idA, 1, 1)
+	p.Image = built
+
+	engine := newFake()
+	r := newReconciler(engine)
+	// Built for the staging project, and nobody has said so: refused.
+	r.Built = func(id, projectID string) bool { return id == built && projectID == staging }
+	report := reconcile(t, r, desired(1, p))
+	if len(engine.running()) != 0 || !strings.Contains(report.Projects[0].Error, "was not built") {
+		t.Fatalf("ran an image built for another project unasked: %+v", report.Projects[0])
+	}
+
+	// Named: run it, because these are bytes this agent produced.
+	p.ImageFrom = staging
+	report = reconcile(t, r, desired(2, p))
+	if len(engine.running()) != 1 {
+		t.Fatalf("running = %v error = %q", engine.running(), report.Projects[0].Error)
+	}
+}
+
+// The widening is by one named project, not a way past the rule: an id
+// this agent has no record of building is refused however it is named.
+func TestNamingAProjectDoesNotRunAnImageThisAgentNeverBuilt(t *testing.T) {
+	somebodyElses := "sha256:" + strings.Repeat("e", 64)
+	p := testProject(idA, 1, 1)
+	p.Image = somebodyElses
+	p.ImageFrom = "prj_" + idB
+
+	engine := newFake()
+	r := newReconciler(engine)
+	r.Built = func(string, string) bool { return false }
+	report := reconcile(t, r, desired(1, p))
+	if len(engine.running()) != 0 || !strings.Contains(report.Projects[0].Error, "was not built") {
+		t.Fatalf("ran an image it never built: %+v", report.Projects[0])
+	}
+}

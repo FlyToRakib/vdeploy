@@ -135,7 +135,12 @@ type DesiredProject struct {
 	ReleaseVersion int         `json:"releaseVersion"`
 	Spec           Application `json:"spec"`
 	Image          string      `json:"image"`
-	Running        bool        `json:"running"`
+	// ImageFrom names the project this image was built for, when that is
+	// not this one: promoting a staging copy runs the same bytes under a
+	// different name (ADR 0021). The agent still runs only images it
+	// built itself — this says which of its own records may vouch.
+	ImageFrom string `json:"imageFrom,omitempty"`
+	Running   bool   `json:"running"`
 	// Revision is bumped to replace every container without a new release.
 	Revision int `json:"revision"`
 	// Hosts the control plane assigned beyond the spec's own domains.

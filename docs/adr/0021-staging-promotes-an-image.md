@@ -58,6 +58,33 @@ how staging is configured. This falls out of the design rather than being
 special-cased: the release is built from the app's spec, with the image
 taken from elsewhere.
 
+## Addendum: the agent had to be told whose build it was (2026-09-30)
+
+The first time this ran on a real server the agent refused it, and it
+was right to. **ADR 0008**: a local image id names nothing, so an agent
+runs one only if its own records say it built those bytes — *for that
+project*. Promotion hands production an image built for the staging
+copy: the same bytes under a different name.
+
+Rebuilding instead would have given up the entire point, so the rule is
+**narrowed rather than relaxed**, the way ADR 0017 narrowed it for
+images that cross servers. The desired state now carries `imageFrom`:
+the project a release's image was built for, when that is not the
+project being run. The agent widens its check by exactly that one
+project and no further.
+
+What is preserved is the property that was doing the work — **an agent
+runs only bytes it produced itself**. "For this project" was the
+conservative default around it, and the source is a fact the control
+plane already holds: the build row says which project it belonged to,
+so nothing new is trusted and nothing is asserted twice.
+
+There is a test that runs the promoted image when it is named, one that
+refuses it when it is not, and one that refuses an id the agent has no
+record of building however it is named. The middle one fails against
+the previous spelling, which is how this was found in the first place —
+by running it.
+
 ## What this costs, honestly
 
 - **The image must be reachable from production's server.** Today that is
