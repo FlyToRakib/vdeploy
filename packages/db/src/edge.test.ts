@@ -2,8 +2,18 @@ import { newId } from '@vdeploy/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { bumpDesiredGeneration } from './desired.js';
+import { desiredStateFor } from './desired.js';
 import { meshFor } from './mesh.js';
-import { organization, projects, releases, servers, user } from './schema/index.js';
+import {
+  databaseLinks,
+  databases,
+  organization,
+  projects,
+  releases,
+  secrets,
+  servers,
+  user,
+} from './schema/index.js';
 import { startTestDatabase, type TestDatabase } from './testing.js';
 
 let t: TestDatabase;
@@ -149,5 +159,60 @@ describe('keeping the edge told (§13)', () => {
     await t.db.transaction((tx) => bumpDesiredGeneration(tx, edgeServer));
     const after = await t.db.select().from(servers).where(eq(servers.id, edgeServer));
     expect(after[0]?.desiredGeneration).toBe((before[0]?.desiredGeneration ?? 0) + 1);
+  });
+});
+
+describe('a database only joins the apps beside it (§13)', () => {
+  /*
+   * Joining a network is a local act. An app on another server cannot be
+   * on a network here, and naming it anyway makes the agent create a
+   * network for a project it does not run, attach the database to it, and
+   * prune it again on the pass that notices the project is not there —
+   * leaving the database holding a reference to a network that no longer
+   * exists. It runs until something restarts it, and then it does not.
+   */
+  it('leaves out an app that reads it from another server', async () => {
+    const databaseId = newId('database');
+    await t.db.insert(databases).values({
+      id: databaseId,
+      orgId,
+      serverId: appServer,
+      name: 'shared-db',
+      engine: 'postgres',
+      version: '18',
+      image: 'postgres:18-alpine',
+      port: 5432,
+      user: 'vdeploy',
+      dbName: 'shared',
+      passwordVersion: 1,
+      memoryLimit: '512Mi',
+      diskSize: '1Gi',
+      passwordSealed: 'sealed',
+    });
+    const secretId = newId('secret');
+    await t.db.insert(secrets).values({
+      id: secretId,
+      orgId,
+      projectId,
+      name: 'database_url',
+      currentVersion: 1,
+    });
+    await t.db.insert(databaseLinks).values({
+      databaseId,
+      projectId,
+      envKey: 'DATABASE_URL',
+      secretId,
+      meshPort: 45000,
+    });
+
+    // The app is on appServer; the database is too, so they share a network.
+    const beside = await desiredStateFor(t.db, appServer);
+    expect(beside.databases[0]?.linkedProjects).toEqual([projectId]);
+
+    // Move the app away: now it reaches the database across the mesh, and
+    // there is no network here for it to be on.
+    await t.db.update(projects).set({ serverId: edgeServer }).where(eq(projects.id, projectId));
+    const across = await desiredStateFor(t.db, appServer);
+    expect(across.databases[0]?.linkedProjects).toEqual([]);
   });
 });

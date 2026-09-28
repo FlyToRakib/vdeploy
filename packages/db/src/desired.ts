@@ -62,6 +62,21 @@ export async function desiredStateFor(
    * is in no frame, no log and no spec.
    */
   const running = await databasesOn(db, serverId);
+  /*
+   * Which apps a database is joined to on *this* machine.
+   *
+   * Joining a network is a local act: an app on another server cannot be
+   * on a network here, and naming it anyway makes the agent create a
+   * network for a project it does not run, attach the database to it, and
+   * then prune it again on the pass that notices the project is not here.
+   * The database is left holding a reference to a network that no longer
+   * exists, and will not start again until somebody recreates it.
+   *
+   * An app on another server reaches this database through the mesh
+   * (§13), which is a different mechanism entirely and needs nothing of
+   * this one.
+   */
+  const here = new Set(rows.map(({ project }) => project.id));
   const databases = [];
   for (const row of running) {
     const profile = engineProfile(row.engine);
@@ -94,7 +109,9 @@ export async function desiredStateFor(
       cpu: 1,
       running: row.running,
       revision: row.revision,
-      linkedProjects: [...new Set(links.map((link) => link.projectId))],
+      linkedProjects: [...new Set(links.map((link) => link.projectId))].filter((id) =>
+        here.has(id),
+      ),
     });
   }
 
