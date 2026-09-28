@@ -31,6 +31,12 @@ export const plugins = pgTable(
     enabled: boolean('enabled').notNull().default(true),
     /** Who allowed it: a plugin never acts above the person who installed it. */
     installedBy: text('installed_by').notNull(),
+    /**
+     * The key it was given, by id. Removing a plugin removes exactly this
+     * key — matching on its name would take the key of a plugin the same
+     * person installed under the same name in another organization.
+     */
+    apiKeyId: text('api_key_id'),
     /** When it last called anything, so one nobody uses is visible. */
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -1,0 +1,1 @@
+ALTER TABLE "plugins" ADD COLUMN "api_key_id" text;

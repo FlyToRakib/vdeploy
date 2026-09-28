@@ -1,4 +1,5 @@
-import { auditLog, plugins, session } from '@vdeploy/db';
+import { newId } from '@vdeploy/contracts';
+import { auditLog, member, organization, plugins, session, user } from '@vdeploy/db';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Browser, startTestApp, type TestApp } from '../test-helpers.js';
@@ -182,5 +183,44 @@ describe('what a plugin hears about', () => {
     const res = await install({ events: ['deploy_failed'] });
     expect(res.statusCode).toBe(400);
     expect(res.json<{ error: { message: string } }>().error.message).toMatch(/no address/);
+  });
+});
+
+describe('two organizations with the same integration', () => {
+  it('do not revoke each other keys when one removes it', async () => {
+    // The same person may allow "deploy-bot" in two organizations. The
+    // key is remembered by id for exactly this: matching on the name
+    // would take both.
+    const first = (await install()).json<{ result: { id: string; key: string } }>().result;
+    const [me] = await t.database.db.select().from(user);
+    const other = newId('organization');
+    await t.database.db
+      .insert(organization)
+      .values({ id: other, name: 'Other', slug: other.toLowerCase() });
+    await t.database.db.insert(member).values({
+      id: newId('member'),
+      userId: me!.id,
+      organizationId: other,
+      role: 'owner',
+    });
+    // A second plugin of the same name, in the other organization.
+    await t.database.db.insert(plugins).values({
+      id: newId('plugin'),
+      orgId: other,
+      name: 'deploy-bot',
+      description: 'The same name somewhere else',
+      operations: ['project.list'],
+      installedBy: me!.id,
+      apiKeyId: 'key_01M3OTHERKEY00000000000000',
+    });
+
+    await owner.request('POST', '/api/v1/operations/plugin.uninstall', {
+      input: { pluginId: first.id },
+    });
+    // The other organization's plugin, and the key it names, are untouched.
+    const left = await t.database.db.select().from(plugins).where(eq(plugins.orgId, other));
+    expect(left).toHaveLength(1);
+    // And the removed one's key really is gone.
+    expect((await asPlugin(first.key, 'project.list')).statusCode).toBe(401);
   });
 });

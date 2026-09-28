@@ -82,3 +82,8 @@ export async function uninstallPlugin(tx: Executor, orgId: string, id: string): 
 export async function pluginUsed(db: Database, id: string, now: Date): Promise<void> {
   await db.update(plugins).set({ lastUsedAt: now }).where(eq(plugins.id, id));
 }
+
+/** Remembers which key a plugin was given, so removing it removes that one. */
+export async function noteApiKey(tx: Executor, id: string, apiKeyId: string): Promise<void> {
+  await tx.update(plugins).set({ apiKeyId }).where(eq(plugins.id, id));
+}

@@ -9,11 +9,12 @@ import {
   deleteChannel,
   installPlugin,
   listPlugins,
+  noteApiKey,
   pluginView,
   uninstallPlugin,
 } from '@vdeploy/db';
 import { apikey } from '@vdeploy/db';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { Handler } from './context.js';
 
 /**
@@ -103,6 +104,9 @@ export const PLUGIN_ADMIN: Partial<Record<OperationName, Handler>> = {
         metadata: { orgId: actor.orgId, scope, pluginId: row.id },
       },
     });
+    // Remembered by id, so removing this plugin removes this key and no
+    // other: the same person may have installed the same name elsewhere.
+    await deps.db.transaction((tx) => noteApiKey(tx, row.id, key.id));
     return {
       ...pluginView(row),
       // Shown once, like every other key.
@@ -119,9 +123,9 @@ export const PLUGIN_ADMIN: Partial<Record<OperationName, Handler>> = {
     });
     // The key goes with it: a plugin that is gone must not still be able
     // to call anything, and a key nobody can see is worse than no key.
-    await deps.db
-      .delete(apikey)
-      .where(and(eq(apikey.referenceId, row.installedBy), eq(apikey.name, `plugin:${row.name}`)));
+    // By id, not by name — the same person may have installed a plugin
+    // of the same name in another organization, and that one keeps its.
+    if (row.apiKeyId) await deps.db.delete(apikey).where(eq(apikey.id, row.apiKeyId));
     return { uninstalled: true, name: row.name };
   },
 };
