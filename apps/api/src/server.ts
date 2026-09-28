@@ -31,6 +31,7 @@ import { terminalRoutes } from './routes/terminal.js';
 import { tcpProbe, type PortProbe } from './agents/reachability.js';
 import { githubFromConfig } from './github-config.js';
 import type { GithubDeps } from './kernel/context.js';
+import { gitRoutes } from './routes/git.js';
 import { githubRoutes } from './routes/github.js';
 import { AgentBinaries } from './agents/installer.js';
 import { agentInstallRoutes } from './routes/agent-install.js';
@@ -63,6 +64,8 @@ export interface ServerDeps {
   now?: () => Date;
   /** Connects to servers' web ports; tests replace it. */
   probe?: PortProbe;
+  /** Reaches a Git host the org connected; tests replace it. */
+  fetch?: typeof fetch;
   /** The GitHub App; from the environment when unset. Tests point it at a stand-in. */
   github?: GithubDeps;
   /** The assistant's model, when no API key is configured. Tests script it. */
@@ -176,6 +179,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     reclaim: gateway,
     connected: (serverId: string) => gateway.isConnected(serverId),
     probe,
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(github ? { github } : {}),
     ...(model ? { model } : {}),
   };
@@ -190,6 +194,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(uploadRoutes(kernel));
   await app.register(dumpRoutes(kernel));
   await app.register(githubRoutes(kernel));
+  await app.register(gitRoutes(kernel));
   await app.register(aiRoutes(kernel));
   await app.register(
     agentInstallRoutes({

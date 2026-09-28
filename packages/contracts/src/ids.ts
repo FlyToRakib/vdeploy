@@ -26,6 +26,8 @@ export const ID_PREFIXES = {
   task: 'tsk',
   /** One artifact on its way from one server to another (§17.6). */
   transfer: 'trf',
+  /** A Git host this organization reads from, and the token for it (§26 M6). */
+  gitConnection: 'gitc',
   terminalSession: 'trm',
   auditEntry: 'aud',
   session: 'ses',

@@ -23,4 +23,8 @@ export const SecretSummary = z.strictObject({
 export type SecretSummary = z.infer<typeof SecretSummary>;
 
 /** Operations whose answers carry a secret value and so are never stored anywhere. */
-export const VALUE_BEARING_OPERATIONS: ReadonlySet<string> = new Set(['secret.read_value']);
+export const VALUE_BEARING_OPERATIONS: ReadonlySet<string> = new Set([
+  'secret.read_value',
+  // Its answer carries the webhook secret, shown once per connection.
+  'git.connect_token',
+]);

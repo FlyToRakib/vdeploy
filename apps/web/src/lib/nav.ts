@@ -63,9 +63,9 @@ export const NAV: readonly NavItem[] = [
   },
   {
     href: '/settings/github',
-    label: 'GitHub',
+    label: 'Git',
     icon: GitBranch,
-    keywords: ['git', 'repository', 'connect', 'push'],
+    keywords: ['github', 'gitlab', 'bitbucket', 'repository', 'connect', 'push'],
   },
   {
     href: '/settings/ai',

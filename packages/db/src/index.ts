@@ -16,6 +16,7 @@ export * from './terminal.js';
 export * from './metrics.js';
 export * from './fronting.js';
 export * from './mesh.js';
+export * from './sources.js';
 export * from './transfers.js';
 export * from './uptime.js';
 export * from './backup-targets.js';

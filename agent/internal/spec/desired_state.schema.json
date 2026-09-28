@@ -81,14 +81,22 @@
                         "const": "git"
                       },
                       "provider": {
+                        "default": "github",
                         "type": "string",
                         "enum": [
-                          "github"
+                          "github",
+                          "gitlab",
+                          "bitbucket"
                         ]
+                      },
+                      "host": {
+                        "type": "string",
+                        "maxLength": 300,
+                        "format": "uri"
                       },
                       "repo": {
                         "type": "string",
-                        "pattern": "^[\\w.-]+\\/[\\w.-]+$"
+                        "pattern": "^[\\w.-]+(?:\\/[\\w.-]+)+$"
                       },
                       "branch": {
                         "default": "main",

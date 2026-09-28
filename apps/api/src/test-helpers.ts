@@ -36,7 +36,12 @@ export interface TestApp {
 }
 
 export async function startTestApp(
-  options: { authRateLimit?: boolean; github?: GithubDeps; model?: ModelClient } = {},
+  options: {
+    authRateLimit?: boolean;
+    github?: GithubDeps;
+    model?: ModelClient;
+    fetch?: typeof fetch;
+  } = {},
 ): Promise<TestApp> {
   const database = await startTestDatabase();
   const mailer = memoryMailer();
@@ -45,6 +50,7 @@ export async function startTestApp(
   const app = await buildServer({
     ...(options.github ? { github: options.github } : {}),
     ...(options.model ? { model: options.model } : {}),
+    ...(options.fetch ? { fetch: options.fetch } : {}),
     probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
     config: testConfig(database.url),
     db: database.db,

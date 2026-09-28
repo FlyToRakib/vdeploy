@@ -10,12 +10,17 @@ import {
   type PlanStep,
 } from '@vdeploy/contracts';
 import {
+  archiveUrl,
+  authHeaders,
   branchHead,
+  cannotRead,
   createRelease,
   diagnoseBuild,
   generateSecret,
   hashOf,
+  headUrl,
   installationToken,
+  readHead,
   SECTION_EDITS,
   specAfter,
   tarballPath,
@@ -23,6 +28,7 @@ import {
 } from '@vdeploy/core';
 import {
   abandonBuild,
+  connectionFor,
   currentSecretVersions,
   diagnoseProject,
   deployments,
@@ -332,19 +338,25 @@ async function rotate(deps: StepDeps, state: ApplyState, secretId: string) {
 }
 
 /**
- * A GitHub repository's branch (or one commit of it) as a tarball, stored
- * like an upload. Through the GitHub App when the org connected the
- * repository's owner — private repositories too — otherwise the public
- * download.
+ * A repository's branch (or one commit of it) as a tarball, stored like an
+ * upload.
+ *
+ * GitHub goes through the App when the org connected the repository's
+ * owner — private repositories too — and through the public download
+ * otherwise. GitLab and Bitbucket go through the token the org connected
+ * for that host, which is also what makes a company's own GitLab work
+ * (ADR 0019). All of them end in the same place: bytes in an upload row,
+ * which is the only thing the rest of a build ever sees.
  */
 async function fetchRepo(
   deps: StepDeps,
   state: ApplyState,
-  repo: string,
-  branch: string,
+  source: Extract<ApplicationSpec['source'], { type: 'git' }>,
 ): Promise<string> {
-  const doFetch = deps.github?.fetch ?? deps.fetch ?? fetch;
+  const { repo, branch } = source;
   const commit = typeof state.args.commit === 'string' ? state.args.commit : null;
+  if (source.provider !== 'github') return fetchWithToken(deps, state, source, commit);
+  const doFetch = deps.github?.fetch ?? deps.fetch ?? fetch;
   const installation = deps.github ? await installationForRepo(deps.db, state.orgId, repo) : null;
   let res: Response;
   let fetched: string;
@@ -373,6 +385,54 @@ async function fetchRepo(
     );
   }
   if (!res.ok) throw new VDeployError('unavailable', `GitHub answered ${res.status}; try again`);
+  const id = await storeArchive(deps, state, res);
+  state.notes.push(`Fetched ${fetched}.`);
+  return id;
+}
+
+/**
+ * GitLab or Bitbucket, read with the access token the org connected for
+ * that host — or with none at all, when the repository is public.
+ *
+ * The commit is resolved before the download rather than handing the
+ * provider a branch name, so what was built is recorded as a commit and
+ * two deploys of `main` are never two different builds wearing one name.
+ */
+async function fetchWithToken(
+  deps: StepDeps,
+  state: ApplyState,
+  source: Extract<ApplicationSpec['source'], { type: 'git' }>,
+  commit: string | null,
+): Promise<string> {
+  const doFetch = deps.fetch ?? fetch;
+  const { repo, branch } = source;
+  const connection = await connectionFor(
+    deps.db,
+    deps.secretsKey,
+    state.orgId,
+    source.provider,
+    source.host,
+  );
+  const headers = { ...authHeaders(connection), 'user-agent': 'VDeploy' };
+  let sha = commit;
+  if (!sha) {
+    const head = await doFetch(headUrl(connection, repo, branch), { headers });
+    if (!head.ok) throw cannotRead(connection, repo, branch, head.status);
+    sha = readHead(connection.provider, await head.json());
+    if (!sha) {
+      throw new VDeployError('not_found', `${repo} has no branch ${branch} on ${connection.host}.`);
+    }
+  }
+  const res = await doFetch(archiveUrl(connection, repo, sha), { headers, redirect: 'follow' });
+  if (!res.ok) throw cannotRead(connection, repo, branch, res.status);
+  const id = await storeArchive(deps, state, res);
+  state.notes.push(`Fetched ${repo}@${branch} (${sha.slice(0, 7)}) from ${connection.host}.`);
+  return id;
+}
+
+/** The downloaded tarball as an upload row, size-checked twice: what the
+ * provider claimed, and what actually arrived. */
+async function storeArchive(deps: StepDeps, state: ApplyState, res: Response): Promise<string> {
   const declared = Number(res.headers.get('content-length') ?? 0);
   if (declared > MAX_UPLOAD_BYTES) {
     throw new VDeployError('invalid_input', 'The repository is larger than 200 MB compressed');
@@ -390,7 +450,6 @@ async function fetchRepo(
     data,
     createdBy: state.actor,
   });
-  state.notes.push(`Fetched ${fetched}.`);
   return id;
 }
 
@@ -514,7 +573,7 @@ async function newRelease(deps: StepDeps, state: ApplyState) {
   } else if (source.type === 'archive') {
     ({ image, buildId } = await buildImage(deps, state, row, source.uploadId));
   } else if (source.type === 'git') {
-    const uploadId = await fetchRepo(deps, state, source.repo, source.branch);
+    const uploadId = await fetchRepo(deps, state, source);
     ({ image, buildId } = await buildImage(deps, state, row, uploadId, 1));
   } else {
     throw new VDeployError(

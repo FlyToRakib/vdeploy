@@ -35,11 +35,12 @@ export const GITHUB_ADMIN: Partial<Record<OperationName, Handler>> = {
    * nothing else, because an installation belongs to whoever can see it on
    * the provider — an id alone proves nothing (ADR 0010). `github.link`
    * finishes it, with the code the provider returns as the proof.
+   *
+   * GitHub is the only provider that works this way; `git.connect_token`
+   * is the one GitLab and Bitbucket take (ADR 0019), which is why the
+   * catalog keeps this operation's provider to the one value.
    */
-  'git.connect': ({ deps, actor, args }) => {
-    if (args.provider !== 'github') {
-      throw new VDeployError('unavailable', 'Only GitHub is supported so far');
-    }
+  'git.connect': ({ deps, actor }) => {
     const github = app(deps);
     const state = signState(deps.approvalKey, {
       orgId: actor.orgId,

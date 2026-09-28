@@ -1,6 +1,8 @@
 import { readSpec, VDeployError } from '@vdeploy/contracts';
+import { DEFAULT_HOST, type GitProvider } from '@vdeploy/core';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
+import { hostFor } from './sources.js';
 import { githubInstallations, projects } from './schema/index.js';
 
 export type GithubInstallation = typeof githubInstallations.$inferSelect;
@@ -115,6 +117,7 @@ export async function projectsForPush(
   orgId: string,
   repo: string,
   branch: string,
+  from: { provider: GitProvider; host: string } = { provider: 'github', host: DEFAULT_HOST.github },
 ): Promise<{ id: string; name: string; paths: string[] }[]> {
   const rows = await db
     .select({ id: projects.id, name: projects.name, spec: projects.spec })
@@ -126,6 +129,10 @@ export async function projectsForPush(
     if (
       source.type === 'git' &&
       source.autoDeploy &&
+      // A push from one host never deploys a repository of the same name
+      // that an app reads from somewhere else.
+      source.provider === from.provider &&
+      hostFor(source.provider, source.host) === from.host &&
       source.repo.toLowerCase() === repo.toLowerCase() &&
       source.branch === branch
     ) {

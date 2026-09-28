@@ -137,6 +137,8 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'backup.download': { backupId: newId('backup') },
   'backup.restore': { backupId: newId('backup') },
   'git.connect': { provider: 'github' },
+  'git.connect_token': { provider: 'gitlab', token: 'not-a-real-token' },
+  'git.disconnect': { connectionId: newId('gitConnection') },
   'volume.delete': { volume: 'uploads' },
   'project.move': { serverId: newId('server') },
   'status.configure': { slug: 'acme', title: 'Acme status', enabled: true, apps: [] },

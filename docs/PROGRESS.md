@@ -1,16 +1,17 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — next: more AI providers, then GitLab/Bitbucket
+**Task:** M6 — next: preview environments per pull request
 **Status:** in progress
-**Updated:** 2026-09-29 09:40 UTC
+**Updated:** 2026-09-29 21:35 UTC
 
 ## M6 — the ecosystem
 
 §26's promise is that one definition has five consumers: tools for the AI,
 OpenAPI for the API, commands for the CLI, tools for MCP, form schemas for
 the UI. Three of those landed here, and all three are generated from the
-operation catalog rather than written down again.
+operation catalog rather than written down again. After them: a second
+kind of model, and a second and third place source can come from.
 
 - [x] **the public API, described** — every word generated from the
   catalog, because a reference written by hand is wrong the first time
@@ -44,7 +45,35 @@ operation catalog rather than written down again.
   which one can delete data, and a person reading the transcript can see
   that it knew
 
-Three bugs, all found by using the thing rather than by a test:
+- [x] **any model that speaks the OpenAI shape** — the adapter answers the
+  same small interface the Anthropic one does (§26 M3), so nothing above it
+  knows which is behind it. It is one `baseUrl` rather than one vendor:
+  OpenAI, anything compatible, or a model on a machine you own — which is
+  the case this exists for, on a platform about owning your servers. Prices
+  are **declared, not assumed**: an undeclared model costs nothing rather
+  than being billed at the most expensive rates we know of, because a
+  made-up number would trip the spend cap on a model that is free to run.
+  Tool calls whose arguments are not JSON are dropped rather than passed
+  on — a smaller model does that, and a half-parsed call is worse than a
+  missing one
+- [x] **GitLab and Bitbucket** (ADR 0019) — GitHub keeps its App; these two
+  take a read-only access token somebody makes, stored sealed against the
+  host it belongs to. The host is part of the connection rather than
+  assumed, so **a GitLab you run yourself** works exactly as gitlab.com
+  does, with nothing for whoever runs this VDeploy to configure first. A
+  token is checked against its host before it is stored — and only a flat
+  refusal counts as wrong, because a token too narrow to see the account
+  endpoint is the token people *should* be pasting. Pushes arrive on a URL
+  that names the connection, since neither provider says which one it is,
+  and the secret on it is derived from the installation key rather than
+  stored, so somebody who loses it can be shown it again instead of
+  rebuilding their hooks; an unknown id and a wrong secret answer
+  identically. The fetcher dispatches on provider: a GitLab project is one
+  encoded segment (subgroups are why a repository name is no longer two
+  parts), and Bitbucket serves downloads and answers questions on **two
+  different hosts**
+
+Four bugs, all found by using the thing rather than by a test:
 
 1. **The reference told people the wrong thing.** It said to send a key as
    `Authorization: Bearer`; the API has always wanted `x-api-key`. Wrong on
@@ -60,6 +89,11 @@ Three bugs, all found by using the thing rather than by a test:
    names collided. It would have broken VDeploy's own AI too; the AI
    package's tests passed because they ran against the stale build. There
    is now a guard beside the catalog asserting the rule itself.
+4. **A push would have deployed the wrong app.** `acme/app` exists on
+   GitHub, on gitlab.com and on a company's own GitLab, and those are
+   three different repositories. Matching a push on the repository name
+   alone deployed all three. The match now includes the provider and the
+   host, with a test that fails against the version comparing names only.
 
 ## M5 exit — met 2026-09-28
 
@@ -375,13 +409,23 @@ GitHub.
 
 ## Next
 
-- M3 — AI (docs/vdeploy.md §26), once M2 is closed
+- M6, in order: preview environments per pull request, a staging
+  environment, SSO/SAML, a plugin system, and servers VDeploy provisions
+  itself (Hetzner, DigitalOcean, Vultr)
 
 ## Known gaps (tracked, not forgotten)
 
 - `registry.add` waits for the agent to be able to pull with credentials; image resolution is public-only today, so storing credentials nothing uses would be worse than not having them. It is out of the catalog until then rather than answering "not available yet". (`server.drain` came back in 5.3b.)
 
 - Notifications: Slack, Discord and Telegram channels; certificate-renewal and autoscale triggers arrive with the features that produce them; an app that runs but fails its health check (not crashing) is not a trigger yet; uptime is recorded (4.3k) but no notification fires on an outage on its own.
+- GitLab and Bitbucket: a push deploys, but nothing reads back — no commit
+  status, no merge-request comment, and a repository picker for them
+  (GitHub has one) waits until there is a reason to list repositories
+  rather than type a path. Bitbucket Data Center is not supported, only
+  Bitbucket Cloud: it answers a different API at a different path, and the
+  connect form says so rather than failing later. The dashboard panel for
+  these has not been opened in a browser (same gap as the private-traffic
+  card); its data path is covered by the API tests.
 - Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
@@ -396,6 +440,7 @@ GitHub.
 
 ## Decisions made
 
+- 2026-09-29 GitLab and Bitbucket connect with a token, not an app — docs/adr/0019-gitlab-and-bitbucket-by-token.md
 - 2026-09-27 The firewall is read, never written — docs/adr/0016-firewall-read-only.md
 - 2026-09-27 The file browser reads the folder on the host, confined by the kernel rather than by a check — docs/adr/0015-file-browser.md
 - 2026-09-24 A managed database is not a project, and its backups are read back — docs/adr/0011-databases-and-backups.md

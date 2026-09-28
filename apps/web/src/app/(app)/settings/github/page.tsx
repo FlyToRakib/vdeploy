@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
+import { GitConnections } from './git-connections';
 import { GithubSettings } from './github-settings';
 
-export const metadata: Metadata = { title: 'GitHub' };
+export const metadata: Metadata = { title: 'Git' };
 
 // eslint-disable-next-line no-restricted-syntax -- Next.js requires a default export
 export default function GithubPage() {
@@ -11,6 +12,7 @@ export default function GithubPage() {
       <Suspense>
         <GithubSettings />
       </Suspense>
+      <GitConnections />
     </div>
   );
 }

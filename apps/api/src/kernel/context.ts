@@ -44,6 +44,8 @@ export interface KernelDeps {
   probe: PortProbe;
   /** The VDeploy GitHub App, when this installation has one (M2 2.15). */
   github?: GithubDeps;
+  /** How this VDeploy reaches a Git host it was given; tests replace it. */
+  fetch?: typeof fetch;
   /** The model behind the assistant; without one the assistant is off (§26).*/
   model?: ModelClient;
 }

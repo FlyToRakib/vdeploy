@@ -119,6 +119,13 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'git.connections',
+    'org',
+    'config',
+    'List the Git hosts this organization can read private repositories from',
+    obj({}),
+  ),
+  query(
     'project.uptime',
     'project',
     'metrics',
@@ -655,6 +662,31 @@ export const OPERATIONS = [
     // the place to go; `github.link` finishes it with the code the provider
     // returns, which is the proof.
     obj({ provider: z.enum(['github']) }),
+    { minRole: 'admin' },
+  ),
+  // GitLab and Bitbucket have no app to install: they take an access token
+  // the person makes themselves, which is why connecting them is one call
+  // rather than a round trip through the provider (ADR 0019).
+  // Tier 4 for the same reason 'secret.set' is: it takes a credential a
+  // person pasted. No AI session is offered a tool that wants one.
+  operation(
+    'git.connect_token',
+    'human_only',
+    'org',
+    'Connect GitLab or Bitbucket with a read-only access token, including a company-run GitLab',
+    obj({
+      provider: z.enum(['gitlab', 'bitbucket']),
+      host: z.url().max(300).optional(),
+      token: z.string().min(8).max(500),
+    }),
+    { minRole: 'admin', stepUp: true },
+  ),
+  operation(
+    'git.disconnect',
+    'sensitive',
+    'org',
+    'Forget a Git host and the token stored for it',
+    obj({ connectionId: idSchema('gitConnection') }),
     { minRole: 'admin' },
   ),
 

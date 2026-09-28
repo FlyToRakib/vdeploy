@@ -32,8 +32,14 @@ const Cidr = z.union([z.cidrv4(), z.cidrv6(), z.ipv4(), z.ipv6()]);
 export const Source = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('git'),
-    provider: z.enum(['github']),
-    repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'must be owner/name'),
+    provider: z.enum(['github', 'gitlab', 'bitbucket']).default('github'),
+    /**
+     * Which host, when it is not the provider's own (§26 M6). A company's
+     * own GitLab is the case this exists for; absent means the public one.
+     */
+    host: z.url().max(300).optional(),
+    // GitLab nests: team/sub/project is one repository, not a path into one.
+    repo: z.string().regex(/^[\w.-]+(?:\/[\w.-]+)+$/, 'must be owner/name'),
     branch: z.string().min(1).max(255).default('main'),
     autoDeploy: z.boolean().default(true),
     paths: z.array(z.string().min(1).max(255)).max(32).default([]),
