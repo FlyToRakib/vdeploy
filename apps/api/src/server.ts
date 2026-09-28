@@ -19,6 +19,7 @@ import { accountRoutes } from './routes/account.js';
 import { authRoutes } from './routes/auth.js';
 import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
+import { referenceRoutes } from './routes/reference.js';
 import { operationRoutes } from './routes/operations.js';
 import { backupDownloadRoutes } from './routes/backup-download.js';
 import { fileDownloadRoutes } from './routes/files-download.js';
@@ -161,6 +162,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     ...(model ? { model } : {}),
   };
   await app.register(operationRoutes(kernel));
+  await app.register(referenceRoutes(config.PUBLIC_URL));
   await app.register(logRoutes(kernel));
   await app.register(backupDownloadRoutes(kernel));
   await app.register(fileDownloadRoutes(kernel));
