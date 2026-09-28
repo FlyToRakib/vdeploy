@@ -110,3 +110,15 @@ export function query<Name extends string, Input extends z.ZodType>(
     input,
   };
 }
+
+/**
+ * What an operation is called where a dot is not allowed: a model-facing
+ * tool name, in VDeploy's own AI and in the MCP server alike.
+ *
+ * It lives here, beside the catalog, because two places that spell the
+ * same name independently are two places that can disagree — and the
+ * disagreement would be a tool the model can see and cannot call.
+ */
+export function toolName(operation: { name: string }): string {
+  return operation.name.replace(/\./g, '_');
+}

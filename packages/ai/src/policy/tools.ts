@@ -1,4 +1,4 @@
-import { OPERATIONS, type AiGrants, type OperationDefinition } from '@vdeploy/contracts';
+import { OPERATIONS, toolName, type AiGrants, type OperationDefinition } from '@vdeploy/contracts';
 import { z } from 'zod';
 import { roleAtLeast } from './identity.js';
 import { deny, type AiActor, type Denied } from './types.js';
@@ -10,10 +10,7 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
-/** Model-facing tool names cannot contain dots: `project.restart` → `project_restart`. */
-export function toolName(op: OperationDefinition): string {
-  return op.name.replace(/\./g, '_');
-}
+export { toolName };
 
 /**
  * Whether an operation is in the AI's tool array for this actor. The array

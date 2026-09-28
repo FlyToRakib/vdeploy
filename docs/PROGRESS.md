@@ -1,9 +1,65 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — starting on the MCP server and the CLI
+**Task:** M6 — next: more AI providers, then GitLab/Bitbucket
 **Status:** in progress
-**Updated:** 2026-09-28 20:30 UTC
+**Updated:** 2026-09-29 09:40 UTC
+
+## M6 — the ecosystem
+
+§26's promise is that one definition has five consumers: tools for the AI,
+OpenAPI for the API, commands for the CLI, tools for MCP, form schemas for
+the UI. Three of those landed here, and all three are generated from the
+operation catalog rather than written down again.
+
+- [x] **the public API, described** — every word generated from the
+  catalog, because a reference written by hand is wrong the first time
+  somebody adds an operation and does not notice, and what people would
+  trust it about is exactly what it would be wrong about: which calls can
+  delete their data. Per operation: what it does, the schema that is
+  actually enforced, the role it needs, whether it wants the password
+  again, and whether any key at all may call it. A tier-4 operation
+  carries **no security scheme**, because the honest answer is nobody. It
+  also explains the thing that otherwise reads as an error — a 202 with a
+  plan waiting for approval is the platform saying a human has to look.
+  Served at `/api/v1/reference` with `openapi.json` beside it, public and
+  unauthenticated: what an API offers is not a secret. Its script and
+  stylesheet are files rather than inline, because the Content-Security
+  -Policy refused the inline version — correctly — and `default-src 'none'`
+  is right for something that serves JSON
+- [x] **a command line** — `vdeploy project list`, and the dotted form too
+  so a name copied out of the reference works. Flags come from the schema
+  the API validates against, so a renamed field renames its flag, and an
+  unknown flag is **refused rather than ignored**: dropping `--replicas`
+  because it was typed `--replica` would deploy the wrong thing and report
+  success. A sentence for a person, `--json` for a script, and a change
+  waiting for approval exits non-zero because it has not happened yet
+- [x] **an MCP server** — `vdeploy mcp`, so somebody else's AI can drive
+  VDeploy over the same routes as everything else: the same plan, the same
+  approval, the same audit entry, and no path of its own. Tier 4 is **not
+  offered at all** rather than offered and refused, because a tool that can
+  only ever fail is worse than a missing one — the model tries it, is told
+  no, and tries again differently. The risk tier is in every tool's
+  description, so a model choosing between two ways to do something knows
+  which one can delete data, and a person reading the transcript can see
+  that it knew
+
+Three bugs, all found by using the thing rather than by a test:
+
+1. **The reference told people the wrong thing.** It said to send a key as
+   `Authorization: Bearer`; the API has always wanted `x-api-key`. Wrong on
+   the very first thing anybody would try.
+2. **A typo exited zero.** `vdeploy project levitate` printed the list of
+   real subcommands and reported success. Asking what can be done to a
+   thing is a question; asking for something that does not exist is a
+   mistake, and a script must be able to tell.
+3. **A lost backslash corrupted shared code.** Moving `toolName` beside the
+   catalog — so MCP and the AI spell it the same way rather than twice —
+   turned `/\\./g` into `/./g`, which replaced *every* character with an
+   underscore. Every operation got a name of underscores, and equal-length
+   names collided. It would have broken VDeploy's own AI too; the AI
+   package's tests passed because they ran against the stale build. There
+   is now a guard beside the catalog asserting the rule itself.
 
 ## M5 exit — met 2026-09-28
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { COMMANDS, fieldOf, findCommand, groups, type Command } from './commands.js';
 import { hint, readSettings, writeSettings } from './config.js';
+import { serve } from './mcp.js';
 import { bold, dim, renderPlan, renderResult } from './render.js';
 
 /**
@@ -146,6 +147,7 @@ function topHelp(): string {
     '  vdeploy <thing>                   what you can do to it',
     '  vdeploy login --url … --key …     point it at your VDeploy',
     '  vdeploy plan approve <id>         let a waiting change run',
+    '  vdeploy mcp                       serve these as tools to an AI client',
     '',
     dim("  --json on any command for the API's own answer, unchanged."),
     '',
@@ -228,6 +230,46 @@ async function main(argv: string[]) {
     const saved = writeSettings({ url: url.replace(/\/$/, ''), key });
     await call('/api/v1/operations/project.list', { input: {} });
     process.stdout.write(`Signed in to ${url}, key ${hint(key)}.\n${dim('  ' + saved)}\n`);
+    return;
+  }
+
+  if (argv[0] === 'mcp') {
+    /*
+     * VDeploy as tools for somebody else's AI (§26 M6).
+     *
+     * It runs as this machine's signed-in user and calls the same routes
+     * the dashboard does, so an outside model gets the same plan, the
+     * same approval and the same audit entry — and no path of its own.
+     *
+     * stdout belongs to the protocol from here on: a stray line is a
+     * parse error at the other end, so the greeting goes to stderr.
+     */
+    const settings = readSettings();
+    if (!settings) {
+      fail(
+        'This machine is not signed in to a VDeploy yet.\n' +
+          '  vdeploy login --url https://your-vdeploy --key <api key>',
+      );
+    }
+    process.stderr.write(`vdeploy mcp · ${settings.url} · key ${hint(settings.key)}\n`);
+    await serve(process.stdin, async (operation, input) => {
+      const response = (await call(`/api/v1/operations/${operation}`, { input })) as {
+        status: string;
+        result?: unknown;
+        plan?: unknown;
+      };
+      if (response.status === 'done') return response.result;
+      // Said plainly, because the model has to tell the person rather
+      // than assume it worked and carry on.
+      return {
+        waitingForApproval: response.status === 'pending_approval',
+        plan: response.plan,
+        note:
+          response.status === 'pending_approval'
+            ? 'This has NOT happened yet. A person must approve it in VDeploy.'
+            : 'Accepted and running.',
+      };
+    });
     return;
   }
 

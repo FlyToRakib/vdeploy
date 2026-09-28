@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { newId } from '../ids.js';
 import { findOperation, OPERATIONS } from './catalog.js';
-import { SCOPE_FIELD } from './define.js';
+import { SCOPE_FIELD, toolName } from './define.js';
 
 function shapeOf(schema: z.ZodType): Record<string, unknown> {
   expect(schema).toBeInstanceOf(z.ZodObject);
@@ -101,5 +101,31 @@ describe('operation inputs', () => {
   it('never lets an invitation mint an owner', () => {
     const op = findOperation('user.invite')!;
     expect(op.input.safeParse({ email: 'a@example.com', role: 'owner' }).success).toBe(false);
+  });
+});
+
+describe('the name a model calls an operation by', () => {
+  /*
+   * It lives beside the catalog because two places spelling the same name
+   * independently can disagree, and the disagreement is a tool the model
+   * can see and cannot call.
+   *
+   * The rule is "replace the dot", and it is worth a test because the
+   * regex that does it is one backslash away from replacing every
+   * character instead — which yields a name for every operation, all of
+   * them wrong, and several of them equal to each other.
+   */
+  it('changes the dot and nothing else', () => {
+    expect(toolName({ name: 'project.restart' })).toBe('project_restart');
+    expect(toolName({ name: 'backup.set_offsite' })).toBe('backup_set_offsite');
+  });
+
+  it('gives every operation its own name, with no dots and no collisions', () => {
+    const names = OPERATIONS.map((operation) => toolName(operation));
+    expect(new Set(names).size).toBe(OPERATIONS.length);
+    for (const name of names) {
+      expect(name).not.toContain('.');
+      expect(name).toMatch(/^[a-z][a-z0-9_]*$/);
+    }
   });
 });
