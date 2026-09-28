@@ -121,6 +121,24 @@ pnpm lint && pnpm typecheck && pnpm test   # what must pass before any commit
 node scripts/e2e.mjs                       # the whole thing, in Docker-in-Docker
 ```
 
+### In production
+
+The arrangement `scripts/e2e.mjs` brings up and exercises on every run is
+written down in `deploy/compose.yml`: Postgres, the API, the worker, the
+dashboard, and one proxy so the dashboard and the API answer on **one
+origin** — which they must, because cookies, CSRF and the agent's
+websocket are all bound to it.
+
+```bash
+cp apps/api/.env.example deploy/.env    # then fill in the four keys
+docker compose -f deploy/compose.yml up -d
+```
+
+Terminate TLS in front of it, pointed at port 8080, and set `PUBLIC_URL`
+to the address people type. Keep a copy of `SECRETS_KEY` somewhere that
+is not that server and not its database backups: without it no stored
+secret can be opened by anybody, including you.
+
 ## Reading further
 
 - `docs/vdeploy.md` — the specification this is built from

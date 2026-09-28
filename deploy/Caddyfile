@@ -1,0 +1,17 @@
+# One origin for the dashboard and the API. Cookies, CSRF and the agent
+# websocket are all bound to it, so this is not a convenience.
+#
+# TLS is terminated in front of this, not here: put it behind whatever
+# already does that for you and point it at 8080.
+:8080 {
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+	# The public status page is served by the API, at the same origin.
+	handle /status/* {
+		reverse_proxy api:8080
+	}
+	handle {
+		reverse_proxy web:3100
+	}
+}

@@ -1,0 +1,107 @@
+# Running VDeploy's control plane.
+#
+# This is the arrangement `scripts/e2e.mjs` brings up and exercises on
+# every run, written down: one Postgres, the API, the worker, the
+# dashboard, and one proxy in front so the dashboard and the API answer
+# on **one origin**. They must — cookies, CSRF and the agent's websocket
+# are all bound to it.
+#
+#   cp apps/api/.env.example deploy/.env    # then fill in the four keys
+#   docker compose -f deploy/compose.yml up -d
+#
+# Run it from where it is: the build context is the repository above it,
+# and the .env it reads sits beside it. Settings you leave blank are
+# settings you have not set — the example lists every one of them so you
+# can read what there is, and an empty line configures nothing.
+#
+# The four keys are generated once and kept: without SECRETS_KEY no
+# stored secret can be opened by anybody, including you, so keep a copy
+# somewhere that is not this server and not its database backups
+# (docs/runbooks/control-plane-restore.md).
+#
+#   openssl rand -hex 32     # APPROVAL_KEY, SECRETS_KEY, CONTROL_PLANE_KEY
+#   openssl rand -base64 48  # AUTH_SECRET
+#
+# TLS is not here. Put this behind whatever already terminates it for
+# you — Caddy, nginx, a load balancer — pointed at port 8080, and set
+# PUBLIC_URL to the address people type. The one requirement is that the
+# dashboard and /api/* arrive on the same origin.
+
+name: vdeploy
+
+x-control-plane: &control-plane
+  image: vdeploy/control-plane:latest
+  build:
+    context: ..
+    dockerfile: deploy/control-plane.Dockerfile
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DATABASE_URL: postgres://vdeploy:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/vdeploy
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vdeploy
+      POSTGRES_DB: vdeploy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vdeploy']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Nothing outside this compose file needs to reach Postgres, so it
+    # publishes no port. Back it up with `docker compose exec db pg_dump`.
+
+  api:
+    <<: *control-plane
+    # Applies migrations as it starts; they are forward-only.
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/readyz']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  worker:
+    <<: *control-plane
+    command: node /app/worker/dist/main.js
+    # Applies plans and runs every schedule. One of it: the worker takes
+    # one plan at a time on purpose (§4), which is the deploy lock.
+
+  web:
+    image: vdeploy/web:latest
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:8080
+    depends_on:
+      - api
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # The one origin: /api/* and the public status page to the API —
+    # websockets and log streams included — and everything else to the
+    # dashboard. Change 8080 to whatever your TLS terminator expects.
+    ports:
+      - '127.0.0.1:8080:8080'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    depends_on:
+      - api
+      - web
+
+volumes:
+  db:
+  caddy:
