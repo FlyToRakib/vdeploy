@@ -1,6 +1,7 @@
 import { newId } from '@vdeploy/contracts';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { bumpDesiredGeneration } from './desired.js';
 import { meshFor } from './mesh.js';
 import { organization, projects, releases, servers, user } from './schema/index.js';
 import { startTestDatabase, type TestDatabase } from './testing.js';
@@ -124,5 +125,29 @@ describe('a server that answers the internet for the others (§13)', () => {
     await t.db.update(servers).set({ role: 'apps' }).where(eq(servers.id, edgeServer));
     const mesh = await meshFor(t.db, appServer, orgId);
     expect(mesh).toEqual({ listen: null, peers: [], forwards: [], grants: [], routes: [] });
+  });
+});
+
+describe('keeping the edge told (§13)', () => {
+  /*
+   * An edge runs none of the organization's apps, so nothing about it
+   * changes when one is created, moved or deleted — and yet what it must
+   * route changes with every one of those. Waking it happens where a
+   * server is woken at all, rather than at each of the two dozen places
+   * that change an app, because that is the difference between "the edge
+   * is always right" and "the edge is right until somebody forgets".
+   */
+  it('wakes the edge when any other server is told something new', async () => {
+    const before = await t.db.select().from(servers).where(eq(servers.id, edgeServer));
+    await t.db.transaction((tx) => bumpDesiredGeneration(tx, appServer));
+    const after = await t.db.select().from(servers).where(eq(servers.id, edgeServer));
+    expect(after[0]?.desiredGeneration).toBe((before[0]?.desiredGeneration ?? 0) + 1);
+  });
+
+  it('does not wake itself again when the edge is the one being told', async () => {
+    const before = await t.db.select().from(servers).where(eq(servers.id, edgeServer));
+    await t.db.transaction((tx) => bumpDesiredGeneration(tx, edgeServer));
+    const after = await t.db.select().from(servers).where(eq(servers.id, edgeServer));
+    expect(after[0]?.desiredGeneration).toBe((before[0]?.desiredGeneration ?? 0) + 1);
   });
 });

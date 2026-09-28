@@ -138,8 +138,31 @@ export async function bumpDesiredGeneration(tx: Executor, serverId: string): Pro
     .update(servers)
     .set({ desiredGeneration: sql`${servers.desiredGeneration} + 1` })
     .where(eq(servers.id, serverId))
-    .returning({ generation: servers.desiredGeneration });
+    .returning({ generation: servers.desiredGeneration, orgId: servers.orgId, role: servers.role });
   if (!row) throw new Error(`server ${serverId} disappeared`);
   await notifyDesiredState(tx, serverId);
+  /*
+   * And the edge, if there is one (§13).
+   *
+   * An edge runs none of the organization's apps, so nothing about it
+   * changes when one is created, moved, renamed or deleted — and yet what
+   * it must route changes with every one of those. Waking it here rather
+   * than at each of the two dozen places that change an app is the
+   * difference between "the edge is always right" and "the edge is right
+   * until somebody adds an operation and forgets".
+   */
+  if (row.role !== 'edge') {
+    const fronting = await tx
+      .select({ id: servers.id })
+      .from(servers)
+      .where(and(eq(servers.orgId, row.orgId), eq(servers.role, 'edge')));
+    for (const edge of fronting) {
+      await tx
+        .update(servers)
+        .set({ desiredGeneration: sql`${servers.desiredGeneration} + 1` })
+        .where(eq(servers.id, edge.id));
+      await notifyDesiredState(tx, edge.id);
+    }
+  }
   return row.generation;
 }
