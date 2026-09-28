@@ -228,6 +228,31 @@ function loadAppImages(beds = [TESTBED]) {
 }
 
 /** A rerun starts clean: everything here lives inside the testbed's own daemon. */
+/**
+ * The same clean slate for a machine that is not the first one.
+ *
+ * The testbeds survive between runs on purpose — creating one costs
+ * minutes — so a run that stopped half way leaves an agent, a proxy and
+ * somebody's containers behind, and the next run trips over its own
+ * leftovers rather than testing anything. Every name here is one this
+ * script created.
+ */
+function resetOtherBed(bed) {
+  inBed(
+    bed,
+    [
+      'pkill vd-agent; sleep 1',
+      'rm -rf /var/lib/vdeploy /etc/vdeploy /var/log/vd-agent.log /usr/local/bin/vd-agent',
+      'docker rm -f cp-proxy >/dev/null 2>&1',
+      'docker ps -aq --filter label=io.vdeploy.managed=true | xargs -r docker rm -f >/dev/null',
+      'docker rm -f vd-traefik >/dev/null 2>&1',
+      'docker network ls -q --filter label=io.vdeploy.managed=true | xargs -r docker network rm >/dev/null 2>&1',
+      'docker volume ls -q --filter label=io.vdeploy.managed=true | xargs -r docker volume rm >/dev/null 2>&1',
+      'true',
+    ].join('; '),
+  );
+}
+
 function resetTestbed() {
   inTestbed(
     [
@@ -592,6 +617,7 @@ async function run() {
  */
 async function secondServer(firstServerId) {
   ensureSecondTestbed();
+  resetOtherBed(TESTBED2);
   await call('POST', '/api/v1/auth/step-up', { password });
   const { result: second } = await op('server.add', { name: 'testbed-2' });
   const config = {
@@ -677,6 +703,7 @@ async function edgeInFront(appServerId) {
     }
   }
 
+  resetOtherBed(TESTBED3);
   await call('POST', '/api/v1/auth/step-up', { password });
   const { result: edge } = await op('server.add', { name: 'edge-1', role: 'edge' });
   const config = {
