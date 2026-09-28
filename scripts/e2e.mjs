@@ -845,13 +845,25 @@ async function privateTrafficBetweenServers(firstServerId, secondServerId) {
     ).trim();
     const at = /@([^:@]+):(\d+)\//.exec(url);
     if (!at) return false;
-    const reached = inBed(
+    /*
+     * Bytes, both ways — not merely a socket that accepted.
+     *
+     * Opening the local port proves nothing: the agent listens there
+     * whether or not it can reach the other server, so a connect that
+     * "succeeds" and is then closed looks exactly like one that worked.
+     * So this speaks Postgres: eight bytes asking whether the server
+     * wants TLS, to which a real Postgres answers with a single byte. Get
+     * that byte back and the request crossed a machine and the answer
+     * came home.
+     */
+    const spoke = inBed(
       TESTBED2,
-      `docker exec ${container} sh -c 'timeout 5 nc ${at[1]} ${at[2]} </dev/null >/dev/null 2>&1 && echo open' 2>&1 || true`,
-    );
-    if (!/open/.test(reached)) return false;
+      `docker exec ${container} sh -c ` +
+        `'printf "\\000\\000\\000\\010\\004\\322\\026\\057" | timeout 5 nc ${at[1]} ${at[2]} | head -c 1' 2>&1 || true`,
+    ).trim();
+    if (spoke !== 'N' && spoke !== 'S') return false;
     pass(
-      'an app opened a database on another server, by the name it would use at home',
+      'an app spoke to a database on another server, by the name it would use at home',
       `${at[1]}:${at[2]}`,
     );
     return true;

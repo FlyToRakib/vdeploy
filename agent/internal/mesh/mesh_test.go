@@ -439,3 +439,65 @@ func TestTheKeyCheckRunsOnAResumedSession(t *testing.T) {
 		t.Fatal("a removed peer resumed its way past the key check")
 	}
 }
+
+/*
+The sockets outlive the pass that opened them.
+
+Apply is called from a reconciliation pass, and that pass has a deadline —
+as it should, since a pass that never finishes is a server that stops
+converging. But a socket opened with the pass's context dies with the
+pass, so every connection arriving afterwards is dialled with a context
+that was cancelled minutes ago: the app's request reaches the listener,
+goes nowhere, and closes. Nothing in the agent says so; the app just sees
+a connection that shut.
+
+Every other test here passes a context that stays alive, which is exactly
+why none of them noticed.
+*/
+func TestTheMeshOutlivesThePassThatOpenedIt(t *testing.T) {
+	aPublic, aPrivate := keypair(t)
+	bPublic, bPrivate := keypair(t)
+	serviceHost, servicePort := echoService(t)
+	listenPort := freePort(t)
+	localPort := freePort(t)
+
+	// One pass, with its own deadline, exactly as the reconciler does it.
+	pass, endPass := context.WithCancel(context.Background())
+
+	b := &Runner{
+		Identity: Identity{ServerID: serverB, Key: bPrivate},
+		Engine:   fakeEngine{container: serviceHost},
+	}
+	b.Apply(pass, spec.Mesh{
+		Listen: ptr(listenPort),
+		Peers:  []spec.MeshPeer{{ServerID: serverA, PublicKey: Encode(aPublic)}},
+		Grants: []spec.MeshGrant{{DatabaseID: database, FromServerID: serverA, Port: servicePort}},
+	})
+	t.Cleanup(b.Close)
+
+	endpoint := net.JoinHostPort("127.0.0.1", strconv.Itoa(listenPort))
+	a := &Runner{
+		Identity: Identity{ServerID: serverA, Key: aPrivate},
+		Engine:   fakeEngine{gateway: "127.0.0.1"},
+	}
+	a.Apply(pass, spec.Mesh{
+		Peers: []spec.MeshPeer{{ServerID: serverB, PublicKey: Encode(bPublic), Endpoint: &endpoint}},
+		Forwards: []spec.MeshForward{{
+			ProjectID: project, Alias: "vd-db-x", ListenPort: localPort,
+			ToServerID: serverB, DatabaseID: database,
+		}},
+	})
+	t.Cleanup(a.Close)
+
+	// The pass is over. Everything it set up must still work.
+	endPass()
+
+	p := &pair{a: a, b: b, localHost: "127.0.0.1", localPort: localPort}
+	back, err := p.say(t, "after the pass")
+	if err != nil {
+		t.Fatalf("the mesh stopped working when the pass that opened it ended: %v", err)
+	}
+	if back != "after the pass" {
+		t.Fatalf("got %q back", back)
+	}
+}

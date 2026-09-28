@@ -39,6 +39,19 @@ type Runner struct {
 	listen   net.Listener
 	listenOn int
 	forwards map[string]*forward
+	/*
+	 * base outlives the pass that opened these sockets.
+	 *
+	 * Apply is called from a reconciliation pass, and that pass has a
+	 * deadline — as it should, since a pass that never finishes is a
+	 * server that stops converging. But a socket opened with the pass's
+	 * context dies with the pass, so every connection that arrived
+	 * afterwards was dialled with a context that had already been
+	 * cancelled: an app's request reached the listener, went nowhere, and
+	 * closed. The sockets belong to the agent's lifetime, not to one pass.
+	 */
+	base context.Context
+	stop context.CancelFunc
 }
 
 // forward is one remote service offered on one project's network.
@@ -68,9 +81,13 @@ again on the next pass, with no retry schedule to get wrong.
 func (r *Runner) Apply(ctx context.Context, config spec.Mesh) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.base == nil {
+		// Detached from this pass, and ended only by Close.
+		r.base, r.stop = context.WithCancel(context.WithoutCancel(ctx))
+	}
 	r.config = config
-	r.applyListener(ctx, config)
-	r.applyForwards(ctx, config)
+	r.applyListener(r.base, config)
+	r.applyForwards(r.base, config)
 }
 
 // Hosts is what a project's containers must be told, so that the name of a
@@ -94,6 +111,10 @@ func (r *Runner) Hosts(projectID string) []string {
 func (r *Runner) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.stop != nil {
+		r.stop()
+		r.base, r.stop = nil, nil
+	}
 	if r.listen != nil {
 		_ = r.listen.Close()
 		r.listen, r.listenOn = nil, 0
