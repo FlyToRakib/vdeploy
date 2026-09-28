@@ -957,6 +957,21 @@ describe('staging', () => {
     expect(now?.spec.network?.domains).toMatchObject([{ host: 'blog.example.com' }]);
     const [after] = await t.db.select().from(projects).where(eq(projects.id, app.id));
     expect(after?.currentReleaseId).toBe(now?.id);
+
+    // The agent runs a local image id only if its own records say it
+    // built those bytes (ADR 0008). These were built for the staging
+    // copy, so the desired state says whose build it was — and says it
+    // for nothing else, because every other release was built for the
+    // project running it.
+    await t.db
+      .update(servers)
+      .set({ agentBoxKey: boxKeyPair().publicKey })
+      .where(eq(servers.id, serverId));
+    const desired = await desiredStateFor(t.db, serverId, { secretsKey: SECRETS });
+    const promotedTo = desired.projects.find((one) => one.projectId === app.id);
+    expect(promotedTo?.imageFrom).toBe(staging.id);
+    const stagingItself = desired.projects.find((one) => one.projectId === staging.id);
+    expect(stagingItself?.imageFrom).toBeUndefined();
   });
 
   it('will not promote from an app with no staging copy', async () => {
