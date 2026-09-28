@@ -31,8 +31,9 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strings"
 	"time"
+
+	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 )
 
 // fetchTimeout bounds collecting an image from another server. Images are
@@ -100,19 +101,6 @@ func (a Arrival) validate() error {
 	return nil
 }
 
-/*
-arrivedName is what the Engine tags the image with while it is loaded.
-
-It is only a label — what the agent trusts is the ID that comes back — but
-Docker will not accept a reference with an upper-case letter in it, and an
-id is upper-case, so an image that arrived perfectly well was refused on
-its name. The same shape the builder uses for what it makes.
-*/
-func arrivedName(req Arrival) string {
-	project := strings.ToLower(strings.TrimPrefix(req.ProjectID, "prj_"))
-	return "vd-arrived/" + project + ":" + strings.ToLower(req.BuildID)
-}
-
 // Load never panics on bad input: every failure becomes a Result, because
 // the deploy waiting on this needs a reason, not a dropped connection.
 func (l *Loader) Load(ctx context.Context, req Arrival) Result {
@@ -140,7 +128,10 @@ func (l *Loader) load(ctx context.Context, req Arrival) error {
 
 	// The name is only what the Engine tags it with; what the agent trusts
 	// is the ID that comes back.
-	loaded, err := l.Engine.LoadImage(ctx, file, arrivedName(req))
+	// The name the builder gave it, because that is the name inside the
+	// tarball: ask for anything else and the image that was just loaded is
+	// not there.
+	loaded, err := l.Engine.LoadImage(ctx, file, compose.BuildImageName(req.ProjectID, req.BuildID))
 	if err != nil {
 		return fmt.Errorf("the image could not be loaded: %w", err)
 	}

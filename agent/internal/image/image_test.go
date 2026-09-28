@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+
+	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"testing"
 )
 
@@ -170,7 +172,10 @@ func TestTheImageIsTaggedWithSomethingDockerAccepts(t *testing.T) {
 	if e.name != strings.ToLower(e.name) {
 		t.Fatalf("loaded under %q, which Docker will not take", e.name)
 	}
-	if !strings.HasPrefix(e.name, "vd-arrived/") || !strings.Contains(e.name, ":") {
-		t.Fatalf("loaded under %q", e.name)
+	// And under the name the builder gave it, because that is the name
+	// inside the tarball: ask for anything else and the image that was
+	// just loaded is not there.
+	if e.name != compose.BuildImageName(project, build) {
+		t.Fatalf("loaded under %q, not the name it was built with", e.name)
 	}
 }

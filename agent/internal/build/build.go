@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 )
 
@@ -333,7 +334,7 @@ func (b *Builder) run(ctx context.Context, req Request) (outcome, error) {
 		return outcome{Detection: detection}, fmt.Errorf("build cache: %w", err)
 	}
 	b.clearStaleLock(ctx)
-	name := "vd-build/" + strings.ToLower(strings.TrimPrefix(req.ProjectID, "prj_")) + ":" + strings.ToLower(req.BuildID)
+	name := compose.BuildImageName(req.ProjectID, req.BuildID)
 	args := append([]string{"build"}, frontend...)
 	args = append(args,
 		"--local", "context="+path.Join("/repo", folder),

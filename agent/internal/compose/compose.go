@@ -73,6 +73,21 @@ func ProjectKey(projectID string) string {
 	return strings.ToLower(strings.TrimPrefix(projectID, "prj_"))
 }
 
+/*
+BuildImageName is what a built image is called.
+
+It has to be computed in exactly one place, because it is written by the
+server that builds and read by the server that runs — and a tarball
+produced by `docker save` carries the name it was built with inside it, so
+the receiving side has to ask for that same string or the image it just
+loaded is not there. Docker also refuses any upper-case letter in a
+reference, and an id is upper-case, which is the other half of why this is
+not worth spelling out twice.
+*/
+func BuildImageName(projectID, buildID string) string {
+	return "vd-build/" + ProjectKey(projectID) + ":" + strings.ToLower(buildID)
+}
+
 // NetworkName is the project's own network: projects cannot reach each other.
 func NetworkName(projectID string) string {
 	return "vd-" + ProjectKey(projectID)
