@@ -47,6 +47,12 @@ export const databases = pgTable(
     running: boolean('running').notNull().default(true),
     /** Bumped to replace the container without changing anything else. */
     revision: integer('revision').notNull().default(0),
+    /**
+     * The port it answers on from outside the server, when a person chose
+     * to open one (§17.3). Null — the default — is reachable only by the
+     * apps linked to it.
+     */
+    publicPort: integer('public_port'),
     /** The admin password, under this database's own data key. */
     passwordSealed: text('password_sealed').notNull(),
     passwordVersion: integer('password_version').notNull().default(1),

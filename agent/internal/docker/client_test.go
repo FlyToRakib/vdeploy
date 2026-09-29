@@ -110,3 +110,14 @@ func TestEngineErrorsCarryStatusAndMessage(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestOnlyAnOpenedDatabaseIsPublishedOnTheServer(t *testing.T) {
+	app, _ := json.Marshal(CreateRequest(compose.Container{Name: "vd-x-v1-0", Image: "nginx", Port: 80}))
+	if strings.Contains(string(app), "PortBindings") {
+		t.Fatalf("an app container asked for a port on the server: %s", app)
+	}
+	db, _ := json.Marshal(CreateRequest(compose.Container{Name: "vd-db-x", Image: "postgres", Port: 5432, HostPort: 15432}))
+	if !strings.Contains(string(db), `"PortBindings":{"5432/tcp":[{"HostPort":"15432"}]}`) {
+		t.Fatalf("an opened database is not published as asked: %s", db)
+	}
+}

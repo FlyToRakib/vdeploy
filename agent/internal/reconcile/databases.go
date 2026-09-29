@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
@@ -77,7 +79,17 @@ func (p *pass) convergeDatabase(ctx context.Context, d spec.DesiredDatabase, c c
 		}
 	}
 	// A changed image or revision replaces the container — never alongside the old one.
-	if running && (existing.Image != c.Image || p.r.databaseRevision[d.DatabaseID] != d.Revision) {
+	replace := existing.Image != c.Image || compose.DatabaseRevision(existing.Labels) != d.Revision
+	// Not for a port something else on the server holds: removing the
+	// running database first and then failing to start the new one would
+	// trade a setting that cannot apply for an outage.
+	if running && replace && c.HostPort > 0 &&
+		existing.Labels[compose.PublicPortLabel] != strconv.Itoa(c.HostPort) && !hostPortFree(c.HostPort) {
+		p.event("failed", d.DatabaseID, c.Name, fmt.Sprintf(
+			"port %d is already used on this server, so it was not opened; the database keeps running as it was", c.HostPort))
+		return nil
+	}
+	if running && replace {
 		p.remove(ctx, existing)
 		running = false
 	}
@@ -114,7 +126,6 @@ func (p *pass) convergeDatabase(ctx context.Context, d spec.DesiredDatabase, c c
 		return fmt.Errorf("start %s: %w", c.Name, err)
 	}
 	p.existing[c.Name] = docker.Container{ID: id, Name: c.Name, State: "running", Image: c.Image, Labels: c.Labels}
-	p.r.databaseRevision[d.DatabaseID] = d.Revision
 	p.event("created", d.DatabaseID, c.Name, "")
 	return p.linkNetworks(ctx, d, id)
 }
@@ -165,4 +176,14 @@ func (p *pass) linkNetworks(ctx context.Context, d spec.DesiredDatabase, id stri
 		p.event("unlinked", d.DatabaseID, name, "")
 	}
 	return errors.Join(errs...)
+}
+
+// hostPortFree says whether nothing on this machine listens on a TCP port.
+var hostPortFree = func(port int) bool {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
 }

@@ -202,6 +202,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'server.set_private_traffic': { enabled: true },
   'server.set_update_channel': { channel: 'canary' },
   'server.set_maintenance': { on: true },
+  'database.expose': { port: 15432 },
   'user.invite': { email: 'someone@example.com', role: 'developer' },
   'user.remove': { userId: newId('user') },
   'user.set_role': { userId: newId('user'), role: 'viewer' },

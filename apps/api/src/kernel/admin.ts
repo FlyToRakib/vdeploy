@@ -363,6 +363,56 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
     if (!updated.length) throw new VDeployError('not_found', 'That server is not one of yours');
     return { serverId: String(args.serverId), channel };
   },
+  /**
+   * Opens a database on a port of its server, or closes it (§17.3). The
+   * container is replaced to take the port, keeping its data; the agent
+   * leaves it running as it was if something else holds that port.
+   */
+  'database.expose': async ({ deps, actor, args }) => {
+    const [row] = await deps.db
+      .select()
+      .from(databases)
+      .where(
+        and(
+          eq(databases.id, String(args.databaseId)),
+          eq(databases.orgId, actor.orgId),
+          isNull(databases.deletedAt),
+        ),
+      );
+    if (!row) throw new VDeployError('not_found', 'Database not found');
+    const port = typeof args.port === 'number' ? args.port : null;
+    if (port === MESH_DEFAULT_PORT) {
+      throw new VDeployError(
+        'conflict',
+        `Port ${String(port)} carries this server's private traffic; choose another`,
+      );
+    }
+    if (port !== null) {
+      const [taken] = await deps.db
+        .select({ name: databases.name })
+        .from(databases)
+        .where(
+          and(
+            eq(databases.serverId, row.serverId),
+            eq(databases.publicPort, port),
+            isNull(databases.deletedAt),
+          ),
+        );
+      if (taken && taken.name !== row.name) {
+        throw new VDeployError('conflict', `${taken.name} already answers on port ${String(port)}`);
+      }
+    }
+    if (row.publicPort !== port) {
+      await deps.db.transaction(async (tx) => {
+        await tx
+          .update(databases)
+          .set({ publicPort: port, revision: row.revision + 1, updatedAt: deps.now() })
+          .where(eq(databases.id, row.id));
+        await bumpDesiredGeneration(tx, row.serverId);
+      });
+    }
+    return { databaseId: row.id, publicPort: port };
+  },
   'server.set_maintenance': async ({ deps, actor, args }) => {
     const on = args.on === true;
     const [row] = await deps.db

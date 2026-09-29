@@ -134,6 +134,8 @@ type DesiredDatabase struct {
 	CPU         float64 `json:"cpu"`
 	Running     bool    `json:"running"`
 	Revision    int     `json:"revision"`
+	// PublicPort also publishes it on the server, when a person opened one.
+	PublicPort int `json:"publicPort,omitempty"`
 	// LinkedProjects may reach it: their networks are joined to its own.
 	LinkedProjects []string `json:"linkedProjects"`
 }

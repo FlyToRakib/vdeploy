@@ -176,3 +176,58 @@ func TestDatabaseIsReplacedInPlaceWhenItsVersionChanges(t *testing.T) {
 		t.Fatalf("exactly one database container should run: %v", engine.running())
 	}
 }
+
+func TestARestartedAgentKeepsADatabaseItsRevisionSaysIsCurrent(t *testing.T) {
+	engine := newFake()
+	d := testDatabase("four")
+	d.Revision = 2
+	state := &spec.DesiredState{Protocol: spec.Protocol, Generation: 1, Databases: []spec.DesiredDatabase{d}}
+	first := newReconciler(engine)
+	first.Secrets = &fakeSecrets{}
+	reconcile(t, first, state)
+	engine.calls = nil
+
+	// A new agent process — an update, a reboot — knows nothing it did not
+	// write down; the container's own label is what it reads.
+	again := newReconciler(engine)
+	again.Secrets = &fakeSecrets{}
+	reconcile(t, again, state)
+	for _, call := range engine.calls {
+		if strings.HasPrefix(call, "remove ") || strings.HasPrefix(call, "create ") {
+			t.Fatalf("a current database was replaced after a restart: %v", engine.calls)
+		}
+	}
+
+	// Its revision moving on does replace it.
+	d.Revision = 3
+	state.Databases = []spec.DesiredDatabase{d}
+	reconcile(t, again, state)
+	if !slices.Contains(engine.calls, "create "+compose.DatabaseName(d.DatabaseID)) {
+		t.Fatalf("a new revision did not replace it: %v", engine.calls)
+	}
+}
+
+func TestAPortSomethingElseHoldsLeavesTheDatabaseRunningAsItWas(t *testing.T) {
+	free := hostPortFree
+	hostPortFree = func(int) bool { return false }
+	t.Cleanup(func() { hostPortFree = free })
+	engine := newFake()
+	r := newReconciler(engine)
+	r.Secrets = &fakeSecrets{}
+	d := testDatabase("five")
+	state := &spec.DesiredState{Protocol: spec.Protocol, Generation: 1, Databases: []spec.DesiredDatabase{d}}
+	reconcile(t, r, state)
+	engine.calls = nil
+
+	d.PublicPort, d.Revision = 15432, 1
+	state.Databases = []spec.DesiredDatabase{d}
+	reconcile(t, r, state)
+	for _, call := range engine.calls {
+		if strings.HasPrefix(call, "remove ") {
+			t.Fatalf("the running database was taken down for a port it could not have: %v", engine.calls)
+		}
+	}
+	if len(engine.running()) != 1 {
+		t.Fatalf("the database stopped: %v", engine.running())
+	}
+}

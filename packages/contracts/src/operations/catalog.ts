@@ -657,6 +657,17 @@ export const OPERATIONS = [
     'Stop a database; apps using it lose their data connection until it starts again',
     obj({ databaseId }),
   ),
+  // A database answering the internet is how self-hosted stacks get
+  // ransomed (§17.3): opening one is a person's act, stepped up, with the
+  // warning in front of them — and closing it again is the same act.
+  operation(
+    'database.expose',
+    'human_only',
+    'database',
+    'Open a database on a port of its server so it can be reached from outside, or close it again (null)',
+    obj({ databaseId, port: z.number().int().min(1024).max(65535).nullable() }),
+    { minRole: 'admin', stepUp: true },
+  ),
   operation(
     'database.start',
     'sensitive',

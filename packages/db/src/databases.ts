@@ -180,6 +180,7 @@ export function databaseView(
     status,
     host: databaseHost(row.id),
     port: row.port,
+    publicPort: row.publicPort,
     user: row.user,
     dbName: row.dbName,
     memoryLimit: row.memoryLimit,

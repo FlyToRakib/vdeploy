@@ -30,6 +30,7 @@ const database: DatabaseSummary = {
   status: 'running',
   host: 'vd-db-1',
   port: 5432,
+  publicPort: null,
   user: 'vdeploy',
   dbName: 'blog_db',
   memoryLimit: '512Mi',

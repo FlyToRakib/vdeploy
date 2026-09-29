@@ -253,7 +253,19 @@ each is one task, one commit.
 
 **Data (§17)**
 - [ ] object storage: a bucket you bring, or managed MinIO (§17.1, M5)
-- [ ] a database's public port, as a warned opt-in (§17.3)
+- [x] **a database's public port, as a warned opt-in (§17.3)**: a person,
+  stepped up, can open a managed database on a port of its server (never
+  a privileged one, never the private-traffic port, never one another
+  database there holds), behind a dialog that says plainly what it risks
+  and asks them to limit who can connect; closing it is the same act. The
+  agent publishes that one port on that one container — no app container
+  ever gets a server port — and if something else already holds it, the
+  database keeps running as it was and the reason is reported, rather
+  than the running engine being removed for a port it cannot have. Found
+  on the way: the agent kept a database's revision only in memory, so
+  once any revision moved past 0 every agent restart — every self-update
+  now — would have replaced the database. It is read from the
+  container's own label instead
 - [x] **the connection-limit warning (§17.3)**: before an app grows, its
   plan says when the copies of every app reading a linked Postgres, MySQL
   or MariaDB could open 80% or more of the connections the engine allows.

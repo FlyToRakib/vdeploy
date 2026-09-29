@@ -168,6 +168,8 @@ type hostConfig struct {
 	ExtraHosts    []string      `json:"ExtraHosts,omitempty"`
 	Mounts        []mount       `json:"Mounts"`
 	NetworkMode   string        `json:"NetworkMode"`
+	// PortBindings is set only for a database a person opened (§17.3).
+	PortBindings map[string][]portBinding `json:"PortBindings,omitempty"`
 }
 
 // CreateBody is the Engine's container-create request, as the agent builds it.
@@ -191,6 +193,12 @@ func CreateRequest(ct compose.Container) CreateBody {
 	var exposed map[string]struct{}
 	if ct.Port > 0 {
 		exposed = map[string]struct{}{strconv.Itoa(ct.Port) + "/tcp": {}}
+	}
+	var published map[string][]portBinding
+	if ct.Port > 0 && ct.HostPort > 0 {
+		published = map[string][]portBinding{
+			strconv.Itoa(ct.Port) + "/tcp": {{HostPort: strconv.Itoa(ct.HostPort)}},
+		}
 	}
 	return CreateBody{
 		Image:        ct.Image,
@@ -216,6 +224,7 @@ func CreateRequest(ct compose.Container) CreateBody {
 			ExtraHosts:    ct.ExtraHosts,
 			Mounts:        mounts,
 			NetworkMode:   ct.Network,
+			PortBindings:  published,
 		},
 	}
 }

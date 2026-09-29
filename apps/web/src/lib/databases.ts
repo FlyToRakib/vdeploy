@@ -9,6 +9,8 @@ export interface DatabaseSummary {
   status: 'creating' | 'running' | 'stopped' | 'failed' | 'deleting';
   host: string;
   port: number;
+  /** The server port it answers on from outside, when a person opened one. */
+  publicPort: number | null;
   user: string;
   dbName: string | null;
   memoryLimit: string;

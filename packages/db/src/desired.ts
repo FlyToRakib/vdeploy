@@ -123,6 +123,7 @@ export async function desiredStateFor(
       cpu: 1,
       running: row.running,
       revision: row.revision,
+      ...(row.publicPort ? { publicPort: row.publicPort } : {}),
       linkedProjects: [...new Set(links.map((link) => link.projectId))].filter((id) =>
         here.has(id),
       ),

@@ -139,8 +139,6 @@ type Reconciler struct {
 	// moving: new permanent folders (by volume) whose files still have to be copied in.
 	moving   map[string]bool
 	evidence map[string]evidenceCache
-	// databaseRevision is the revision each database container was created at.
-	databaseRevision map[string]int
 	// lastDesired is what this server was last told to run, read by tasks.
 	desiredMu   sync.Mutex
 	lastDesired map[string]spec.DesiredProject
@@ -180,9 +178,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	if r.ready == nil {
 		r.ready = map[string]*readiness{}
 		r.draining = map[string]time.Time{}
-	}
-	if r.databaseRevision == nil {
-		r.databaseRevision = map[string]int{}
 	}
 	if r.canaries == nil {
 		r.canaries = map[string]canary{}
@@ -500,7 +495,6 @@ func (p *pass) retire(ctx context.Context) {
 				continue
 			}
 			p.remove(ctx, c)
-			delete(p.r.databaseRevision, id)
 			continue
 		}
 		projectID := c.Labels[compose.ProjectLabel]

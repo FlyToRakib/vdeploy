@@ -222,6 +222,8 @@ function DatabaseCard({
   const [importing, setImporting] = useState(false);
   const [reading, setReading] = useState(false);
   const [dump, setDump] = useState<UploadedDump | null>(null);
+  const [exposing, setExposing] = useState(false);
+  const [understood, setUnderstood] = useState(false);
   const status = statusWords(database.status);
   const data = dataLine(backups);
   const verified = verifiedWords(database);
@@ -449,6 +451,32 @@ function DatabaseCard({
         >
           Load a file
         </Button>
+        {database.publicPort ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              void run(
+                'database.expose',
+                { port: null },
+                { doing: 'Closing it to the outside…', done: 'Only its apps can reach it again.' },
+              )
+            }
+          >
+            Close port {database.publicPort}
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setUnderstood(false);
+              setExposing(true);
+            }}
+          >
+            Reach it from outside
+          </Button>
+        )}
         <Button
           variant="danger"
           size="sm"
@@ -459,6 +487,60 @@ function DatabaseCard({
           Delete
         </Button>
       </div>
+
+      <Dialog
+        open={exposing}
+        onOpenChange={setExposing}
+        title={`Open ${database.name} to the internet?`}
+        description="Only its apps can reach it now. That is how it should stay unless a tool outside this server truly needs it."
+      >
+        <form
+          action={(form) => {
+            setExposing(false);
+            void run(
+              'database.expose',
+              { port: Number(formText(form, 'port')) },
+              { doing: 'Opening it…', done: 'It answers on that port now.' },
+            );
+          }}
+          className="grid gap-4"
+        >
+          <p className="text-sm text-status-warning">
+            Anyone on the internet will be able to try its password. Databases open like this are
+            how self-hosted servers get broken into and held to ransom. If you go ahead, allow only
+            your own address to that port in your hosting provider&apos;s firewall.
+          </p>
+          <Field
+            label="Port on the server"
+            name="port"
+            type="number"
+            required
+            min={1024}
+            max={65535}
+            defaultValue={String(10_000 + database.port)}
+            hint="Not the database's usual port, so the scanners that try those first miss it."
+          />
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={understood}
+              onChange={(event) => {
+                setUnderstood(event.target.checked);
+              }}
+              className="mt-1"
+            />
+            I understand it can be reached from the internet, and I will limit who can connect.
+          </label>
+          <Button
+            type="submit"
+            variant="danger"
+            disabled={!understood}
+            className="justify-self-start"
+          >
+            Open it
+          </Button>
+        </form>
+      </Dialog>
 
       <Dialog
         open={linking}

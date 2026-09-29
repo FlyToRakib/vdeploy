@@ -47,6 +47,8 @@ export const DatabaseView = z.strictObject({
   /** Host and port on the server's internal network — never reachable from outside. */
   host: z.string().max(128),
   port: z.number().int().min(1).max(65535),
+  /** The server port it also answers on from outside, when a person opened one (§17.3). */
+  publicPort: z.number().int().nullable(),
   user: z.string().max(64),
   /** The logical database inside the engine; Redis has none. */
   dbName: z.string().max(64).nullable(),
@@ -92,6 +94,11 @@ export const DesiredDatabase = z.strictObject({
   running: z.boolean(),
   /** Bumped to replace the container without changing anything else. */
   revision: z.number().int().min(0),
+  /**
+   * The server port it also answers on from outside (§17.3), when a person
+   * opened one. Never a privileged port: those belong to the machine.
+   */
+  publicPort: z.number().int().min(1024).max(65535).optional(),
   /** Projects allowed to reach it: their networks are joined to its own. */
   linkedProjects: z.array(idSchema('project')).max(64),
 });

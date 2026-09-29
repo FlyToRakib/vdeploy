@@ -5,6 +5,7 @@ import {
   approvals,
   auditLog,
   claimBuilds,
+  databases,
   deployments,
   idempotencyKeys,
   organization,
@@ -618,6 +619,55 @@ describe('the gate', () => {
     );
     expect((await op(owner, 'freeze.remove', { freezeId })).statusCode).toBe(200);
     expect((await setting('d')).statusCode).toBe(202);
+  });
+
+  it('opens a database to the outside only on a free port, and closes it again', async () => {
+    const serverId = newId('server');
+    await t.database.db
+      .insert(servers)
+      .values({ id: serverId, orgId, name: 'db-box', status: 'online' });
+    const seed = async (name: string) => {
+      const id = newId('database');
+      await t.database.db.insert(databases).values({
+        id,
+        orgId,
+        serverId,
+        name,
+        engine: 'postgres',
+        version: '18',
+        image: 'postgres:18-alpine',
+        port: 5432,
+        user: 'vdeploy',
+        dbName: name,
+        memoryLimit: '512Mi',
+        diskSize: '1Gi',
+        passwordSealed: 'sealed',
+      });
+      return id;
+    };
+    const [first, second] = [await seed('orders'), await seed('reports')];
+    await stepUp(owner);
+
+    const opened = await op(owner, 'database.expose', { databaseId: first, port: 15432 });
+    expect(opened.statusCode).toBe(200);
+    const [row] = await t.database.db.select().from(databases).where(eq(databases.id, first));
+    // A new revision replaces the container, which is how it takes the port.
+    expect(row).toMatchObject({ publicPort: 15432, revision: 1 });
+
+    const clash = await op(owner, 'database.expose', { databaseId: second, port: 15432 });
+    expect(clash.statusCode).toBe(409);
+    const mesh = await op(owner, 'database.expose', { databaseId: second, port: 45800 });
+    expect(mesh.json<{ error: { message: string } }>().error.message).toMatch(/private traffic/);
+    // Never a port the machine itself uses.
+    expect((await op(owner, 'database.expose', { databaseId: second, port: 22 })).statusCode).toBe(
+      400,
+    );
+
+    expect((await op(owner, 'database.expose', { databaseId: first, port: null })).statusCode).toBe(
+      200,
+    );
+    const [closed] = await t.database.db.select().from(databases).where(eq(databases.id, first));
+    expect(closed?.publicPort).toBeNull();
   });
 
   it('ends a canary early for a person, and cancels only what is running', async () => {

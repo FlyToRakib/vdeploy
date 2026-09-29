@@ -42,6 +42,10 @@ type Container struct {
 	StopTimeout   int
 	RestartPolicy string
 	Port          int
+	// HostPort publishes Port on the server. Only a database a person
+	// opened has one: no app container ever does, and the router has its
+	// own, separate request.
+	HostPort int
 	// ExtraHosts maps a name to an address inside this container, as
 	// `name:address` (§13). It is how a service on another server is reached
 	// under the name it would have if it were here: the app resolves it,
@@ -208,6 +212,13 @@ func ReleaseJob(p spec.DesiredProject, replica Container) Container {
 // DatabaseLabel marks the managed database a container belongs to.
 const DatabaseLabel = "io.vdeploy.database"
 
+// RevisionLabel records the revision a database container was made for, so
+// an agent that restarts knows it is current rather than replacing it.
+const RevisionLabel = "io.vdeploy.revision"
+
+// PublicPortLabel records the server port a database container holds.
+const PublicPortLabel = "io.vdeploy.public-port"
+
 // DatabaseKey is the short, name-safe form of a database id.
 func DatabaseKey(databaseID string) string {
 	return strings.ToLower(strings.TrimPrefix(databaseID, "db_"))
@@ -232,15 +243,15 @@ func DatabaseVolume(databaseID string) string {
 }
 
 // PlanDatabase composes the single container of a managed database (§17.3).
-// It publishes no port: a database is reachable only on the networks of the
-// apps linked to it. Credentials are not here — they are opened and added
-// at creation, like every other secret.
+// It publishes no port unless a person opened one: a database is reachable
+// only on the networks of the apps linked to it. Credentials are not here —
+// they are opened and added at creation, like every other secret.
 func PlanDatabase(d spec.DesiredDatabase) Container {
 	env := make([]string, 0, len(d.Env))
 	for _, e := range d.Env {
 		env = append(env, e.Key+"="+e.Value)
 	}
-	return Container{
+	container := Container{
 		Name:    DatabaseName(d.DatabaseID),
 		Image:   d.Image,
 		Env:     env,
@@ -250,13 +261,38 @@ func PlanDatabase(d spec.DesiredDatabase) Container {
 			ManagedLabel:  "true",
 			DatabaseLabel: d.DatabaseID,
 			RoleLabel:     "database",
+			RevisionLabel: strconv.Itoa(d.Revision),
 		},
 		MemoryBytes:   d.MemoryBytes,
 		NanoCPUs:      int64(d.CPU * 1e9),
 		PidsLimit:     PidsLimit,
 		StopTimeout:   60,
 		RestartPolicy: "unless-stopped",
+		Port:          publishedPort(d),
+		HostPort:      d.PublicPort,
 	}
+	if d.PublicPort > 0 {
+		container.Labels[PublicPortLabel] = strconv.Itoa(d.PublicPort)
+	}
+	return container
+}
+
+// publishedPort is the engine's port when it is also opened on the server.
+func publishedPort(d spec.DesiredDatabase) int {
+	if d.PublicPort > 0 {
+		return d.Port
+	}
+	return 0
+}
+
+// DatabaseRevision is the revision a database container was made for; one
+// made before revisions were recorded was made for the first.
+func DatabaseRevision(labels map[string]string) int {
+	n, err := strconv.Atoi(labels[RevisionLabel])
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // DatabaseEnv opens a database's sealed credentials for one container
