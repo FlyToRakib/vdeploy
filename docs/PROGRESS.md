@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** step-up with a passkey or an authenticator code
+**Task:** certificate renewal status, and an alert 21 days out
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -125,7 +125,26 @@ each is one task, one commit.
   and quietly drop it. **Secrets are named and left empty**: an export
   is a file that gets emailed and committed. Folders and databases leave
   as they always could, as copies and dumps from their own screens
-- [ ] step-up with a passkey or an authenticator code (§20.2) — a passkey-only person cannot do anything sensitive
+- [x] **step-up with a passkey or an authenticator code (§20.2)**. The
+  dialog now asks for what the person actually signs in with — a
+  passkey first, then a code, then a password — because password-only
+  step-up locked out exactly the people who had done the most for their
+  account: somebody with a passkey alone could confirm nothing. None of
+  these is a sign-in: Better Auth's own passkey and code endpoints make
+  or replace sessions, and step-up must prove it is still the person
+  behind *this* session and leave it alone. So the passkey ceremony is
+  VDeploy's own, on the same stored keys and the same library the
+  passkey plugin uses, with **user verification required** (step-up
+  proves the person, not the device), a challenge answered once, and
+  only this person's keys accepted. A code is accepted only once an
+  authenticator is fully set up, so checking one can never finish
+  setting one up. **Found on the way: step-up had no limit of its own**
+  beyond 300 requests a minute, so a stolen session cookie was a
+  password guesser at that rate. After five misses in a row it now
+  waits fifteen minutes, counted from the audit log that already records
+  every miss; a confirmation that works clears the misses before it. The
+  passkey test signs real P-256 assertions, and refuses one that was
+  only tapped, one replayed, and a key that is nobody's
 - [ ] certificate renewal status, and an alert 21 days out (§30 ⑦, §18)
 - [ ] the break-glass command on the control-plane host (§30 ⑧)
 - [ ] one command to install the control plane, one to upgrade it with a backup first (§34.1)
@@ -852,7 +871,6 @@ GitHub.
   sign-in URL, issuer and certificate rather than reading them out of a
   metadata document (which is accepted and stored, but not parsed).
   `fetchableOrigin` checks what was typed, not what it resolves to.
-- Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
 - The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.

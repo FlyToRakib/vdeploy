@@ -14,6 +14,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import type { Auth } from '../auth/auth.js';
 import { notMeSignature } from '../auth/hooks.js';
+import { checkStepUp, passkeyChallenge, stepUpMethods } from '../auth/step-up.js';
 import { resolveSession } from '../http/actor.js';
 import { webHeaders } from '../http/headers.js';
 
@@ -37,6 +38,7 @@ export const accountRoutes =
   ({ auth, db, secret, publicUrl }: AccountDeps): FastifyPluginAsyncZod =>
   (app) => {
     const origin = new URL(publicUrl).origin;
+    const rpID = new URL(publicUrl).hostname;
     const signedIn = (req: Parameters<typeof resolveSession>[0]) =>
       resolveSession(req, auth, db, origin);
     const audit = (action: string, userId: string, details: Record<string, unknown> = {}) =>
@@ -158,17 +160,44 @@ export const accountRoutes =
       return reply.status(204).send();
     });
 
+    /**
+     * How this person can confirm it is them, and — when they have a
+     * passkey — a fresh challenge for it, so the dialog asks for what they
+     * actually use rather than a password they may not have (§20.2).
+     */
+    app.post('/api/v1/auth/step-up/options', async (req) => {
+      const me = await signedIn(req);
+      const methods = await stepUpMethods(db, me.userId);
+      const passkey = methods.passkey
+        ? await passkeyChallenge(db, me.userId, me.sessionId, rpID)
+        : null;
+      return { methods, ...(passkey ? { passkey } : {}) };
+    });
+
     /** Step-up re-authentication (§20.2): proves it is still you, for ten minutes. */
     app.post(
       '/api/v1/auth/step-up',
-      { schema: { body: z.strictObject({ password: z.string().min(1).max(128) }) } },
+      {
+        schema: {
+          body: z.union([
+            z.strictObject({ password: z.string().min(1).max(128) }),
+            z.strictObject({ code: z.string().regex(/^\d{6}$/, 'six digits') }),
+            // Checked field by field by the WebAuthn library, not here.
+            z.strictObject({ passkey: z.looseObject({ id: z.string().max(1024) }) }),
+          ]),
+        },
+      },
       async (req, reply) => {
         const me = await signedIn(req);
         const headers = new Headers({ cookie: req.headers.cookie ?? '' });
-        const verified = await auth.api
-          .verifyPassword({ body: { password: req.body.password }, headers })
-          .then(() => true)
-          .catch(() => false);
+        const method =
+          'password' in req.body ? 'password' : 'code' in req.body ? 'code' : 'passkey';
+        const verified = await checkStepUp(
+          { db, auth, origin, rpID },
+          me,
+          req.body as Parameters<typeof checkStepUp>[2],
+          headers,
+        );
         if (!verified) {
           await appendAudit(db, {
             chain: '',
@@ -176,15 +205,22 @@ export const accountRoutes =
             action: 'auth.step_up',
             target: me.userId,
             outcome: 'failed',
-            details: {},
+            details: { method },
           });
-          throw new VDeployError('unauthenticated', 'That password is not right');
+          throw new VDeployError(
+            'unauthenticated',
+            method === 'password'
+              ? 'That password is not right'
+              : method === 'code'
+                ? 'That code is not right, or it has expired'
+                : 'That passkey could not confirm it is you',
+          );
         }
         await db
           .update(sessionTable)
           .set({ stepUpAt: new Date() })
           .where(eq(sessionTable.id, me.sessionId));
-        await audit('auth.step_up', me.userId);
+        await audit('auth.step_up', me.userId, { method });
         return reply.status(204).send();
       },
     );

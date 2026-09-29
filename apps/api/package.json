@@ -19,6 +19,7 @@
     "@fastify/swagger": "^9.8.1",
     "@fastify/websocket": "^11.3.1",
     "@node-rs/argon2": "^2.2.1",
+    "@simplewebauthn/server": "13.3.3",
     "@vdeploy/ai": "workspace:*",
     "@vdeploy/contracts": "workspace:*",
     "@vdeploy/core": "workspace:*",
