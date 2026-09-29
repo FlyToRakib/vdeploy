@@ -784,7 +784,8 @@ describe('agent channel', () => {
     expect(await asked(again)).toBe(false);
     again.close();
     newBox.close();
-  });
+    // Two enrollments and two silences waited out in full: never quick.
+  }, 20_000);
 
   it('hands an agent the sign-in for a private image, sealed, and nothing in the clear', async () => {
     // A server of its own: nothing else on it that a push would have to carry.
