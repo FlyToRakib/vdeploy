@@ -224,7 +224,20 @@ each is one task, one commit.
   ranges the router refuses, and a rate limit counted per client address
   or per the value of a named header (an API key, say). The end-to-end
   run checks a moved page and a password against the real router
-- [ ] HTTP/3, and timeouts that suit SSE and WebSockets
+- [x] **HTTP/3, and timeouts that suit SSE and WebSockets**: the router
+  serves QUIC on 443/udp and advertises it (`alt-svc: h3=":443"`, checked
+  end to end); where something else already holds 443/udp the router
+  starts without it rather than not at all. A router made by an older
+  agent is replaced when what it is made of changes, once, keeping its
+  certificates. Checked against the pinned Traefik: a WebSocket and a
+  server-sent-events stream both outlive the read timeout (it is cleared
+  on upgrade, and streaming has no write timeout), so the defaults stay;
+  what an app can set is `loadBalancer.responseTimeout`, how long it has
+  to start answering — which never cuts a stream that has started. Also
+  from Traefik's own warning: headers that alias others (`X_Auth_User`
+  for `X-Auth-User`) are dropped at the door, so a visitor cannot forge
+  the identity forward-auth hands an app. The Config screen gains a Load
+  balancing section (sticky sessions, retries, the response timeout)
 - [ ] the raw Traefik escape hatch (§20)
 - [ ] `network.protocol: tcp`
 - [ ] DNS-01 certificates, and a wildcard certificate as the opt-in (§13, §13.1)

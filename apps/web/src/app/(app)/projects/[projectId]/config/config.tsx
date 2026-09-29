@@ -12,6 +12,7 @@ import {
   DomainsSection,
   ExportSection,
   HealthSection,
+  LoadBalancingSection,
   MovedPagesSection,
   PreviewsSection,
   ScheduleSection,
@@ -142,6 +143,7 @@ export function ProjectConfig() {
       <AccessSection />
       <SizeSection />
       <HealthSection />
+      <LoadBalancingSection />
       <StorageSection />
       <ScheduleSection />
       <StagingSection />

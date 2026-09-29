@@ -243,6 +243,13 @@ export const Network = z.strictObject({
         .regex(/^NetworkErrorRatio\(\) > 0\.\d{1,2}$/, 'must be NetworkErrorRatio() > 0.NN')
         .optional(),
       retry: z.strictObject({ attempts: z.number().int().min(1).max(5) }).optional(),
+      /**
+       * How long the app has to start answering a request before the
+       * visitor gets a 504 (§13). Unset, it has as long as it needs. A live
+       * stream or a WebSocket starts answering at once and is never cut by
+       * this, however long it then stays open.
+       */
+      responseTimeout: Duration.optional(),
     })
     .prefault({}),
 });

@@ -1882,6 +1882,11 @@ async function inFrontOfAnApp() {
   const [app] = (await op('project.list', {})).result.filter((p) => p.name === 'cli-app');
   if (!app?.url) throw new Error('the cli-app is not online');
   const host = new URL(app.url).host;
+  const plain = overTls(host);
+  if (!/^alt-svc: h3=":443"/im.test(plain)) {
+    throw new Error(`HTTP/3 is not offered: ${plain.split('\r\n\r\n')[0]}`);
+  }
+  pass('the router offers HTTP/3 alongside HTTP/2 and 1.1', 'alt-svc: h3=":443"');
   const { result: current } = await op('project.get', { projectId: app.id });
   const change = async (spec) => {
     const { plan } = await op('project.update_spec', { projectId: app.id, spec });
@@ -2411,6 +2416,9 @@ try {
   }
 } catch (error) {
   console.error(`[e2e] FAILED: ${error instanceof Error ? error.message : error}`);
+  // A command that failed said why on its output, which the message leaves out.
+  const said = typeof error?.stdout === 'string' ? error.stdout.trim() : '';
+  if (said) console.error(`--- what it said ---\n${said.split('\n').slice(-40).join('\n')}`);
   try {
     // What the testbed had left, too: a failure that reads only
     // 'fetch failed' is the control plane having gone away, and the

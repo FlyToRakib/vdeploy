@@ -853,6 +853,10 @@
                           "attempts"
                         ],
                         "additionalProperties": false
+                      },
+                      "responseTimeout": {
+                        "type": "string",
+                        "pattern": "^([1-9]\\d{0,6})(ms|s|m|h)$"
                       }
                     },
                     "required": [
@@ -2077,6 +2081,10 @@
                           "attempts"
                         ],
                         "additionalProperties": false
+                      },
+                      "responseTimeout": {
+                        "type": "string",
+                        "pattern": "^([1-9]\\d{0,6})(ms|s|m|h)$"
                       }
                     },
                     "required": [

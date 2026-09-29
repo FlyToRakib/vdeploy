@@ -7,6 +7,7 @@ export interface EditableSpec {
     domains: { host: string; tls?: unknown; twin?: boolean }[];
     redirects?: MovedPath[];
     middleware?: Middleware;
+    loadBalancer?: LoadBalancer;
     [key: string]: unknown;
   };
   runtime: {
@@ -31,6 +32,33 @@ export interface EditableSpec {
   /** How the platform knows the app is up, alive and ready (§18). */
   health?: { startup?: Probe; liveness?: Probe; readiness?: Probe };
   [key: string]: unknown;
+}
+
+export interface LoadBalancer {
+  sticky?: { enabled: boolean; cookie?: string };
+  retry?: { attempts: number };
+  responseTimeout?: string;
+  [key: string]: unknown;
+}
+
+/** How long an app may take to start answering, in the choices the form offers. */
+export const WAIT_CHOICES = ['30s', '1m', '5m'] as const;
+
+/**
+ * Load balancing from the form's answers (§13). What the form does not
+ * show — the health check the router runs, a circuit breaker — is kept as
+ * it is; a retry keeps its number of attempts, and starts at two.
+ */
+export function withLoadBalancing(
+  lb: LoadBalancer | undefined,
+  answers: { sticky: boolean; retry: boolean; wait: string },
+): LoadBalancer {
+  const out: LoadBalancer = { ...lb, sticky: { ...lb?.sticky, enabled: answers.sticky } };
+  delete out.retry;
+  delete out.responseTimeout;
+  if (answers.retry) out.retry = lb?.retry ?? { attempts: 2 };
+  if (answers.wait) out.responseTimeout = answers.wait;
+  return out;
 }
 
 export interface Probe {

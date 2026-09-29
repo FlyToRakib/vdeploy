@@ -194,7 +194,7 @@ func movedPath(moved spec.MovedPath) object {
 // services renders either one service, or a weighted pair sharing traffic.
 func services(key string, n spec.Network, traffic Traffic) object {
 	if !traffic.splitting() {
-		return object{key: service(n, traffic.all())}
+		return object{key: service(key, n, traffic.all())}
 	}
 	weighted := object{"services": []object{
 		{"name": key + "-stable", "weight": 100 - traffic.Percent},
@@ -210,12 +210,12 @@ func services(key string, n spec.Network, traffic Traffic) object {
 	}
 	return object{
 		key:             object{"weighted": weighted},
-		key + "-stable": service(n, traffic.Backends),
-		key + "-new":    service(n, traffic.Canary),
+		key + "-stable": service(key, n, traffic.Backends),
+		key + "-new":    service(key, n, traffic.Canary),
 	}
 }
 
-func service(n spec.Network, backends []Backend) object {
+func service(key string, n spec.Network, backends []Backend) object {
 	servers := make([]object, 0, len(backends))
 	for _, b := range backends {
 		servers = append(servers, object{"url": "http://" + b.Container + ":" + strconv.Itoa(b.Port)})
@@ -227,7 +227,22 @@ func service(n spec.Network, backends []Backend) object {
 	if hc := n.LoadBalancer.HealthCheck; hc != nil {
 		lb["healthCheck"] = object{"path": hc.Path, "interval": hc.Interval, "timeout": hc.Timeout}
 	}
+	if n.LoadBalancer.ResponseTimeout != "" {
+		lb["serversTransport"] = key
+	}
 	return object{"loadBalancer": lb}
+}
+
+// transports carries the timeout a project's services share, if it set one.
+// Only the wait for an answer to begin is bounded: a stream, or a WebSocket,
+// has begun answering and may then stay open as long as it likes.
+func transports(key string, n spec.Network) object {
+	if n.LoadBalancer.ResponseTimeout == "" {
+		return nil
+	}
+	return object{key: object{"forwardingTimeouts": object{
+		"responseHeaderTimeout": n.LoadBalancer.ResponseTimeout,
+	}}}
 }
 
 // File renders one project's routing, or reports that it has none: no
@@ -279,11 +294,15 @@ func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Re
 			"rule": old, "service": key, "entryPoints": []string{"web"}, "middlewares": []string{name},
 		}
 	}
-	config := object{"http": object{
+	dynamic := object{
 		"routers":     routers,
 		"services":    services(key, *network, traffic),
 		"middlewares": middlewareDefs,
-	}}
+	}
+	if t := transports(key, *network); t != nil {
+		dynamic["serversTransports"] = t
+	}
+	config := object{"http": dynamic}
 	// JSON is valid YAML, and Traefik's file provider only reads .yml files.
 	out, _ := json.MarshalIndent(config, "", "  ")
 	return append(out, '\n'), true

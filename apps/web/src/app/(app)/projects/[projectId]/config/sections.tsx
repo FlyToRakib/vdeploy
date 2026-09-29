@@ -14,8 +14,10 @@ import {
   memoryWords,
   MEMORY_CHOICES,
   secretNameFor,
+  WAIT_CHOICES,
   withChecks,
   withDomains,
+  withLoadBalancing,
   withMiddleware,
   withMovedPaths,
   withTwin,
@@ -853,6 +855,93 @@ export function HealthSection() {
             hint="If this says no three times in a row, visitors go to the other copies until it says yes. It is not restarted."
           />
           {select('readyEvery', every(readiness, '10s'))}
+        </div>
+        <Button type="submit" className="justify-self-start">
+          Save
+        </Button>
+      </form>
+    </Section>
+  );
+}
+
+const WAIT_WORDS: Record<string, string> = {
+  '30s': '30 seconds',
+  '1m': 'a minute',
+  '5m': '5 minutes',
+};
+
+/** How visitors are shared between an app's copies (§13). */
+export function LoadBalancingSection() {
+  const { projectId, act } = useProject();
+  const spec = useSpec();
+  if (!spec.network) return null;
+  const lb = spec.network.loadBalancer;
+  const wait = lb?.responseTimeout ?? '';
+  const waits: string[] = [...WAIT_CHOICES];
+  if (wait && !waits.includes(wait)) waits.push(wait);
+  return (
+    <Section
+      title="Load balancing"
+      hint="How visitors are shared between the copies of this app, and how long it has to answer them."
+    >
+      <form
+        action={(form) => {
+          void act(
+            'loadbalancer.configure',
+            {
+              projectId,
+              loadBalancer: withLoadBalancing(lb, {
+                sticky: form.get('sticky') === 'on',
+                retry: form.get('retry') === 'on',
+                wait: formText(form, 'wait'),
+              }),
+            },
+            'Changing how visitors are shared',
+          );
+        }}
+        className="grid gap-4"
+      >
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="sticky"
+            defaultChecked={lb?.sticky?.enabled ?? false}
+            className="mt-1"
+          />
+          <span>
+            Keep each visitor on the same copy
+            <span className="block text-muted-foreground">
+              For apps that keep sign-ins or carts in memory rather than in a database.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" name="retry" defaultChecked={!!lb?.retry} className="mt-1" />
+          <span>
+            Try another copy when one cannot be reached
+            <span className="block text-muted-foreground">
+              Only a request that never arrived is sent again, so nothing is done twice.
+            </span>
+          </span>
+        </label>
+        <div className="grid gap-1 text-sm">
+          <label htmlFor="wait">Give up on a request that has not started answering after</label>
+          <select
+            id="wait"
+            name="wait"
+            defaultValue={wait}
+            className="h-10 justify-self-start rounded-md border border-border bg-surface-raised px-3"
+          >
+            <option value="">No limit</option>
+            {waits.map((w) => (
+              <option key={w} value={w}>
+                {WAIT_WORDS[w] ?? w}
+              </option>
+            ))}
+          </select>
+          <span className="text-muted-foreground">
+            Live streams and WebSockets start answering at once, so a limit never cuts them off.
+          </span>
         </div>
         <Button type="submit" className="justify-self-start">
           Save

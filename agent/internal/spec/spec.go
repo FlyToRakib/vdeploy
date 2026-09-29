@@ -369,6 +369,8 @@ type LoadBalancer struct {
 	Retry *struct {
 		Attempts int `json:"attempts"`
 	} `json:"retry,omitempty"`
+	// ResponseTimeout is how long a replica has to start answering.
+	ResponseTimeout string `json:"responseTimeout,omitempty"`
 }
 
 var (

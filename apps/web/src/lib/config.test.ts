@@ -6,6 +6,7 @@ import {
   specToYaml,
   withDomains,
   withChecks,
+  withLoadBalancing,
   withMemory,
   withMiddleware,
   withMovedPaths,
@@ -79,6 +80,30 @@ describe('config edits', () => {
     expect(
       withChecks(undefined, { alive: '', aliveEvery: '30s', ready: '', readyEvery: '10s' }),
     ).toEqual({});
+  });
+
+  it('shares visitors as the form says, keeping what it does not show', () => {
+    const before = {
+      algorithm: 'wrr',
+      sticky: { enabled: false, cookie: 'cart' },
+      circuitBreaker: 'NetworkErrorRatio() > 0.30',
+      retry: { attempts: 4 },
+      responseTimeout: '1m',
+    };
+    expect(withLoadBalancing(before, { sticky: true, retry: true, wait: '' })).toEqual({
+      algorithm: 'wrr',
+      sticky: { enabled: true, cookie: 'cart' },
+      circuitBreaker: 'NetworkErrorRatio() > 0.30',
+      retry: { attempts: 4 },
+    });
+    expect(withLoadBalancing(undefined, { sticky: false, retry: true, wait: '30s' })).toEqual({
+      sticky: { enabled: false },
+      retry: { attempts: 2 },
+      responseTimeout: '30s',
+    });
+    expect(
+      withLoadBalancing(before, { sticky: false, retry: false, wait: '5m' }),
+    ).not.toHaveProperty('retry');
   });
 
   it('adds a domain and keeps the settings of the ones already there', () => {
