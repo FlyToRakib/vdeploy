@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import { statSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
+import { MAX_UPLOAD_BYTES, projectName } from '@vdeploy/contracts';
 import { COMMANDS, fieldOf, findCommand, groups, type Command } from './commands.js';
 import { hint, readSettings, writeSettings } from './config.js';
 import { serve } from './mcp.js';
+import { packFolder } from './pack.js';
 import { bold, dim, renderPlan, renderResult } from './render.js';
 
 /**
@@ -147,6 +151,7 @@ function topHelp(): string {
     '  vdeploy <thing>                   what you can do to it',
     '  vdeploy login --url … --key …     point it at your VDeploy',
     '  vdeploy plan approve <id>         let a waiting change run',
+    '  vdeploy up [folder]               put a folder online, or its new version',
     '  vdeploy mcp                       serve these as tools to an AI client',
     '',
     dim("  --json on any command for the API's own answer, unchanged."),
@@ -196,6 +201,145 @@ async function call(path: string, body: unknown, method = 'POST'): Promise<unkno
     fail(problem?.message ?? `The control plane answered ${String(response.status)}.`, 3);
   }
   return parsed;
+}
+
+/** Sends an archive as the upload body, as the dashboard does. */
+async function upload(archive: Buffer): Promise<string> {
+  const settings = readSettings();
+  if (!settings) fail('This machine is not signed in to a VDeploy yet.');
+  let response: Response;
+  try {
+    response = await fetch(settings.url + '/api/v1/uploads', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/gzip',
+        'x-api-key': settings.key,
+        'user-agent': 'vdeploy-cli',
+      },
+      body: new Uint8Array(archive),
+    });
+  } catch (err) {
+    fail(
+      `Could not reach ${settings.url}.\n  ${err instanceof Error ? err.message : String(err)}`,
+      2,
+    );
+  }
+  const body = (await response.json().catch(() => null)) as {
+    uploadId?: string;
+    error?: { message?: string };
+  } | null;
+  if (!response.ok || !body?.uploadId) {
+    fail(body?.error?.message ?? `The upload was refused (${String(response.status)}).`, 3);
+  }
+  return body.uploadId;
+}
+
+/**
+ * `vdeploy up` (§30 ③): the folder you are in, online. The same upload,
+ * the same rule for what is left out, the same plan and approval as
+ * dropping the folder on the dashboard — from a terminal.
+ *
+ * A folder whose name matches an app becomes that app's next version;
+ * otherwise it becomes a new app. Either way it is built on the server,
+ * so nothing needs installing here.
+ */
+async function up(argv: string[], wantsJson: boolean) {
+  const flag = (name: string) => {
+    const at = argv.indexOf(name);
+    return at >= 0 ? argv[at + 1] : undefined;
+  };
+  const known = new Set(['--project', '--server', '--port', JSON_OUT]);
+  const unknown = argv.find((a) => a.startsWith('--') && !known.has(a));
+  if (unknown)
+    fail(
+      `vdeploy up does not know ${unknown}.\n  vdeploy up [folder] [--project <name or id>] [--server <id>] [--port <n>]`,
+    );
+  const positional = argv.filter((a, i) => !a.startsWith('--') && !argv[i - 1]?.startsWith('--'));
+  const folder = resolve(positional[0] ?? '.');
+  try {
+    if (!statSync(folder).isDirectory()) fail(`${folder} is not a folder.`);
+  } catch {
+    fail(`There is no folder at ${folder}.`);
+  }
+
+  const packed = packFolder(folder);
+  if (packed.files === 0) fail(`${folder} has nothing in it to put online.`);
+  if (packed.archive.length > MAX_UPLOAD_BYTES) {
+    fail('That is more than 200 MB even compressed. Is something large in the folder by mistake?');
+  }
+  if (!wantsJson) {
+    process.stderr.write(`Uploading ${String(packed.files)} files from ${folder}…\n`);
+    if (packed.secretsLeftOut.length) {
+      process.stderr.write(
+        dim(
+          `  Left on this computer: ${packed.secretsLeftOut.join(', ')}. Put those values in the app's settings.\n`,
+        ),
+      );
+    }
+    if (packed.linksLeftOut.length) {
+      process.stderr.write(dim(`  Links left out: ${packed.linksLeftOut.join(', ')}.\n`));
+    }
+  }
+  const uploadId = await upload(packed.archive);
+
+  const wanted = flag('--project') ?? projectName(basename(folder));
+  const projects = (
+    (await call('/api/v1/operations/project.list', { input: {} })) as {
+      result: { id: string; name: string }[];
+    }
+  ).result;
+  const existing = projects.find((p) => p.id === wanted || p.name === wanted);
+  if (!existing && flag('--project')) fail(`There is no app called ${wanted}.`);
+
+  const port = Number(flag('--port') ?? '3000');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) fail('--port wants a port number.');
+  const server = flag('--server');
+  const response = (await call(
+    `/api/v1/operations/${existing ? 'project.deploy_upload' : 'project.create'}`,
+    {
+      input: existing
+        ? { projectId: existing.id, uploadId }
+        : {
+            spec: {
+              apiVersion: 'vdeploy/v1',
+              kind: 'Application',
+              metadata: { name: wanted },
+              source: { type: 'archive', uploadId },
+              // Worked out on the server from what is in the folder (§30 ④).
+              build: { strategy: 'railpack' },
+              network: { containerPort: port },
+            },
+            ...(server ? { serverId: server } : {}),
+          },
+    },
+  )) as { status: string; plan?: { id: string } };
+  if (response.status === 'pending_approval' || !response.plan) {
+    process.stdout.write(
+      wantsJson
+        ? JSON.stringify(response, null, 2) + '\n'
+        : `Waiting for somebody to approve it: vdeploy plan approve ${response.plan?.id ?? ''}\n`,
+    );
+    process.exit(response.status === 'pending_approval' ? 5 : 0);
+  }
+  if (!wantsJson) {
+    process.stderr.write(
+      existing ? `Building it as the next version of ${existing.name}…\n` : `Building ${wanted}…\n`,
+    );
+  }
+  const plan = (await follow(response.plan.id)) as { status: string; error?: { message?: string } };
+  if (plan.status !== 'applied') {
+    fail(plan.error?.message ?? `It did not go through (${plan.status}).`, 4);
+  }
+  const after = (
+    (await call('/api/v1/operations/project.list', { input: {} })) as {
+      result: { name: string; url: string | null }[];
+    }
+  ).result.find((p) => p.name === (existing?.name ?? wanted));
+  process.stdout.write(
+    wantsJson
+      ? JSON.stringify({ plan, url: after?.url ?? null }, null, 2) + '\n'
+      : `${bold('Live')} ${after?.url ?? ''}\n`,
+  );
 }
 
 async function follow(planId: string): Promise<unknown> {
@@ -270,6 +414,11 @@ async function main(argv: string[]) {
             : 'Accepted and running.',
       };
     });
+    return;
+  }
+
+  if (argv[0] === 'up') {
+    await up(argv.slice(1), wantsJson);
     return;
   }
 

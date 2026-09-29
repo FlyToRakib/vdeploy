@@ -7,6 +7,43 @@ export const LocalImageId = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 /** The largest source upload, compressed. */
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 
+/** Folders never uploaded: rebuilt on the server, or not the app at all. */
+const SKIPPED = new Set(['node_modules', '.git', '.next', '.nuxt', '.venv', 'venv', '__pycache__']);
+
+/**
+ * What happens to one file of a folder being uploaded, by its path inside
+ * the folder — the same rule for the dashboard and `vdeploy up`. Secrets
+ * files stay on the computer: their values belong in the app's settings,
+ * where they are stored encrypted, not in an archive that gets built.
+ */
+export function uploadRule(path: string): 'keep' | 'skip' | 'secret' {
+  const parts = path.split('/');
+  if (parts.some((p) => SKIPPED.has(p)) || parts.at(-1) === '.DS_Store') return 'skip';
+  const file = parts.at(-1) ?? '';
+  if (/^\.env(\..+)?$/.test(file) && !file.endsWith('.example')) return 'secret';
+  return 'keep';
+}
+
+/** A folder, repository or image name as a project name: lowercase letters, digits and hyphens. */
+export function projectName(from: string): string {
+  // The last path segment, without an archive extension or an image tag or digest.
+  const base = from
+    .replace(/\.(zip|tar\.gz|tgz)$/i, '')
+    .split('/')
+    .filter(Boolean)
+    .at(-1)
+    ?.replace(/[:@].*$/, '');
+  const slug = (base ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 63)
+    .replace(/-$/, '');
+  if (!slug) return 'my-app';
+  return /^[a-z]/.test(slug) ? slug : `app-${slug}`.slice(0, 63);
+}
+
 export const BuildStatus = z.enum(['queued', 'running', 'succeeded', 'failed']);
 export type BuildStatus = z.infer<typeof BuildStatus>;
 

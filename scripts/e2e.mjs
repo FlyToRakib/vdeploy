@@ -24,7 +24,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { crc32 } from 'node:zlib';
 import { join } from 'node:path';
@@ -623,6 +623,8 @@ async function run() {
   await previewOfAPullRequest(fromGithubId);
   await stagingAndPromote(fromGithubId);
   await aPluginKey();
+  await vdeployUp();
+  await agentUpdatesItself(server.serverId);
   await secondServer(server.serverId);
 
   const from = new Date(Date.now() - 3600_000).toISOString();
@@ -1870,6 +1872,97 @@ async function aPluginKey() {
 }
 
 /**
+ * An agent becomes the build its control plane serves (§25), on its own:
+ * the control plane is given a different build to serve — bytes after an
+ * ELF binary are ignored when it runs, so this one works and has another
+ * hash — and restarted, as an upgrade would. The connected agent is asked
+ * to update, downloads it, checks it, swaps itself and comes back as it.
+ */
+async function agentUpdatesItself(serverId) {
+  const { result: before } = await op('server.status', { serverId });
+  const arch = before.arch ?? 'amd64';
+  const file = `/app/agent/vd-agent-linux-${arch}`;
+  inTestbed(
+    `docker exec -u root cp-api sh -c 'printf "\\n# a newer build" >> ${file}' && docker restart cp-api >/dev/null`,
+  );
+  const served = inTestbed(`docker exec cp-api sha256sum ${file}`).split(/\s+/)[0];
+  const running = await until(
+    'the agent became the build served',
+    async () => {
+      const onDisk = inTestbed('sha256sum /usr/local/bin/vd-agent').split(/\s+/)[0];
+      return onDisk === served ? onDisk : null;
+    },
+    240_000,
+  );
+  await until(
+    'it came back as that build',
+    async () => {
+      try {
+        const { result } = await op('server.status', { serverId });
+        return result.status === 'online' && result.agent.state === 'current' ? result : null;
+      } catch {
+        return null; // the control plane is still starting
+      }
+    },
+    180_000,
+  );
+  pass(
+    'the agent updated itself to the build its control plane serves, checked, and came back',
+    running.slice(0, 12),
+  );
+}
+
+/**
+ * `vdeploy up` (§30 ③): a folder online from a terminal, with a key of
+ * the least scope that can do it, through the built CLI exactly as a
+ * person would run it. The folder carries a .env the app would notice if
+ * it were uploaded; it must stay on this computer.
+ */
+async function vdeployUp() {
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const { result: key } = await op('api_key.create', { name: 'e2e-cli', scope: 'deploy' });
+  const parent = mkdtempSync(join(tmpdir(), 'vdeploy-e2e-cli-'));
+  const folder = join(parent, 'cli-app');
+  mkdirSync(folder);
+  writeFileSync(
+    join(folder, 'package.json'),
+    JSON.stringify({ name: 'cli-app', version: '1.0.0', scripts: { start: 'node index.js' } }),
+  );
+  writeFileSync(
+    join(folder, 'index.js'),
+    `const leaked = require('fs').existsSync('.env');
+require('http').createServer((q, s) => s.end(leaked ? 'leaked\\n' : 'cli ok\\n')).listen(process.env.PORT || 3000);
+`,
+  );
+  writeFileSync(join(folder, '.env'), 'SECRET_TOKEN=must-not-leave-this-computer\n');
+  let out;
+  try {
+    out = execFileSync(process.execPath, [`${root}apps/cli/dist/main.js`, 'up', folder], {
+      encoding: 'utf8',
+      env: { ...process.env, VDEPLOY_URL: API, VDEPLOY_API_KEY: key.key },
+      timeout: 1_500_000,
+    });
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+  const url = /Live (https:\/\/\S+)/.exec(out)?.[1];
+  if (!url) throw new Error(`vdeploy up did not say where it is live: ${out}`);
+  const host = new URL(url).host;
+  const body = await until(
+    'the app vdeploy up put online',
+    async () => {
+      const answer = overTls(host);
+      if (answer.includes('leaked')) throw new Error('the .env was uploaded');
+      return answer.includes('cli ok') ? answer : null;
+    },
+    180_000,
+  );
+  pass('vdeploy up: a folder online from a terminal, its .env left on the computer', url);
+  await op('api_key.revoke', { keyId: key.id });
+  return body;
+}
+
+/**
  * Builds on the server (§15, M2 2.7): upload a source with no Dockerfile,
  * preview what auto-detect finds, then deploy it — Railpack works out how to
  * build it, a capped rootless BuildKit builds it on the server, and the
@@ -1966,8 +2059,8 @@ async function buildFromSource(serverId) {
 const INSTANT_HOST = 'hello.apps.vdeploy.test';
 
 /** One HTTPS request to Traefik with the given SNI and Host; returns the raw response. */
-function overTls(host) {
-  const request = `GET / HTTP/1.1\\r\\nHost: ${host}\\r\\nConnection: close\\r\\n\\r\\n`;
+function overTls(host, path = '/', headers = '') {
+  const request = `GET ${path} HTTP/1.1\\r\\nHost: ${host}\\r\\n${headers}Connection: close\\r\\n\\r\\n`;
   return inTestbed(
     `printf '${request}' | timeout 5 openssl s_client -quiet -servername ${host} -connect 127.0.0.1:443 2>/dev/null || true`,
   );

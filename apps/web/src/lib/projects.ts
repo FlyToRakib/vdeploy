@@ -1,3 +1,4 @@
+import { uploadRule } from '@vdeploy/contracts';
 import type { Health } from '@/components/ui/status';
 
 export type ProjectHealth = 'live' | 'deploying' | 'failing' | 'down' | 'stopped' | 'new';
@@ -94,13 +95,9 @@ export function describeDetection(detection: unknown): DetectionSummary {
   };
 }
 
-/** Folders never uploaded: rebuilt on the server, or not the app at all. */
-const SKIPPED = new Set(['node_modules', '.git', '.next', '.nuxt', '.venv', 'venv', '__pycache__']);
-
 /**
- * Which files of a chosen folder to upload, relative to the folder. Secrets
- * files stay on the computer: their values belong in the app's settings,
- * where they are stored encrypted.
+ * Which files of a chosen folder to upload, relative to the folder, by the
+ * rule `vdeploy up` follows too.
  */
 export function uploadPlan(paths: readonly string[]): { keep: string[]; secretsLeftOut: string[] } {
   const keep: string[] = [];
@@ -109,34 +106,11 @@ export function uploadPlan(paths: readonly string[]): { keep: string[]; secretsL
     // The browser gives "folder/sub/file"; the archive holds "sub/file".
     const path = full.split('/').slice(1).join('/');
     if (!path) continue;
-    const parts = path.split('/');
-    if (parts.some((p) => SKIPPED.has(p)) || parts.at(-1) === '.DS_Store') continue;
-    const file = parts.at(-1) ?? '';
-    if (/^\.env(\..+)?$/.test(file) && !file.endsWith('.example')) {
-      secretsLeftOut.push(path);
-      continue;
-    }
-    keep.push(path);
+    const rule = uploadRule(path);
+    if (rule === 'secret') secretsLeftOut.push(path);
+    else if (rule === 'keep') keep.push(path);
   }
   return { keep, secretsLeftOut };
 }
 
-/** A folder or repository name as a project name: lowercase letters, digits and hyphens. */
-export function projectName(from: string): string {
-  // The last path segment, without an archive extension or an image tag or digest.
-  const base = from
-    .replace(/\.(zip|tar\.gz|tgz)$/i, '')
-    .split('/')
-    .filter(Boolean)
-    .at(-1)
-    ?.replace(/[:@].*$/, '');
-  const slug = (base ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 63)
-    .replace(/-$/, '');
-  if (!slug) return 'my-app';
-  return /^[a-z]/.test(slug) ? slug : `app-${slug}`.slice(0, 63);
-}
+export { projectName } from '@vdeploy/contracts';

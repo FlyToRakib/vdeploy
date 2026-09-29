@@ -187,7 +187,13 @@ each is one task, one commit.
   made, none printed, answering), install again (keys and owner kept),
   upgrade (a real dump first, owner still there), and rollback (a change
   made after the dump is gone) — 4 checks, passed. ShellCheck is clean
-- [ ] `vdeploy up` from a local folder (§30 ③)
+- [x] **`vdeploy up` from a local folder (§30 ③)**: the folder is packed
+  on the spot, under the same rule the dashboard's drop uses for what is
+  left out (`.env` files stay on the computer and are named, as do
+  links), uploaded, and planned like any change — a folder named after an
+  app becomes its next version, anything else a new app. The end-to-end
+  run puts a folder online this way with a deploy-scoped key and reads
+  the app back over TLS
 
 **Routing (§13)**
 - [x] **www↔apex, on by default (§30 ⑤)**: every domain also answers at
