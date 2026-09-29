@@ -58,12 +58,16 @@ describe('whether a dump can be loaded here', () => {
     expect(dumpRefusal(maria, { engine: 'mysql', version: '8.4' })).toBeNull();
   });
 
-  it('refuses what cannot be sent to a running server at all', () => {
+  it('takes each engine its own kind of dump, and says what that is', () => {
     const rdb = sniffDump(Buffer.from('REDIS0011', 'latin1'));
-    expect(dumpRefusal(rdb, { engine: 'redis', version: '8' })).toContain('when it starts');
-    expect(dumpRefusal(sniffDump(Buffer.from([0x1f, 0x8b])), postgres18)).toContain(
-      'Unpack it',
-    );
+    expect(dumpRefusal(rdb, { engine: 'redis', version: '8' })).toBeNull();
+    expect(dumpRefusal(rdb, postgres18)).toContain('Redis dump');
+    const archive = sniffDump(Buffer.from([0x1f, 0x8b, 0x08]));
+    expect(dumpRefusal(archive, { engine: 'mongodb', version: '8' })).toBeNull();
+    const sql = sniffDump(Buffer.from('CREATE TABLE t (id int);'));
+    expect(dumpRefusal(sql, { engine: 'mongodb', version: '8' })).toContain('mongodump');
+    expect(dumpRefusal(sql, { engine: 'redis', version: '8' })).toContain('.rdb');
+    expect(dumpRefusal(sniffDump(Buffer.from([0x1f, 0x8b])), postgres18)).toContain('Unpack it');
   });
 
   it('takes an archive into object storage, and nothing else', () => {

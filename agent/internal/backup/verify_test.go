@@ -150,17 +150,23 @@ func TestAnEngineThatNeverComesUpIsSaidPlainly(t *testing.T) {
 	}
 }
 
-func TestCheckingAnEngineWeCannotQueryIsRefusedBeforeAnythingIsMade(t *testing.T) {
-	engine := verifyEngine("14")
+func TestARedisDumpIsProvedByRedisReadingAllOfIt(t *testing.T) {
+	engine := redisEngine(true)
 	runner := &Runner{Engine: engine, Open: opener()}
 	req := verifyRequest()
-	req.Engine = "redis"
+	req.Engine, req.Image = "redis", "redis:8"
 	result := runner.Verify(context.Background(), req)
-	if result.OK || !strings.Contains(result.Error, "not supported yet") {
+	if !result.OK || result.Tables == nil || *result.Tables != 42 {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(engine.created) != 0 {
-		t.Fatalf("something was made anyway: %+v", engine.created)
+	// Nothing stood up, nothing reachable: the file, read where it lies.
+	if len(engine.created) != 0 || engine.runs[0].Network != "none" {
+		t.Fatalf("created %+v, run %+v", engine.created, engine.runs[0])
+	}
+	req.Engine = "cassandra"
+	if refused := runner.Verify(context.Background(), req); refused.OK ||
+		!strings.Contains(refused.Error, "not supported") {
+		t.Fatalf("refused = %+v", refused)
 	}
 }
 

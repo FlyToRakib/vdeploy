@@ -323,7 +323,9 @@ export function backupFileName(name: string, engine: DatabaseEngine, at: Date): 
         ? 'dump'
         : engine === 's3'
           ? 'tar.gz'
-          : 'sql';
+          : engine === 'mongodb'
+            ? 'archive.gz'
+            : 'sql';
   return `${name.replace(/[^A-Za-z0-9._-]/g, '-')}-${stamp}.${suffix}`;
 }
 

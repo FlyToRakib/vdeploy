@@ -277,6 +277,14 @@ func (c *Client) Stop(ctx context.Context, id string, timeoutSeconds int) error 
 	return c.do(ctx, http.MethodPost, "/containers/"+url.PathEscape(id)+"/stop", query, nil, nil)
 }
 
+// Kill ends a container at once, with no chance to write anything on the
+// way out — what putting a Redis dump back needs, since Redis saves over
+// its dump file when it is stopped politely.
+func (c *Client) Kill(ctx context.Context, id string) error {
+	query := url.Values{"signal": {"KILL"}}
+	return c.do(ctx, http.MethodPost, "/containers/"+url.PathEscape(id)+"/kill", query, nil, nil)
+}
+
 // Remove deletes a stopped container. Its named volumes are kept.
 func (c *Client) Remove(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/containers/"+url.PathEscape(id), nil, nil, nil)

@@ -299,6 +299,23 @@ each is one task, one commit.
   you bring is the project's Object storage section — presets for S3, R2,
   B2 and Spaces — storing the key as a secret and the same five settings
   in one deploy. A compose file's `minio/minio` imports as this engine
+- [x] **every engine backed up, checked and put back (§17.4, §17.5)**:
+  found on the way that MongoDB was never backed up (4.2a waited for a
+  safe way to pass its password), Redis backups could not be put back
+  (4.2b), and the weekly check, queued for every engine, failed each week
+  for both. MongoDB's tools now read the password from a config file the
+  helper writes from its environment — on no command line — and dump the
+  app's database alone: checked against mongo:8, dumping everything took
+  the admin users with it, and a restore replaced the target's own
+  login. A restore maps whatever database it came from into the target,
+  replacing each collection, and the check restores into a throwaway and
+  counts collections with mongosh reading the password from its
+  environment. A Redis dump is checked with Redis's own redis-check-rdb —
+  every checksum, and how many keys — and put back by placing it where
+  Redis loads it, ending that Redis outright (stopping it politely would
+  save over the file) and starting it on the dump; a damaged file never
+  reaches the database. Imports take each engine's own kind of file and
+  say which that is
 - [x] **managed Redis ran without its password**: found on the way that
   the official image reads no password from its environment, so the
   generated one was handed over and never asked for — Redis answered

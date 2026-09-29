@@ -81,16 +81,28 @@ export function dumpRefusal(
   if (!facts.format) {
     return 'That file is not a database dump VDeploy can read. Export it with pg_dump, mysqldump, or as plain SQL.';
   }
+  // Engines whose dumps are a format of their own take that and nothing else;
+  // what is inside is checked on the server before anything is replaced.
   if (target.engine === 's3') {
     return facts.format === 'gzip'
       ? null
       : 'Object storage takes an archive of a store, as VDeploy backs one up — not a database dump.';
   }
+  if (target.engine === 'mongodb') {
+    return facts.format === 'gzip'
+      ? null
+      : 'MongoDB takes an archive made with mongodump --archive --gzip.';
+  }
+  if (target.engine === 'redis') {
+    return facts.format === 'redis-rdb'
+      ? null
+      : 'Redis takes a dump Redis made: an .rdb file, such as from redis-cli --rdb.';
+  }
   if (facts.format === 'gzip') {
     return 'That file is compressed. Unpack it (gunzip) and upload the dump inside.';
   }
   if (facts.format === 'redis-rdb') {
-    return 'A Redis dump is a file the server loads when it starts, not something that can be sent to a running one.';
+    return `That is a Redis dump, and ${target.engine} cannot read it.`;
   }
   if (facts.format === 'postgres-custom' && target.engine !== 'postgres') {
     return `That is a PostgreSQL dump, and ${target.engine} cannot read it.`;

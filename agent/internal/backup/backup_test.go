@@ -24,6 +24,7 @@ type fakeEngine struct {
 	gone         []string
 	created      []compose.Container
 	started      []string
+	killed       []string
 	managed      []docker.Container
 	folders      string
 	foldersErr   error
@@ -148,6 +149,11 @@ func (f *fakeEngine) Create(_ context.Context, ct compose.Container) (string, er
 	return ct.Name, nil
 }
 
+func (f *fakeEngine) Kill(_ context.Context, id string) error {
+	f.killed = append(f.killed, id)
+	return nil
+}
+
 func (f *fakeEngine) Start(_ context.Context, id string) error {
 	f.started = append(f.started, id)
 	return f.startErr
@@ -263,13 +269,37 @@ func TestAFailedDumpSaysSoAndNamesNoPassword(t *testing.T) {
 	}
 }
 
-func TestAnEngineWithoutASafePasswordPathIsRefusedPlainly(t *testing.T) {
+func TestMongoIsDumpedWithItsPasswordInAFileOnlyTheToolReads(t *testing.T) {
 	req := request()
-	req.Engine = "mongodb"
-	runner := &Runner{Engine: &fakeEngine{}, Open: opener()}
+	req.Engine, req.Port, req.DBName = "mongodb", 27017, "shop"
+	req.Credentials = []Credential{{Key: "MONGO_INITDB_ROOT_PASSWORD", Version: 1, Sealed: "sealed:hunter2"}}
+	engine := &fakeEngine{checked: checked("2048", "\x1f\x8b\x08\x00")}
+	runner := &Runner{Engine: engine, Open: opener()}
 	result := runner.Take(context.Background(), req)
-	if result.OK || !strings.Contains(result.Error, "not supported yet") {
-		t.Fatalf("mongodb should be refused in words: %+v", result)
+	if !result.OK || !result.Verified {
+		t.Fatalf("result = %+v", result)
+	}
+	dump := engine.runs[0]
+	line := strings.Join(append(append([]string{}, dump.Entrypoint...), dump.Cmd...), " ")
+	if strings.Contains(line, "hunter2") || !slices.Contains(dump.Env, "MONGO_PASSWORD=hunter2") {
+		t.Fatalf("the password is not where only the tool reads it: %q %v", line, dump.Env)
+	}
+	// The app's database alone: the admin users are the target's own.
+	if !strings.Contains(line, `--db "$4"`) || !slices.Contains(dump.Cmd, "shop") ||
+		!strings.Contains(line, `--config="$C"`) {
+		t.Fatalf("dump = %q", line)
+	}
+	// Restored into whichever database it goes to, replacing each collection.
+	restore := restoreRequest()
+	restore.Engine, restore.DBName = "mongodb", "shop-copy"
+	steps, err := restorePlan(restore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := strings.Join(steps.args, " ")
+	if !strings.Contains(script, `--drop --nsFrom='$db$.$coll$' --nsTo="$4"'.$coll$'`) ||
+		!slices.Contains(steps.args, "shop-copy") {
+		t.Fatalf("restore = %q", script)
 	}
 }
 
@@ -347,13 +377,49 @@ func TestAFailedRestoreSaysNothingWasChanged(t *testing.T) {
 	}
 }
 
-func TestRedisRestoreIsRefusedInWords(t *testing.T) {
+// redisEngine answers redis-check-rdb with a sound file of that many keys,
+// and runs the database's Redis as a managed container.
+func redisEngine(sound bool) *fakeEngine {
+	engine := &fakeEngine{managed: []docker.Container{
+		{ID: "redis1", Name: "vd-db-01j9z3q8s7m2k4x6v1b5n0c9d8", State: "running"},
+	}}
+	engine.dump = func(h docker.Helper) (int, string, error) {
+		if strings.HasSuffix(h.Name, "-rdb") {
+			if !sound {
+				return 1, "--- RDB ERROR DETECTED ---\n", nil
+			}
+			return 0, "\\o/ RDB looks OK! \\o/\n[info] 42 keys read\n", nil
+		}
+		return 0, "", nil
+	}
+	return engine
+}
+
+func TestARedisDumpGoesWhereRedisLoadsItAndRedisStartsOnIt(t *testing.T) {
 	req := restoreRequest()
-	req.Engine = "redis"
-	runner := &Runner{Engine: &fakeEngine{}, Open: opener()}
+	req.Engine, req.Image, req.FileName = "redis", "redis:8", "cache-2026-09-24.rdb"
+	engine := redisEngine(true)
+	runner := &Runner{Engine: engine, Open: opener()}
 	result := runner.Restore(context.Background(), req)
-	if result.OK || !strings.Contains(result.Error, "not supported yet") {
-		t.Fatalf("redis restore should be refused in words: %+v", result)
+	if !result.OK || !strings.Contains(result.Log, "42 keys") {
+		t.Fatalf("result = %+v", result)
+	}
+	put := engine.runs[1]
+	if put.Volumes[compose.DatabaseVolume(req.DatabaseID)] != "/data" || put.Network != "none" ||
+		!strings.Contains(put.Cmd[0], "mv /data/dump.rdb.vdeploy /data/dump.rdb") {
+		t.Fatalf("put = %+v", put)
+	}
+	// Ended outright, so it cannot save over the file, then started on it.
+	if !slices.Equal(engine.killed, []string{"redis1"}) || !slices.Equal(engine.started, []string{"redis1"}) {
+		t.Fatalf("killed %v, started %v", engine.killed, engine.started)
+	}
+
+	damaged := redisEngine(false)
+	runner = &Runner{Engine: damaged, Open: opener()}
+	result = runner.Restore(context.Background(), req)
+	if result.OK || !strings.Contains(result.Error, "nothing was changed") ||
+		len(damaged.runs) != 1 || len(damaged.killed) != 0 {
+		t.Fatalf("a damaged dump reached the database: %+v, runs %d", result, len(damaged.runs))
 	}
 }
 

@@ -125,6 +125,8 @@ type Engine interface {
 	RemoveNetwork(ctx context.Context, name string) error
 	Create(ctx context.Context, ct compose.Container) (string, error)
 	Start(ctx context.Context, id string) error
+	// Kill ends a container with no chance to write on the way out.
+	Kill(ctx context.Context, id string) error
 	RemoveWithVolumes(ctx context.Context, id string) error
 	ListManaged(ctx context.Context) ([]docker.Container, error)
 }
@@ -183,12 +185,34 @@ func planFor(req Request) (plan, error) {
 			passwordKey: "REDISCLI_AUTH", // #nosec G101 -- a variable name, not a password
 			magic:       "REDIS",
 		}, nil
+	case "mongodb":
+		// Only the app's own database: the users in admin are the target's
+		// own, and a restore must never replace them.
+		return plan{
+			entrypoint: []string{"/bin/sh", "-c"},
+			args: []string{
+				mongoConfig + `exec mongodump --config="$C" --host "$1" --port "$2" --username "$3" ` +
+					`--authenticationDatabase admin --db "$4" --archive="$5" --gzip`,
+				"sh", host, port, req.User, req.DBName, file,
+			},
+			passwordKey: mongoPasswordKey,
+			magic:       "\x1f\x8b",
+		}, nil
 	default:
-		// Mongo's client takes its password as an argument, where every process
-		// on the server could read it. It waits for a way to pass it safely.
-		return plan{}, fmt.Errorf("backups of %s are not supported yet", req.Engine)
+		return plan{}, fmt.Errorf("backups of %s are not supported", req.Engine)
 	}
 }
+
+/*
+Mongo's tools take a password as an argument, where every process on the
+server could read it, or from a config file. So the helper writes one that
+only it can read, from the environment, and points the tool at it.
+*/
+const mongoConfig = `umask 077 && C=/tmp/vdeploy-mongo.yaml && ` +
+	`printf 'password: "%s"\n' "$MONGO_PASSWORD" > "$C" && `
+
+// mongoPasswordKey is where a Mongo helper finds the password.
+const mongoPasswordKey = "MONGO_PASSWORD" // #nosec G101 -- a variable name, not a password
 
 /*
 check reads back what was written: the size, the hash, and the first bytes,
@@ -441,10 +465,21 @@ func restorePlan(req RestoreRequest) (plan, error) {
 			args:        []string{`exec mysql -h "$H" -P "$P" -u "$U" "$D" < "$F"`},
 			passwordKey: "MYSQL_PWD", // #nosec G101 -- a variable name, not a password
 		}, nil
+	case "mongodb":
+		// Whatever database the dump was taken from goes into this one, and
+		// --drop replaces each collection rather than adding to it.
+		return plan{
+			entrypoint: []string{"/bin/sh", "-c"},
+			args: []string{
+				mongoConfig + `exec mongorestore --config="$C" --host "$1" --port "$2" --username "$3" ` +
+					`--authenticationDatabase admin --drop --nsFrom='$db$.$coll$' --nsTo="$4"'.$coll$' ` +
+					`--archive="$5" --gzip`,
+				"sh", host, port, req.User, req.DBName, file,
+			},
+			passwordKey: mongoPasswordKey,
+		}, nil
 	default:
-		// A Redis dump is a file the server loads at startup, not something a
-		// client can send over the wire.
-		return plan{}, fmt.Errorf("restoring %s is not supported yet", req.Engine)
+		return plan{}, fmt.Errorf("restoring %s is not supported", req.Engine)
 	}
 }
 
@@ -456,8 +491,11 @@ func (r *Runner) Restore(ctx context.Context, req RestoreRequest) RestoreResult 
 	if !safeName.MatchString(req.FileName) {
 		return fail("the backup file name is not allowed", "")
 	}
-	if req.Engine == "s3" {
+	switch req.Engine {
+	case "s3":
 		return r.restoreObjects(ctx, req)
+	case "redis":
+		return r.restoreRedis(ctx, req)
 	}
 	steps, err := restorePlan(req)
 	if err != nil {

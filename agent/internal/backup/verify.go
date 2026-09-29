@@ -92,10 +92,23 @@ func countScript(engine string) (plan, error) {
 			},
 			passwordKey: "MYSQL_PWD", // #nosec G101 -- a variable name, not a password
 		}, nil
+	case "mongodb":
+		return plan{
+			entrypoint: []string{"/bin/sh", "-c"},
+			args: []string{
+				`exec mongosh --quiet --host "$H" --port "$P" --eval ` +
+					`'` + mongoAuth + `print(db.getSiblingDB(process.env.D).getCollectionNames().length)'`,
+			},
+			passwordKey: mongoPasswordKey,
+		}, nil
 	default:
-		return plan{}, fmt.Errorf("checking a %s backup is not supported yet", engine)
+		return plan{}, fmt.Errorf("checking a %s backup is not supported", engine)
 	}
 }
+
+// mongoAuth signs mongosh in from its own environment: the password is
+// never part of the command.
+const mongoAuth = `db.getSiblingDB("admin").auth(process.env.U, process.env.MONGO_PASSWORD); `
 
 // readyScript is the engine's own way of saying it is accepting connections.
 func readyScript(engine string) (plan, error) {
@@ -112,8 +125,19 @@ func readyScript(engine string) (plan, error) {
 			args:        []string{`exec mysqladmin ping -h "$H" -P "$P" -u "$U" --silent`},
 			passwordKey: "MYSQL_PWD", // #nosec G101 -- a variable name, not a password
 		}, nil
+	case "mongodb":
+		// The engine's first start runs on localhost only, so a sign-in
+		// from outside succeeds only once it is really up.
+		return plan{
+			entrypoint: []string{"/bin/sh", "-c"},
+			args: []string{
+				`exec mongosh --quiet --host "$H" --port "$P" --eval ` +
+					`'` + mongoAuth + `quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1)'`,
+			},
+			passwordKey: mongoPasswordKey,
+		}, nil
 	default:
-		return plan{}, fmt.Errorf("checking a %s backup is not supported yet", engine)
+		return plan{}, fmt.Errorf("checking a %s backup is not supported", engine)
 	}
 }
 
@@ -126,9 +150,13 @@ func (r *Runner) Verify(ctx context.Context, req VerifyRequest) VerifyResult {
 	if !safeName.MatchString(req.FileName) {
 		return fail("the backup file name is not allowed", "")
 	}
-	// A store's backup is proved by reading it back; there are no tables.
-	if req.Engine == "s3" {
+	// Neither has tables: a store's backup and a Redis dump are proved by
+	// reading every byte of them back.
+	switch req.Engine {
+	case "s3":
 		return r.verifyObjects(ctx, req)
+	case "redis":
+		return r.verifyRedis(ctx, req)
 	}
 	count, err := countScript(req.Engine)
 	if err != nil {
