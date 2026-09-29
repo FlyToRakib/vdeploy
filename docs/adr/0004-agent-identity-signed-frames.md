@@ -36,6 +36,7 @@ authority.
 - No CA to operate. Rotating the control-plane key means re-pinning it on
   each agent through a frame signed by the old key; that is not built, and
   a control-plane key that must change today means enrolling again.
+- `docs/vdeploy.md` §25 is illustrative on mTLS; this ADR is normative.
 
 ## Addendum — agent keys rotate (2026-09-29)
 
@@ -54,4 +55,3 @@ backup taken before the rotation knows only that one, so a hello it
 refuses is tried once more with the previous key, and on that
 connection the agent offers its current key again: the ordinary
 rotation then finishes, and the restore never locks a server out.
-- `docs/vdeploy.md` §25 is illustrative on mTLS; this ADR is normative.
