@@ -2,6 +2,7 @@
 # Installs, upgrades, backs up and rolls back VDeploy's control plane (§34.1).
 #
 #   ./deploy/vdeploy.sh install --url https://vdeploy.example.com
+#   ./deploy/vdeploy.sh install --url … --no-build   # images already loaded here
 #   ./deploy/vdeploy.sh upgrade        # a dump first, then the new version
 #   ./deploy/vdeploy.sh backup         # a dump, checked, beside this file
 #   ./deploy/vdeploy.sh rollback       # the version and the data from before the last upgrade
@@ -54,9 +55,13 @@ dump() {
 
 install() {
   url=''
+  build=--build
   while [ $# -gt 0 ]; do
     case "$1" in
       --url) url=${2:-}; shift 2 ;;
+      # Images built elsewhere and loaded here (docker load): a small server
+      # busy with other apps is spared the compiling.
+      --no-build) build=--no-build; shift ;;
       *) fail "unknown option $1" ;;
     esac
   done
@@ -78,7 +83,7 @@ install() {
     say 'Made deploy/.env with new keys. Copy it somewhere that is not this server:'
     say 'without SECRETS_KEY no stored secret can be opened again, by anybody.'
   fi
-  compose up -d --build
+  compose up -d "$build"
   wait_ready || fail 'it started but is not answering; the lines above are what the API said.'
   public=$(sed -n 's/^PUBLIC_URL=//p' "$here/.env")
   say ''
