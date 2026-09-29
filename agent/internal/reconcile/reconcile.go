@@ -79,6 +79,9 @@ type Report struct {
 	Usage *metrics.Usage `json:"usage,omitempty"`
 	// Health is what the server is made of (§18), on its own slower pace.
 	Health *health.Report `json:"health,omitempty"`
+	// nextProbe is when the soonest liveness or readiness check falls due;
+	// zero when none is configured. The loop's pace, not the control plane's business.
+	nextProbe time.Duration
 }
 
 // SecretSource opens a secret value sealed to this server for one project.

@@ -22,6 +22,7 @@ export async function diagnoseProject(
   return diagnose({
     containerPort: spec.network?.containerPort ?? null,
     memoryLimit: spec.runtime.resources.memory.limit,
+    readinessPath: spec.health.readiness?.path ?? null,
     evidence: entry?.evidence ?? [],
   });
 }

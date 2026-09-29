@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   newId,
+  readSpec,
   VDeployError,
   type ChannelConfig,
   type DeliveryView,
@@ -304,9 +305,13 @@ export async function notifyFromReport(
   for (const project of rows) {
     const evidence = troubled.find((p) => p.projectId === project.id)?.evidence ?? [];
     const oom = evidence.some((e) => e.oomKilled);
+    // Through the schema, as everywhere a stored spec is read: a section
+    // added after this one was written is filled in rather than missing.
+    const spec = readSpec(project.spec);
     const causes = diagnose({
-      containerPort: project.spec.network?.containerPort ?? null,
-      memoryLimit: project.spec.runtime.resources.memory.limit,
+      containerPort: spec.network?.containerPort ?? null,
+      memoryLimit: spec.runtime.resources.memory.limit,
+      readinessPath: spec.health.readiness?.path ?? null,
       evidence,
     });
     // A crash loop's diagnosis quotes the app's own output, which can hold
@@ -322,7 +327,7 @@ export async function notifyFromReport(
         message: named
           ? `${named.plain}\n\nWhat to do: ${named.fix}`
           : oom
-            ? `${project.name} needed more than its ${project.spec.runtime.resources.memory.limit} memory limit and was stopped.`
+            ? `${project.name} needed more than its ${spec.runtime.resources.memory.limit} memory limit and was stopped.`
             : `${project.name} keeps stopping right after it starts. Its logs say why.`,
         projectId: project.id,
         serverId,

@@ -121,24 +121,33 @@ func (l *Loop) accept(frame []byte) error {
 	return nil
 }
 
-// pass runs one reconciliation and reports whether the server is still settling.
-func (l *Loop) pass(ctx context.Context) bool {
+// pass runs one reconciliation and says how soon the next one is wanted:
+// every couple of seconds while something settles, when the next health
+// check falls due if that is sooner than the interval, and otherwise the
+// interval.
+func (l *Loop) pass(ctx context.Context) time.Duration {
 	if l.current == nil {
-		return false
+		return l.Interval
 	}
 	passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), passTimeout)
 	defer cancel()
 	report, err := l.Reconciler.Reconcile(passCtx, l.current)
 	if err != nil {
 		l.Reconciler.Log.Warn("reconcile pass failed", "err", err)
-		return false
+		return l.Interval
 	}
 	select {
 	case l.Reports <- report:
 	default:
 		l.Reconciler.Log.Warn("report dropped: nobody is listening")
 	}
-	return report.Settling
+	switch {
+	case report.Settling:
+		return min(settleInterval, l.Interval)
+	case report.nextProbe > 0:
+		return min(report.nextProbe, l.Interval)
+	}
+	return l.Interval
 }
 
 // Run converges until ctx is cancelled.
@@ -148,14 +157,7 @@ func (l *Loop) Run(ctx context.Context) error {
 	}
 	ticker := time.NewTicker(l.Interval)
 	defer ticker.Stop()
-	// While settling, pass every couple of seconds; otherwise on the interval.
-	pace := func(settling bool) {
-		if settling {
-			ticker.Reset(min(settleInterval, l.Interval))
-		} else {
-			ticker.Reset(l.Interval)
-		}
-	}
+	pace := func(next time.Duration) { ticker.Reset(next) }
 	pace(l.pass(ctx))
 	for {
 		select {

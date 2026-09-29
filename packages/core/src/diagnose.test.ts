@@ -45,6 +45,24 @@ describe('diagnose', () => {
     expect(conditionOf(replica({ listening: null }))).toEqual([]);
   });
 
+  it('says an app failing its readiness check is waiting, not broken, and not crashed', () => {
+    const [d, ...rest] = diagnose({
+      containerPort: 3000,
+      memoryLimit: '512Mi',
+      readinessPath: '/ready',
+      // Listening where it should: the platform can reach it, the app says no.
+      evidence: [replica({ state: 'not_ready', listening: ['0.0.0.0:3000'] })],
+    });
+    expect(rest).toEqual([]);
+    expect(d?.condition).toBe('readiness_failing');
+    expect(d?.plain).toMatch(/says it is not ready at \/ready, so it gets no visitors/);
+    expect(d?.plain).toMatch(/It is not restarted/);
+    // Not the crash-loop sentence, even with restarts behind it.
+    expect(conditionOf(replica({ state: 'not_ready', restarts: 1 }))).toEqual([
+      'readiness_failing',
+    ]);
+  });
+
   it('says out of memory when the kernel killed it', () => {
     const [d] = diagnose({
       containerPort: 3000,

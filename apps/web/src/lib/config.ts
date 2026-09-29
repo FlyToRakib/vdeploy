@@ -26,7 +26,49 @@ export interface EditableSpec {
   schedule?: {
     crons: { name: string; command: string[]; expr: string; timezone: string }[];
   };
+  /** How the platform knows the app is up, alive and ready (§18). */
+  health?: { startup?: Probe; liveness?: Probe; readiness?: Probe };
   [key: string]: unknown;
+}
+
+export interface Probe {
+  type: 'http' | 'tcp';
+  path?: string;
+  interval?: string;
+  timeout?: string;
+  failureThreshold?: number;
+}
+
+/** How often a check may run, in the words the form offers. */
+export const CHECK_EVERY = ['10s', '30s', '1m', '5m'] as const;
+
+/**
+ * The two checks that run after an app has started, from the form's
+ * answers: a path turns a check on, an empty one turns it off. The
+ * startup check is kept as it is — it is set in the raw spec, because the
+ * default (a connection on the app's port) is right for nearly everyone.
+ */
+export function withChecks(
+  health: EditableSpec['health'],
+  answers: { alive: string; aliveEvery: string; ready: string; readyEvery: string },
+): NonNullable<EditableSpec['health']> {
+  const check = (path: string, every: string, before?: Probe): Probe | undefined => {
+    const trimmed = path.trim();
+    if (trimmed === '') return undefined;
+    return {
+      ...before,
+      type: 'http',
+      path: trimmed.startsWith('/') ? trimmed : `/${trimmed}`,
+      interval: every,
+    };
+  };
+  const out: NonNullable<EditableSpec['health']> = {};
+  if (health?.startup) out.startup = health.startup;
+  const liveness = check(answers.alive, answers.aliveEvery, health?.liveness);
+  const readiness = check(answers.ready, answers.readyEvery, health?.readiness);
+  if (liveness) out.liveness = liveness;
+  if (readiness) out.readiness = readiness;
+  return out;
 }
 
 /** Memory sizes people pick from; anything else is set in the raw spec. */

@@ -179,14 +179,21 @@ type Application struct {
 
 // Probe checks one replica: an HTTP GET or a TCP connect.
 type Probe struct {
-	Type    string `json:"type"`
-	Path    string `json:"path,omitempty"`
-	Timeout string `json:"timeout"`
+	Type     string `json:"type"`
+	Path     string `json:"path,omitempty"`
+	Timeout  string `json:"timeout"`
+	Interval string `json:"interval"`
+	// FailureThreshold is how many checks in a row must fail before it counts.
+	FailureThreshold int `json:"failureThreshold"`
 }
 
-// Health says how to know a replica is ready for traffic.
+// Health says how to know a replica is ready for traffic (§18). Startup
+// gates a new replica; after that, readiness takes one out of the pool
+// and puts it back, and liveness restarts one that stopped answering.
 type Health struct {
-	Startup *Probe `json:"startup,omitempty"`
+	Startup   *Probe `json:"startup,omitempty"`
+	Liveness  *Probe `json:"liveness,omitempty"`
+	Readiness *Probe `json:"readiness,omitempty"`
 }
 
 // Deploy is how a new release replaces the old one.

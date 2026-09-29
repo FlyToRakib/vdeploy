@@ -8,10 +8,12 @@ import { Field } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Status, type Health } from '@/components/ui/status';
 import {
+  CHECK_EVERY,
   cleanHost,
   memoryWords,
   MEMORY_CHOICES,
   secretNameFor,
+  withChecks,
   withDomains,
   withMemory,
   type EditableSpec,
@@ -299,6 +301,97 @@ export function SizeSection() {
           defaultValue={spec.runtime.replicas}
         />
         <Button type="submit">Save</Button>
+      </form>
+    </Section>
+  );
+}
+
+const EVERY_WORDS: Record<(typeof CHECK_EVERY)[number], string> = {
+  '10s': 'every 10 seconds',
+  '30s': 'every 30 seconds',
+  '1m': 'every minute',
+  '5m': 'every 5 minutes',
+};
+
+/**
+ * The checks an app keeps having to pass once it has started (§18).
+ *
+ * They are two questions with two different answers, and the screen says
+ * which is which, because choosing the wrong one is how an app gets
+ * restarted in a loop while it waits for its database: **alive** means
+ * "answering at all" and failing it restarts the app; **ready** means
+ * "able to take visitors right now" and failing it only stops sending
+ * them until it is.
+ */
+export function HealthSection() {
+  const { projectId, act } = useProject();
+  const spec = useSpec();
+  if (!spec.network) return null;
+  const { liveness, readiness } = spec.health ?? {};
+  const every = (probe: { interval?: string } | undefined, fallback: string) =>
+    probe?.interval && (CHECK_EVERY as readonly string[]).includes(probe.interval)
+      ? probe.interval
+      : fallback;
+  const select = (id: string, value: string) => (
+    <select
+      id={id}
+      name={id}
+      defaultValue={value}
+      className="h-10 rounded-md border border-border bg-surface-raised px-3 text-sm"
+    >
+      {CHECK_EVERY.map((e) => (
+        <option key={e} value={e}>
+          {EVERY_WORDS[e]}
+        </option>
+      ))}
+    </select>
+  );
+  return (
+    <Section
+      title="Health checks"
+      hint="An app is checked until it first answers. These keep checking it after that; leave a path empty to turn that check off."
+    >
+      <form
+        action={(form) => {
+          void act(
+            'health.configure',
+            {
+              projectId,
+              health: withChecks(spec.health, {
+                alive: formText(form, 'alive'),
+                aliveEvery: formText(form, 'aliveEvery'),
+                ready: formText(form, 'ready'),
+                readyEvery: formText(form, 'readyEvery'),
+              }),
+            },
+            'Changing its health checks',
+          );
+        }}
+        className="grid gap-4"
+      >
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <Field
+            label="Is it still alive?"
+            name="alive"
+            placeholder="/health"
+            defaultValue={liveness?.path ?? ''}
+            hint="If this stops answering three times in a row, the app is restarted."
+          />
+          {select('aliveEvery', every(liveness, '30s'))}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <Field
+            label="Can it take visitors?"
+            name="ready"
+            placeholder="/ready"
+            defaultValue={readiness?.path ?? ''}
+            hint="If this says no three times in a row, visitors go to the other copies until it says yes. It is not restarted."
+          />
+          {select('readyEvery', every(readiness, '10s'))}
+        </div>
+        <Button type="submit" className="justify-self-start">
+          Save
+        </Button>
       </form>
     </Section>
   );

@@ -5,6 +5,7 @@ import {
   secretNameFor,
   specToYaml,
   withDomains,
+  withChecks,
   withMemory,
   yamlToSpec,
   type EditableSpec,
@@ -24,6 +25,33 @@ const spec: EditableSpec = {
 };
 
 describe('config edits', () => {
+  it('turns a check on with a path and off without one, keeping what the form does not show', () => {
+    const startup = { type: 'http' as const, path: '/boot', timeout: '90s' };
+    const before = {
+      startup,
+      liveness: { type: 'http' as const, path: '/health', interval: '30s', failureThreshold: 5 },
+    };
+    const next = withChecks(before, {
+      alive: '/health',
+      aliveEvery: '1m',
+      ready: 'ready',
+      readyEvery: '10s',
+    });
+    expect(next).toEqual({
+      startup,
+      // Its threshold was set elsewhere and survives a change of interval.
+      liveness: { type: 'http', path: '/health', interval: '1m', failureThreshold: 5 },
+      // A path typed without its slash is still a path.
+      readiness: { type: 'http', path: '/ready', interval: '10s' },
+    });
+    expect(
+      withChecks(next, { alive: ' ', aliveEvery: '30s', ready: '', readyEvery: '10s' }),
+    ).toEqual({ startup });
+    expect(
+      withChecks(undefined, { alive: '', aliveEvery: '30s', ready: '', readyEvery: '10s' }),
+    ).toEqual({});
+  });
+
   it('adds a domain and keeps the settings of the ones already there', () => {
     const next = withDomains(spec, ['shop.example.com', 'www.example.com']);
     expect(next.network?.domains).toEqual([

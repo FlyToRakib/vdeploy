@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** liveness and readiness probes
+**Task:** a config change no longer recompiles the app
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -18,7 +18,25 @@ reopened until these are in. Grouped by the harm of leaving them out;
 each is one task, one commit.
 
 **Accepted by the spec and silently ignored — worst first, because they look configured**
-- [ ] liveness and readiness probes (§5, §18) — the agent reads only `startup`, and not its interval
+- [x] **liveness and readiness probes (§5, §18)**. They answer different
+  questions, so they do different things: a replica failing **readiness**
+  keeps running and leaves the pool until it passes again — warming a
+  cache, waiting on a database — while one failing **liveness** has
+  stopped answering at all and is restarted, starting over from its
+  startup check. Both count failures in a row (default three), so one
+  slow answer never empties the pool. They run inside the existing pass
+  rather than a second goroutine with its own locking, and the loop now
+  paces itself to the next check that falls due instead of waiting out
+  its 15 s interval; no check runs more often than every 5 s, the floor
+  the agent already puts on its own interval. The startup check's
+  interval is honoured too when it asks for less often than the 2 s
+  settling pace. The plain-language layer says what a not-ready app is
+  doing ("it says it is not ready at /ready, so it gets no visitors until
+  it is. It is not restarted"), and the Config screen gains a **Health
+  checks** section that asks the two questions in those words. Found on
+  the way: the crash notification read the stored spec raw instead of
+  through `readSpec`, the one place a section added later would have
+  been missing
 - [ ] `build.cache` (§5, §15) — no build reads it
 - [ ] the AI's deploy-window guardrail (§8 L1) — on the grant matrix in the spec, not in the grants
 - [ ] `domain.add` refusing a host another project routes (2.4) — the agent refuses it later instead

@@ -8,6 +8,7 @@ import { specToYaml, yamlToSpec } from '@/lib/config';
 import { useProject } from '../project-shell';
 import {
   DomainsSection,
+  HealthSection,
   PreviewsSection,
   ScheduleSection,
   BuildServerSection,
@@ -134,6 +135,7 @@ export function ProjectConfig() {
       <SettingsSection />
       <DomainsSection />
       <SizeSection />
+      <HealthSection />
       <StorageSection />
       <ScheduleSection />
       <StagingSection />

@@ -12,10 +12,12 @@ export interface DiagnosisInput {
   containerPort: number | null;
   /** Memory limit, as written in the spec (512Mi). */
   memoryLimit: string;
+  /** Where the app's readiness check asks, when it has one. */
+  readinessPath?: string | null;
   evidence: ReplicaEvidence[];
 }
 
-const RUNNING = new Set(['running', 'ready', 'starting', 'unhealthy']);
+const RUNNING = new Set(['running', 'ready', 'starting', 'unhealthy', 'not_ready']);
 const LOCALHOST = /^(127\.\d+\.\d+\.\d+|::1|\[::1\])$/;
 const ANY = /^(0\.0\.0\.0|::|\[::\])$/;
 
@@ -94,7 +96,8 @@ export function diagnose(input: DiagnosisInput): Diagnosis[] {
       });
       continue;
     }
-    // Running states from the agent: ready, starting, unhealthy (up but failing its check).
+    // Running states from the agent: ready, starting, unhealthy (never passed
+    // its startup check), not_ready (passed it, now failing readiness).
     const exited = !RUNNING.has(replica.state) || replica.exitCode !== null;
     if (exited || replica.restarts >= 3) {
       const output = replica.lastOutput;
@@ -119,6 +122,20 @@ export function diagnose(input: DiagnosisInput): Diagnosis[] {
           risk: 'none — your app is already stopping',
         });
       }
+      continue;
+    }
+    if (replica.state === 'not_ready') {
+      // It answered once and is saying "not now" on purpose: the app's own
+      // check, not the platform's guess, so the cause is what it is waiting for.
+      const where = input.readinessPath ? ` at ${input.readinessPath}` : '';
+      add({
+        condition: 'readiness_failing',
+        detected: `the app is running but its readiness check${where} is failing`,
+        plain: `Your app is running, but it says it is not ready${where}, so it gets no visitors until it is. It is not restarted: not ready usually means waiting for something.`,
+        fix: 'Look at what the readiness check needs — usually a database, a cache, or a warm-up — or change the check if it asks for something the app never has.',
+        confidence: 'high',
+        risk: 'none — this replica is already out of rotation',
+      });
       continue;
     }
     if (input.containerPort === null || replica.listening === null) continue;
