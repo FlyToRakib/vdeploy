@@ -6,12 +6,15 @@ import { eq } from 'drizzle-orm';
 import { assertMayRegister } from './registration.js';
 import { clearFailures, lockedUntil, recordFailure } from './lockout.js';
 import type { Mailer } from './mailer.js';
+import type { Locate } from './geoip.js';
 
 export interface HookDeps {
   db: Database;
   mailer: Mailer;
   secret: string;
   publicUrl: string;
+  /** Where an address roughly is, when a GeoIP database is configured. */
+  locate?: Locate;
 }
 
 /** Auth endpoints whose outcome is written to the audit log. */
@@ -158,6 +161,7 @@ async function alertOnNewDevice(
   url.searchParams.set('session', session.id);
   url.searchParams.set('user', session.userId);
   url.searchParams.set('sig', notMeSignature(deps.secret, session.id, session.userId));
+  const place = deps.locate?.(session.ipAddress) ?? null;
   await deps.mailer.send({
     to: user.email,
     subject: 'New sign-in to your VDeploy account',
@@ -165,6 +169,7 @@ async function alertOnNewDevice(
       'Your account was just used from a device we have not seen before.',
       `Browser: ${session.userAgent ?? 'unknown'}`,
       `IP address: ${session.ipAddress ?? 'unknown'}`,
+      ...(place ? [`Roughly in: ${place}`] : []),
       '',
       `If this was you, there is nothing to do. If it wasn't, sign that device out and reset your password here: ${url.toString()}`,
     ].join('\n'),

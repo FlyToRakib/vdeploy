@@ -403,7 +403,13 @@ each is one task, one commit.
   "trusted provider" shortcut that would let an unverified address at
   GitHub take over the account that owns it here. A refusal comes back to
   the sign-in page, in words
-- [ ] a session's approximate location, when a GeoIP database is configured (§20.2)
+- [x] **a session's approximate location, when a GeoIP database is
+  configured (§20.2)**: `GEOIP_DATABASE` names a MaxMind GeoLite2 City or
+  Country file; each session then shows "Dhaka, BD" beside its address,
+  and the new-device email says roughly where. Without one nothing is
+  shown — VDeploy never asks a service on the internet where an address
+  is — and a path that cannot be read stops the start, in words, rather
+  than quietly showing nothing
 - [ ] CAPTCHA after repeated failures, when configured (§20.2)
 - [x] **the 4 GB image warning, and a DNS propagation countdown (§30 ④ ⑤)**:
   the agent measures every image it builds, and one of 2 GB or more gets

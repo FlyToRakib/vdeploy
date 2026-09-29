@@ -11,6 +11,8 @@ interface SessionRow {
   id: string;
   userAgent: string | null;
   ipAddress: string | null;
+  /** Roughly where, when this VDeploy has a GeoIP database (§20.2). */
+  location: string | null;
   lastActiveAt: string;
   current: boolean;
 }
@@ -80,6 +82,7 @@ export function SessionsPanel() {
                   {s.current ? 'This device' : (s.userAgent ?? 'Unknown device')}
                 </p>
                 <p className="text-muted-foreground">
+                  {s.location ? `${s.location} · ` : ''}
                   {s.ipAddress ?? 'unknown IP'} · {s.current ? 'active now' : when(s.lastActiveAt)}
                 </p>
               </div>

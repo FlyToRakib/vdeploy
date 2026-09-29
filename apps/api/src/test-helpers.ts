@@ -1,4 +1,5 @@
 import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
+import type { Locate } from './auth/geoip.js';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { memoryMailer, type Mail } from './auth/mailer.js';
 import { ApiConfig } from './config.js';
@@ -50,6 +51,8 @@ export async function startTestApp(
     agentBinariesDir?: string;
     /** More of the environment, as an installation would set it. */
     env?: Record<string, string>;
+    /** Where an address roughly is, in place of a GeoIP database. */
+    locate?: Locate;
   } = {},
 ): Promise<TestApp> {
   const database = await startTestDatabase();
@@ -61,6 +64,7 @@ export async function startTestApp(
     ...(options.github ? { github: options.github } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.locate ? { locate: options.locate } : {}),
     resolveTxt: (name) => Promise.resolve(txt.get(name) ?? []),
     probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
     config: testConfig(database.url, {

@@ -50,6 +50,12 @@ export const ApiConfig = z.object({
   SIGN_IN_GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
   SIGN_IN_GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   SIGN_IN_GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+  /**
+   * A MaxMind database file (GeoLite2 City or Country, .mmdb) for where a
+   * session roughly is (§20.2). Without one, no location is shown: VDeploy
+   * never asks a service on the internet where an address is.
+   */
+  GEOIP_DATABASE: z.string().min(1).optional(),
   /** The key for the assistant's model (§26, bring your own key). Without it the assistant is off. */
   ANTHROPIC_API_KEY: z.string().min(8).optional(),
   ANTHROPIC_BASE_URL: z.url().optional(),

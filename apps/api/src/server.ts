@@ -13,6 +13,7 @@ import websocket from '@fastify/websocket';
 import { agentRoutes, Gateway } from './agents/gateway.js';
 import { privateKeyFromSeed } from './agents/frames.js';
 import { createAuth, socialSignIn } from './auth/auth.js';
+import { openGeoIp, type Locate } from './auth/geoip.js';
 import { logMailer, smtpMailer, type Mailer } from './auth/mailer.js';
 import type { ApiConfig } from './config.js';
 import { handleError } from './errors.js';
@@ -74,6 +75,8 @@ export interface ServerDeps {
   github?: GithubDeps;
   /** The assistant's model, when no API key is configured. Tests script it. */
   model?: ModelClient;
+  /** Where an address roughly is; from GEOIP_DATABASE when unset. Tests replace it. */
+  locate?: Locate;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -108,6 +111,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     (config.SMTP_URL
       ? smtpMailer(config.SMTP_URL, config.MAIL_FROM)
       : logMailer(app.log, config.NODE_ENV === 'development'));
+  const locate = deps.locate ?? (await openGeoIp(config.GEOIP_DATABASE));
   const auth = createAuth({
     db,
     mailer,
@@ -119,6 +123,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // http means a browser would refuse to send them.
     secureCookies: new URL(config.PUBLIC_URL).protocol === 'https:',
     social: socialSignIn(config),
+    locate,
   });
 
   await app.register(healthRoutes(db));
@@ -130,6 +135,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       secret: config.AUTH_SECRET,
       publicUrl: config.PUBLIC_URL,
       socialProviders: (['github', 'google'] as const).filter((p) => socialSignIn(config)[p]),
+      locate,
     }),
   );
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });

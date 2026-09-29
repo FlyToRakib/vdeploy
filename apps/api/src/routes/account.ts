@@ -17,6 +17,7 @@ import { notMeSignature } from '../auth/hooks.js';
 import { checkStepUp, passkeyChallenge, stepUpMethods } from '../auth/step-up.js';
 import { resolveSession } from '../http/actor.js';
 import { webHeaders } from '../http/headers.js';
+import { NO_LOCATION, type Locate } from '../auth/geoip.js';
 
 export interface AccountDeps {
   auth: Auth;
@@ -25,6 +26,8 @@ export interface AccountDeps {
   publicUrl: string;
   /** Which of GitHub and Google this VDeploy offers for signing in. */
   socialProviders?: ('github' | 'google')[];
+  /** Where an address roughly is, when a GeoIP database is configured (§20.2). */
+  locate?: Locate;
 }
 
 function slugify(name: string): string {
@@ -37,7 +40,14 @@ function slugify(name: string): string {
 }
 
 export const accountRoutes =
-  ({ auth, db, secret, publicUrl, socialProviders = [] }: AccountDeps): FastifyPluginAsyncZod =>
+  ({
+    auth,
+    db,
+    secret,
+    publicUrl,
+    socialProviders = [],
+    locate = NO_LOCATION,
+  }: AccountDeps): FastifyPluginAsyncZod =>
   (app) => {
     const origin = new URL(publicUrl).origin;
     const rpID = new URL(publicUrl).hostname;
@@ -134,6 +144,7 @@ export const accountRoutes =
         id: s.id,
         userAgent: s.userAgent,
         ipAddress: s.ipAddress,
+        location: locate(s.ipAddress),
         signedInAt: s.createdAt.toISOString(),
         lastActiveAt: s.updatedAt.toISOString(),
         current: s.id === me.sessionId,

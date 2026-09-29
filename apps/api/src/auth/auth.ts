@@ -14,6 +14,7 @@ import {
 import { createAccessControl } from 'better-auth/plugins/access';
 import { createHooks } from './hooks.js';
 import { ssoPlugin } from './sso.js';
+import type { Locate } from './geoip.js';
 import type { Mailer } from './mailer.js';
 import { hashPassword, verifyPassword } from './password.js';
 
@@ -79,6 +80,8 @@ export interface AuthDeps {
   secureCookies: boolean;
   /** GitHub and Google sign-in, each only when its OAuth app is configured (§20.2). */
   social?: SocialSignIn;
+  /** Where an address roughly is, for the new-device email (§20.2). */
+  locate?: Locate;
 }
 
 export interface SocialSignIn {
