@@ -473,3 +473,22 @@ func TestABuildReportsWhereTheAppKeepsData(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 }
+
+func TestNoCacheBuildsEveryStepAgainAndTheDefaultReusesThem(t *testing.T) {
+	builder, engine, req := setup(t, archive(t, entry{name: "Dockerfile", body: "FROM alpine"}))
+	if result := builder.Run(context.Background(), req); !result.OK {
+		t.Fatalf("result = %+v", result)
+	}
+	if slices.Contains(buildHelper(t, engine).Cmd, "--no-cache") {
+		t.Fatal("an ordinary build threw its cache away")
+	}
+
+	builder, engine, req = setup(t, archive(t, entry{name: "Dockerfile", body: "FROM alpine"}))
+	req.NoCache = true
+	if result := builder.Run(context.Background(), req); !result.OK {
+		t.Fatalf("result = %+v", result)
+	}
+	if !slices.Contains(buildHelper(t, engine).Cmd, "--no-cache") {
+		t.Fatalf("cache: none still used the cache: %v", buildHelper(t, engine).Cmd)
+	}
+}

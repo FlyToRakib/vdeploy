@@ -58,6 +58,8 @@ type Request struct {
 	// into the Engine and the work directory is thrown away, which is right
 	// for every build that runs where its app does.
 	Export bool `json:"export,omitempty"`
+	// NoCache builds every step from scratch, reusing nothing earlier builds left.
+	NoCache bool `json:"noCache,omitempty"`
 	// Secrets are build-time secrets, each sealed to this agent (ADR 0007).
 	Secrets []Secret `json:"secrets"`
 }
@@ -341,6 +343,9 @@ func (b *Builder) run(ctx context.Context, req Request) (outcome, error) {
 		"--output", "type=docker,name="+name+",dest=/out/image.tar",
 		"--progress", "plain",
 	)
+	if req.NoCache {
+		args = append(args, "--no-cache")
+	}
 	builder := docker.Helper{
 		Name:        "vd-build-" + strings.ToLower(req.BuildID),
 		Image:       docker.BuildkitImage,

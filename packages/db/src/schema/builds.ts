@@ -69,6 +69,8 @@ export const builds = pgTable(
          * run it is not this one (§15).
          */
         export?: boolean;
+        /** Build every step from scratch: `build.cache: none`. */
+        noCache?: boolean;
       }>()
       .notNull(),
     /** Build-time secrets, by name and pinned version: sealed only when sent. */

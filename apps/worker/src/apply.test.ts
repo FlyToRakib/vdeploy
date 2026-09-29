@@ -68,7 +68,25 @@ function spec(overrides: Partial<ApplicationSpecInput> = {}) {
 
 /** A stand-in agent: runs whatever it is told, except releases from crashFrom on. */
 let crashFrom = Number.POSITIVE_INFINITY;
-let agentTimer: NodeJS.Timeout;
+let agentTimer: NodeJS.Timeout | undefined;
+let ticking: Promise<void> = Promise.resolve();
+
+/**
+ * The stand-in agent: one pass at a time, as a real one runs — and nothing
+ * in flight when it is stopped, which is what lets the test database go
+ * away (or a report be written by hand) without a pass landing after it.
+ */
+function startAgent() {
+  agentTimer = setInterval(() => {
+    ticking = ticking.then(() => agentTick()).catch(() => undefined);
+  }, 50);
+}
+
+async function stopAgent() {
+  clearInterval(agentTimer);
+  agentTimer = undefined;
+  await ticking;
+}
 /** A stand-in builder: every queued build succeeds, unless builds are set to fail. */
 let buildsFail = false;
 const BUILT = `sha256:${'d'.repeat(64)}`;
@@ -223,7 +241,7 @@ beforeAll(async () => {
       throw error;
     },
   };
-  agentTimer = setInterval(() => void agentTick(), 50);
+  startAgent();
 }, 120_000);
 
 afterEach(async () => {
@@ -233,7 +251,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  clearInterval(agentTimer);
+  await stopAgent();
   await t.stop();
 });
 
@@ -565,6 +583,29 @@ describe('building from uploaded source', () => {
     expect((await running()).buildId).not.toBe(first.buildId);
   });
 
+  it('asks for a build from scratch only when the spec says cache: none', async () => {
+    const options = async (cache: 'none' | 'registry') => {
+      const uploadId = await upload();
+      const row = await plan('project.create', {
+        spec: spec({
+          metadata: { name: `cache-${cache}` },
+          source: { type: 'archive', uploadId },
+          build: { strategy: 'dockerfile', cache },
+        }),
+        serverId,
+      });
+      expect(await applyPlan(deps, row.id)).toBe('applied');
+      const [created] = await t.db
+        .select()
+        .from(projects)
+        .where(eq(projects.name, `cache-${cache}`));
+      const [build] = await t.db.select().from(builds).where(eq(builds.projectId, created!.id));
+      return build!.options;
+    };
+    expect((await options('none')).noCache).toBe(true);
+    expect((await options('registry')).noCache).toBeUndefined();
+  });
+
   it("fails the plan with the build's own reason", async () => {
     const uploadId = await upload();
     buildsFail = true;
@@ -737,8 +778,7 @@ describe('building from uploaded source', () => {
   it('reads unsaved files from the agent report when planning, minus temporary ones', async () => {
     const created = await createProject();
     // Keep the report as written: stop the stand-in agent, and let a pass already running finish.
-    clearInterval(agentTimer);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await stopAgent();
     await t.db
       .update(observedState)
       .set({
@@ -769,7 +809,7 @@ describe('building from uploaded source', () => {
       expect(restart.tier).toBe('destructive');
       expect(restart.blastRadius.dataAtRisk).toEqual(['files in /app/uploads']);
     } finally {
-      agentTimer = setInterval(() => void agentTick(), 50);
+      startAgent();
     }
   });
 

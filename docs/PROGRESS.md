@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** `build.cache`
+**Task:** the AI's deploy-window guardrail
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -54,7 +54,19 @@ each is one task, one commit.
   the way: the crash notification read the stored spec raw instead of
   through `readSpec`, the one place a section added later would have
   been missing
-- [ ] `build.cache` (§5, §15) — no build reads it
+- [x] **`build.cache` (§5, §15)**: `none` builds every step from
+  scratch (`buildctl --no-cache`); `local` is the building server's own
+  BuildKit cache, which is what every build already used. `registry`,
+  the default, means the same until the organization has a registry to
+  keep a cache in — that arrives with `registry.add` below, and the
+  worker says so where it sends the build
+- [x] **the worker suite's "teardown race" was a real bug in the test, not
+  load**: its stand-in agent fired a pass every 50 ms without waiting for
+  the last, and nothing waited for the one in flight before the database
+  closed, so a pass could land after it and fail a passing run. It now
+  runs one pass at a time and stopping it waits — the pattern the
+  databases suite already had. The pause in the middle of one test no
+  longer guesses with a 300 ms sleep either
 - [ ] the AI's deploy-window guardrail (§8 L1) — on the grant matrix in the spec, not in the grants
 - [ ] `domain.add` refusing a host another project routes (2.4) — the agent refuses it later instead
 

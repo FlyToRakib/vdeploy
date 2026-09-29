@@ -636,6 +636,9 @@ async function buildImage(
         ...(strip ? { strip } : {}),
         // Keep the image on disk afterwards: another server must collect it.
         ...(elsewhere ? { export: true } : {}),
+        // `registry` and `local` both use the building server's own cache
+        // until the organization has a registry to keep one in (§15).
+        ...(spec.build.cache === 'none' ? { noCache: true } : {}),
       },
       secrets: buildSecrets,
     }),
