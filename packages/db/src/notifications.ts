@@ -4,6 +4,7 @@ import {
   readSpec,
   VDeployError,
   type ChannelConfig,
+  type NewChannelConfig,
   type DeliveryView,
   type NotificationChannelView,
   type NotificationPayload,
@@ -167,37 +168,55 @@ function view(c: Channel): NotificationChannelView {
   };
 }
 
+/** What a channel keeps in the open, and the one thing it keeps sealed. */
+function splitSecret(config: NewChannelConfig): { config: ChannelConfig; secret: string | null } {
+  switch (config.kind) {
+    case 'webhook':
+      return { config, secret: `whsec_${randomBytes(24).toString('base64url')}` };
+    case 'slack':
+    case 'discord':
+      return { config: { kind: config.kind }, secret: config.webhookUrl };
+    case 'telegram':
+      return { config: { kind: 'telegram', chatId: config.chatId }, secret: config.botToken };
+    case 'email':
+      return { config, secret: null };
+  }
+}
+
 /**
- * A new channel. A webhook gets its own signing secret, returned here once
- * and afterwards only ever held sealed by the installation key.
+ * A new channel. Its one secret is sealed by the installation key: a
+ * webhook's signing secret, made here and returned once; a chat's webhook
+ * address or a Telegram bot's token, as given and never returned.
  */
 export async function createChannel(
   db: Executor,
   secretsKey: Buffer,
-  input: { orgId: string; name: string; config: ChannelConfig; triggers: NotificationTrigger[] },
+  input: { orgId: string; name: string; config: NewChannelConfig; triggers: NotificationTrigger[] },
   now: Date,
 ): Promise<{ channel: NotificationChannelView; signingSecret: string | null }> {
   const id = newId('notificationChannel');
-  const signingSecret =
-    input.config.kind === 'webhook' ? `whsec_${randomBytes(24).toString('base64url')}` : null;
+  const { config, secret } = splitSecret(input.config);
   const [row] = await db
     .insert(notificationChannels)
     .values({
       id,
       orgId: input.orgId,
       name: input.name,
-      config: input.config,
+      config,
       triggers: [...new Set(input.triggers)],
-      signingSecret: signingSecret ? sealValue(secretsKey, signingAad(id), signingSecret) : null,
+      signingSecret: secret ? sealValue(secretsKey, signingAad(id), secret) : null,
       createdAt: now,
     })
     .returning();
   if (!row) throw new VDeployError('internal', 'The channel was not saved');
-  return { channel: view(row), signingSecret };
+  return { channel: view(row), signingSecret: config.kind === 'webhook' ? secret : null };
 }
 
-/** The webhook signing secret, for the worker that signs deliveries. */
-export function openSigningSecret(secretsKey: Buffer, channel: Channel): string | null {
+/**
+ * The channel's sealed secret, for the worker that sends to it: a
+ * webhook's signing secret, a chat's webhook address or a bot's token.
+ */
+export function openChannelSecret(secretsKey: Buffer, channel: Channel): string | null {
   return channel.signingSecret
     ? openValue(secretsKey, signingAad(channel.id), channel.signingSecret)
     : null;
@@ -287,6 +306,7 @@ export async function notifyFromReport(
 ): Promise<void> {
   await notifyDiskFilling(db, serverId, report, now);
   await notifyCertificatesNotRenewing(db, serverId, report, now);
+  await notifyHealthFailing(db, serverId, report, now);
   const troubled = (report.projects ?? []).filter((p) =>
     p.evidence?.some((e) => e.oomKilled || e.restarts >= 3),
   );
@@ -330,6 +350,61 @@ export async function notifyFromReport(
           : oom
             ? `${project.name} needed more than its ${spec.runtime.resources.memory.limit} memory limit and was stopped.`
             : `${project.name} keeps stopping right after it starts. Its logs say why.`,
+        projectId: project.id,
+        serverId,
+      },
+      now,
+    );
+  }
+}
+
+/**
+ * An app that runs and answers nobody (§18): every replica is out of the
+ * pool because its health check keeps failing, and none of them is
+ * crashing, so nothing else would say so. Visitors get errors while the
+ * dashboard shows it running. One replica failing while others serve is
+ * the load balancer doing its job, and is not told.
+ */
+async function notifyHealthFailing(
+  db: Executor,
+  serverId: string,
+  report: ObservedReport,
+  now: Date,
+): Promise<void> {
+  const failing = (report.projects ?? []).filter((p) => {
+    const replicas = p.replicas ?? [];
+    return (
+      replicas.length > 0 &&
+      replicas.every((r) => r.state === 'not_ready' || r.state === 'unhealthy') &&
+      !p.evidence?.some((e) => e.oomKilled || e.restarts >= 3)
+    );
+  });
+  if (failing.length === 0) return;
+  const rows = await db
+    .select({ id: projects.id, orgId: projects.orgId, name: projects.name, spec: projects.spec })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.serverId, serverId),
+        inArray(
+          projects.id,
+          failing.map((p) => p.projectId),
+        ),
+      ),
+    );
+  for (const project of rows) {
+    const spec = readSpec(project.spec);
+    const path = spec.health.readiness?.path ?? spec.health.liveness?.path;
+    await notify(
+      db,
+      project.orgId,
+      {
+        trigger: 'health_failing',
+        key: `health:${project.id}:${hourOf(now)}`,
+        title: `${project.name} is running but failing its health check`,
+        message:
+          `Every copy of ${project.name} is running, and none of them passes its health check${path ? ` at ${path}` : ''}, so visitors are not sent to any of them.` +
+          '\n\nWhat to do: look at what the check needs — usually a database, a cache or a warm-up — or change the check if it asks for something the app never has.',
         projectId: project.id,
         serverId,
       },

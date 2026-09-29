@@ -248,8 +248,23 @@ each is one task, one commit.
   image is now always kept
 
 **Notifications (§18)**
-- [ ] Slack, Discord and Telegram
-- [ ] triggers: health failing without crashing, certificate renewal failed, autoscaling
+- [x] **Slack, Discord and Telegram**: a chat is a channel like email or a
+  webhook. Its webhook address or bot token is as good as a password to
+  the chat, so it is sealed on the way in, never shown or returned again,
+  and never kept in the channel's settings; the dashboard shows "a Slack
+  channel" or the Telegram chat's id. Each gets a message in its own
+  shape — Slack's markup escaped, Discord with mentions turned off so an
+  app's text can never ping @everyone — through the same public-internet
+  only sender as webhooks
+- [x] **triggers: health failing without crashing, and autoscaling**: an
+  app whose every copy is out of the pool on a failing health check, and
+  none crashing, is told once an hour (one copy failing while others serve
+  is the load balancer doing its job, and is not); a rule resizing an app
+  is told, and so is a rule that asked to grow on a server with no room,
+  once an hour. Channels that took every default get both. A certificate
+  whose renewal keeps failing is `certificate_not_renewing`: Traefik
+  renews thirty days out, so one inside twenty-one has been failing for a
+  week
 
 **The manual control surface (§20, §24, §25)**
 - [ ] cancel a deploy, and promote a canary early (§7, §20)

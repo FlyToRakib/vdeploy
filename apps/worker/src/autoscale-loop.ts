@@ -6,6 +6,7 @@ import {
   lastScaledAt,
   loadPlanWorld,
   metricsOf,
+  notify,
   plans,
   scalableProjects,
   type Database,
@@ -49,7 +50,7 @@ async function queueScale(
   deps: AutoscaleDeps,
   project: { id: string; orgId: string },
   replicas: number,
-): Promise<void> {
+): Promise<string> {
   const args = { projectId: project.id, replicas };
   const plan = buildPlan('project.scale', args, await loadPlanWorld(deps.db, project.id, args));
   const planId = newId('plan');
@@ -72,6 +73,7 @@ async function queueScale(
     expiresAt: new Date(deps.now().getTime() + 15 * 60_000),
   });
   await enqueuePlan(deps.queue, planId);
+  return planId;
 }
 
 /**
@@ -108,7 +110,21 @@ export async function runAutoscaling(deps: AutoscaleDeps): Promise<number> {
 
       // Built by the same planner anybody's request uses: the governor
       // can refuse it, and what applies is an ordinary plan.
-      await queueScale(deps, project, decision.replicas);
+      const planId = await queueScale(deps, project, decision.replicas);
+      const grew = decision.replicas > spec.runtime.replicas;
+      await notify(
+        deps.db,
+        project.orgId,
+        {
+          trigger: 'autoscaled',
+          key: `autoscale:${planId}`,
+          title: `${spec.metadata.name} ${grew ? 'grew' : 'shrank'} to ${String(decision.replicas)} copies`,
+          message: `A scaling rule changed ${spec.metadata.name} from ${String(spec.runtime.replicas)} to ${String(decision.replicas)} copies, because ${decision.because}.`,
+          projectId: project.id,
+          serverId: project.serverId,
+        },
+        now,
+      );
       await appendAudit(deps.db, {
         chain: project.orgId,
         actor: { system: 'autoscale' },
@@ -128,6 +144,24 @@ export async function runAutoscaling(deps: AutoscaleDeps): Promise<number> {
       // a while.
       if (error instanceof VDeployError && error.code === 'capacity_exceeded') {
         refused.set(project.id, now.getTime() + COOLDOWN_MS);
+        // Said once an hour: an app that needs to grow and cannot is worth
+        // knowing about, and a minute-by-minute retelling is not.
+        const name = readSpec(project.spec).metadata.name;
+        await notify(
+          deps.db,
+          project.orgId,
+          {
+            trigger: 'autoscaled',
+            key: `autoscale-refused:${project.id}:${now.toISOString().slice(0, 13)}`,
+            title: `${name} needs to grow, and its server has no room`,
+            message: `A scaling rule asked for more copies of ${name}, and its server does not have the memory or CPU for them. ${error.message}`,
+            projectId: project.id,
+            serverId: project.serverId,
+          },
+          now,
+        ).catch((err: unknown) => {
+          deps.logError(err, project.id);
+        });
         continue;
       }
       deps.logError(error, project.id);

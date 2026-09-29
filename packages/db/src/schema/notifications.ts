@@ -19,7 +19,11 @@ export const notificationChannels = pgTable('notification_channels', {
     .references(() => organization.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   config: jsonb('config').$type<ChannelConfig>().notNull(),
-  /** The webhook signing key, sealed by the installation key; null for email. */
+  /**
+   * The channel's one secret, sealed by the installation key: a webhook's
+   * signing key, a chat's webhook address, or a Telegram bot's token. Null
+   * for email.
+   */
   signingSecret: text('signing_secret'),
   triggers: jsonb('triggers').$type<NotificationTrigger[]>().notNull(),
   enabled: boolean('enabled').notNull().default(true),

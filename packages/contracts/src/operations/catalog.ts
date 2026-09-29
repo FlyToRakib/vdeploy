@@ -18,7 +18,7 @@ import { AiGrants } from '../grants.js';
 import { RestoreMode } from '../backups.js';
 import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { FolderPath } from '../files.js';
-import { ChannelConfig, NotificationTrigger } from '../notifications.js';
+import { NewChannelConfig, NotificationTrigger } from '../notifications.js';
 import { PluginManifest } from '../plugins.js';
 import { PreviewRef } from '../previews.js';
 import { EmailDomain, SsoSettings } from '../sso.js';
@@ -423,10 +423,10 @@ export const OPERATIONS = [
     'notification.channel_create',
     'sensitive',
     'org',
-    'Add an email list or a webhook that is told about failures (a webhook gets a signing secret, shown once)',
+    'Add an email list, a webhook, or a Slack, Discord or Telegram chat that is told about failures (a webhook gets a signing secret, shown once)',
     obj({
       name: z.string().min(1).max(80),
-      config: ChannelConfig,
+      config: NewChannelConfig,
       triggers: z.array(NotificationTrigger).max(20).optional(),
     }),
     { minRole: 'admin' },

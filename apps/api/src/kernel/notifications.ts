@@ -1,5 +1,5 @@
 import {
-  ChannelConfig,
+  NewChannelConfig,
   DEFAULT_TRIGGERS,
   NotificationTrigger,
   type OperationName,
@@ -26,7 +26,7 @@ export const NOTIFICATION_ADMIN: Partial<Record<OperationName, Handler>> = {
       {
         orgId: actor.orgId,
         name: String(args.name),
-        config: ChannelConfig.parse(args.config),
+        config: NewChannelConfig.parse(args.config),
         triggers: args.triggers === undefined ? DEFAULT_TRIGGERS : Triggers.parse(args.triggers),
       },
       deps.now(),

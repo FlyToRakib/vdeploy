@@ -40,18 +40,63 @@ const DELIVERY_LOOK: Record<Delivery['status'], { health: Health; label: string 
 /** "A deploy failed" → "a deploy failed"; "AI" stays "AI". */
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
+type Kind = NotificationChannelView['config']['kind'];
+
+const KINDS: { kind: Kind; label: string }[] = [
+  { kind: 'email', label: 'Email' },
+  { kind: 'slack', label: 'Slack' },
+  { kind: 'discord', label: 'Discord' },
+  { kind: 'telegram', label: 'Telegram' },
+  { kind: 'webhook', label: 'Webhook' },
+];
+
+/** Where a channel sends, in words; a chat's address is sealed, so it is not shown. */
 function target(channel: NotificationChannelView): string {
-  return channel.config.kind === 'email'
-    ? channel.config.to.join(', ')
-    : new URL(channel.config.url).host;
+  const { config } = channel;
+  switch (config.kind) {
+    case 'email':
+      return `Email to ${config.to.join(', ')}`;
+    case 'webhook':
+      return `Webhook to ${new URL(config.url).host}`;
+    case 'telegram':
+      return `Telegram chat ${config.chatId}`;
+    case 'slack':
+      return 'A Slack channel';
+    case 'discord':
+      return 'A Discord channel';
+  }
 }
 
-/** Where failures are told: email lists and signed webhooks (§18, ADR 0009). */
+/** The channel as the form describes it. */
+function configFrom(kind: Kind, form: FormData): Record<string, unknown> {
+  switch (kind) {
+    case 'email':
+      return {
+        kind,
+        to: formText(form, 'to')
+          .split(/[,\s]+/)
+          .filter(Boolean),
+      };
+    case 'webhook':
+      return { kind, url: formText(form, 'url').trim() };
+    case 'slack':
+    case 'discord':
+      return { kind, webhookUrl: formText(form, 'webhookUrl').trim() };
+    case 'telegram':
+      return {
+        kind,
+        botToken: formText(form, 'botToken').trim(),
+        chatId: formText(form, 'chatId').trim(),
+      };
+  }
+}
+
+/** Where failures are told: email, chats and signed webhooks (§18, ADR 0009). */
 export function Channels() {
   const stepUp = useStepUp();
   const [channels, setChannels] = useState<NotificationChannelView[] | null>(null);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [kind, setKind] = useState<'email' | 'webhook'>('email');
+  const [kind, setKind] = useState<Kind>('email');
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
@@ -89,15 +134,7 @@ export function Channels() {
   async function add(form: FormData) {
     setError(null);
     const triggers = NotificationTrigger.options.filter((t) => form.get(`t-${t}`) === 'on');
-    const config =
-      kind === 'email'
-        ? {
-            kind,
-            to: formText(form, 'to')
-              .split(/[,\s]+/)
-              .filter(Boolean),
-          }
-        : { kind, url: formText(form, 'url').trim() };
+    const config = configFrom(kind, form);
     try {
       const outcome = await stepUp(() =>
         runOperation<{ signingSecret: string | null }>('notification.channel_create', {
@@ -122,8 +159,8 @@ export function Channels() {
       {channels === null && <Skeleton className="h-32" />}
       {channels?.length === 0 && (
         <EmptyState icon={Bell} title="No one is told yet">
-          Add an email list or a webhook to hear about failed deploys, crashes and servers that go
-          offline — before your visitors do.
+          Add an email list, a chat or a webhook to hear about failed deploys, crashes and servers
+          that go offline — before your visitors do.
         </EmptyState>
       )}
       {channels?.map((c) => {
@@ -135,10 +172,7 @@ export function Channels() {
               <Status health={c.enabled ? 'healthy' : 'neutral'}>
                 {c.enabled ? 'On' : 'Paused'}
               </Status>
-              <span className="text-sm break-all text-muted-foreground">
-                {c.config.kind === 'email' ? 'Email to ' : 'Webhook to '}
-                {target(c)}
-              </span>
+              <span className="text-sm break-all text-muted-foreground">{target(c)}</span>
             </div>
             <p className="text-sm">
               Told when: {c.triggers.map((t) => lowerFirst(TRIGGER_LABELS[t])).join('; ')}.
@@ -223,8 +257,8 @@ export function Channels() {
         <h2 className="font-medium">Add a channel</h2>
         <form action={add} className="grid gap-4">
           <Field label="Name" name="name" required placeholder="Team email" />
-          <div role="radiogroup" aria-label="Kind" className="flex gap-4 text-sm">
-            {(['email', 'webhook'] as const).map((k) => (
+          <div role="radiogroup" aria-label="Kind" className="flex flex-wrap gap-4 text-sm">
+            {KINDS.map(({ kind: k, label }) => (
               <label key={k} className="flex items-center gap-2">
                 <input
                   type="radio"
@@ -234,11 +268,11 @@ export function Channels() {
                     setKind(k);
                   }}
                 />
-                {k === 'email' ? 'Email' : 'Webhook'}
+                {label}
               </label>
             ))}
           </div>
-          {kind === 'email' ? (
+          {kind === 'email' && (
             <Field
               label="Send to"
               name="to"
@@ -246,7 +280,8 @@ export function Channels() {
               placeholder="you@example.com, ops@example.com"
               hint="Up to 10 addresses, separated by commas."
             />
-          ) : (
+          )}
+          {kind === 'webhook' && (
             <Field
               label="Webhook address"
               name="url"
@@ -255,6 +290,45 @@ export function Channels() {
               placeholder="https://hooks.example.com/vdeploy"
               hint="Receives a signed JSON message. Only addresses on the internet are allowed."
             />
+          )}
+          {(kind === 'slack' || kind === 'discord') && (
+            <Field
+              label={`${kind === 'slack' ? 'Slack' : 'Discord'} webhook address`}
+              name="webhookUrl"
+              type="password"
+              required
+              autoComplete="off"
+              placeholder={
+                kind === 'slack'
+                  ? 'https://hooks.slack.com/services/…'
+                  : 'https://discord.com/api/webhooks/…'
+              }
+              hint={
+                kind === 'slack'
+                  ? 'In Slack: Apps → Incoming Webhooks → Add to a channel. Anyone with this address can post there, so it is stored sealed and never shown again.'
+                  : 'In Discord: channel settings → Integrations → Webhooks → New Webhook → Copy URL. It is stored sealed and never shown again.'
+              }
+            />
+          )}
+          {kind === 'telegram' && (
+            <>
+              <Field
+                label="Bot token"
+                name="botToken"
+                type="password"
+                required
+                autoComplete="off"
+                placeholder="123456789:AA…"
+                hint="From @BotFather. It is stored sealed and never shown again."
+              />
+              <Field
+                label="Chat"
+                name="chatId"
+                required
+                placeholder="-1001234567890 or @yourchannel"
+                hint="Add the bot to the group or channel first, or it cannot post there."
+              />
+            </>
           )}
           <fieldset className="grid gap-2 text-sm">
             <legend className="mb-1 font-medium">Tell it when</legend>

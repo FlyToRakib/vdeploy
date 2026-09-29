@@ -5,6 +5,7 @@ import { verifyWebhook } from '@vdeploy/core';
 import {
   createChannel,
   listDeliveries,
+  notificationChannels,
   notificationDeliveries,
   notify,
   notifyFromReport,
@@ -108,6 +109,74 @@ describe('notifications', () => {
     // The secret is stored sealed, never as given.
     const deliveries = await listDeliveries(t.db, orgId, channel.id);
     expect(deliveries[0]?.status).toBe('sent');
+  });
+
+  it('posts to Slack, Discord and Telegram, keeping each address sealed and out of sight', async () => {
+    const slackUrl = 'https://hooks.slack.com/services/T0/B0/secretpart';
+    const discordUrl = 'https://discord.com/api/webhooks/123/secret-token';
+    const botToken = '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
+    const made = await Promise.all(
+      [
+        { kind: 'slack' as const, webhookUrl: slackUrl },
+        { kind: 'discord' as const, webhookUrl: discordUrl },
+        { kind: 'telegram' as const, botToken, chatId: '-1001234567890' },
+      ].map((config) =>
+        createChannel(
+          t.db,
+          SECRETS,
+          { orgId, name: config.kind, config, triggers: ['deploy_failed'] },
+          clock,
+        ),
+      ),
+    );
+    // Nothing a chat can be posted to with is kept in the open, or handed back.
+    for (const { channel, signingSecret } of made) {
+      expect(signingSecret).toBeNull();
+      expect(JSON.stringify(channel)).not.toMatch(/secret|ABCDEFG/);
+    }
+    const stored = JSON.stringify(await t.db.select().from(notificationChannels));
+    expect(stored).not.toContain(slackUrl);
+    expect(stored).not.toContain(botToken);
+
+    const projectId = newId('project');
+    await notify(
+      t.db,
+      orgId,
+      { ...failed(projectId), title: 'Deploy of <blog> failed', message: 'hi @everyone' },
+      clock,
+    );
+    expect(await sendDueNotifications(deps())).toBe(3);
+    const to = (prefix: string) => posts.find((p) => p.url.startsWith(prefix));
+
+    const slack = JSON.parse(to(slackUrl)!.body) as { text: string };
+    expect(slack.text).toContain('*Deploy of &lt;blog&gt; failed*');
+    expect(slack.text).toContain(
+      `<https://vdeploy.example.com/projects/${projectId}|Open in VDeploy>`,
+    );
+
+    const discord = JSON.parse(to(discordUrl)!.body) as {
+      content: string;
+      allowed_mentions: { parse: string[] };
+    };
+    expect(discord.content).toContain('hi @everyone');
+    expect(discord.allowed_mentions.parse).toEqual([]);
+
+    const telegram = JSON.parse(
+      to(`https://api.telegram.org/bot${botToken}/sendMessage`)!.body,
+    ) as {
+      chat_id: string;
+      text: string;
+    };
+    expect(telegram.chat_id).toBe('-1001234567890');
+    expect(telegram.text).toMatch(/^Deploy of <blog> failed\n/);
+
+    // A chat that turns the message away says so, by name.
+    answer = 404;
+    await notify(t.db, orgId, failed(projectId, 'plan:2'), clock);
+    await sendDueNotifications(deps());
+    const errors = (await t.db.select().from(notificationDeliveries)).map((d) => d.lastError);
+    expect(errors).toContain('Slack answered HTTP 404');
+    expect(errors).toContain('Telegram answered HTTP 404');
   });
 
   it('tells each cause once, and only to channels that want it', async () => {
@@ -276,6 +345,70 @@ describe('notifications', () => {
     expect(body.message).toMatch(/256Mi/);
     // The app's own output never leaves in a notification.
     expect(posts[0]!.body).not.toMatch(/hunter2/);
+  });
+
+  it('tells about an app that runs and answers nobody, but not one that still has a copy serving', async () => {
+    await createChannel(
+      t.db,
+      SECRETS,
+      {
+        orgId,
+        name: 'hook',
+        config: { kind: 'webhook', url: 'https://hooks.example.com/h' },
+        triggers: ['health_failing'],
+      },
+      clock,
+    );
+    const serverId = newId('server');
+    await t.db.insert(servers).values({ id: serverId, orgId, name: 'box', status: 'online' });
+    const app = async (name: string) => {
+      const id = newId('project');
+      await t.db.insert(projects).values({
+        id,
+        orgId,
+        serverId,
+        name,
+        specHash: 'x',
+        spec: {
+          apiVersion: 'vdeploy/v1',
+          kind: 'Application',
+          metadata: { name, labels: {} },
+          source: { type: 'image', image: 'nginx:1' },
+          build: { strategy: 'image' },
+          health: { readiness: { type: 'http', path: '/ready' } },
+        } as never,
+      });
+      return id;
+    };
+    const down = await app('shop');
+    const half = await app('blog');
+    const report: ObservedReport = {
+      generation: 1,
+      events: null,
+      projects: [
+        {
+          projectId: down,
+          replicas: [
+            { name: 'vd-a', state: 'not_ready', release: 'rel_1' },
+            { name: 'vd-b', state: 'not_ready', release: 'rel_1' },
+          ],
+        },
+        {
+          projectId: half,
+          replicas: [
+            { name: 'vd-c', state: 'ready', release: 'rel_1' },
+            { name: 'vd-d', state: 'not_ready', release: 'rel_1' },
+          ],
+        },
+      ],
+    };
+    await notifyFromReport(t.db, serverId, report, clock);
+    await notifyFromReport(t.db, serverId, report, new Date(clock.getTime() + 60_000));
+    await sendDueNotifications(deps());
+    expect(posts).toHaveLength(1);
+    const body = JSON.parse(posts[0]!.body) as { title: string; message: string };
+    expect(body.title).toBe('shop is running but failing its health check');
+    expect(body.message).toContain('/ready');
   });
 
   it('says a certificate has not renewed while there are weeks left, once a day', async () => {
