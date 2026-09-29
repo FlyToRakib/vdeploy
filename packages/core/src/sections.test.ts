@@ -163,7 +163,12 @@ describe('the catalog and the planners agree', () => {
     expect(plan.steps.filter((s) => s.kind === 'update_spec')).toHaveLength(1);
     const after = specAfter(
       'env.import',
-      { entries: [{ key: 'A', value: '1' }, { key: 'A', value: '2' }] },
+      {
+        entries: [
+          { key: 'A', value: '1' },
+          { key: 'A', value: '2' },
+        ],
+      },
       project.spec,
     );
     expect(after.runtime.env.filter((e) => e.key === 'A')).toEqual([{ key: 'A', value: '2' }]);
