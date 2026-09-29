@@ -235,7 +235,17 @@ each is one task, one commit.
 - [ ] the connection-limit warning (§17.3)
 - [ ] the filesystem-sessions warning when scaling (§17.6)
 - [ ] per-volume usage, and an alert before one fills (§17.2)
-- [ ] scheduled clean-up of unused images and build cache (§19)
+- [x] **scheduled clean-up of unused images and build cache (§19)**: once
+  a day each connected server is asked to free disk with the same request
+  as the button — every version a person could still roll back to is
+  named and kept, and the agent removes only images it made. A day counts
+  from the server being added, its last answer, or its last being asked,
+  so a new server is left alone and a silent one is not asked every
+  minute. Found on the way: an image the agent built or received in the
+  last day was removable before its deploy started (a local build often
+  has no name, and nothing names it until its release runs), so a run
+  between a build and its deploy could have failed the deploy. Such an
+  image is now always kept
 
 **Notifications (§18)**
 - [ ] Slack, Discord and Telegram

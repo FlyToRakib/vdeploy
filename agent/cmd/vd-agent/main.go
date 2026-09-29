@@ -340,6 +340,7 @@ func serve(configPath string, log *slog.Logger) error {
 			Reclaim: &reclaim.Runner{
 				Engine: engine,
 				Ours:   images.Ours,
+				Recent: func(id string) bool { return images.Recent(id, reclaim.RecentFor) },
 				Forget: images.Forget,
 				Log:    log,
 			},

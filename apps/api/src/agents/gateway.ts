@@ -86,6 +86,7 @@ import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { WebSocket } from 'ws';
 import { hashToken } from '../kernel/admin.js';
+import { rollbackTargets } from '../kernel/reclaim.js';
 import { checkReachability, type PortProbe } from './reachability.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
 import { DESIRED_STATE_SCHEMA_SHA } from './schema-hash.js';
@@ -138,6 +139,13 @@ interface Connection {
 
 /** How often connected agents are looked at for an update that has become due (§34.2). */
 const UPDATE_SWEEP_MS = 60_000;
+/**
+ * How often a server frees disk without anybody asking (§19): images of
+ * versions nobody can roll back to any more, and the build cache. Daily is
+ * often enough that a small disk never fills with a week of deploys, and
+ * rare enough that the cache a build reuses is usually still there.
+ */
+export const RECLAIM_EVERY_MS = 24 * 60 * 60_000;
 
 interface LogRequest {
   serverId: string;
@@ -284,6 +292,8 @@ export class Gateway
 
   /** When each server's ports were last checked from here (ms). */
   private readonly reachChecked = new Map<string, number>();
+  /** When each server was last asked to free disk on schedule (ms). */
+  private readonly reclaimAsked = new Map<string, number>();
 
   constructor(private readonly deps: GatewayDeps) {}
 
@@ -295,6 +305,9 @@ export class Gateway
       for (const serverId of this.connections.keys()) {
         void this.offerUpdate(serverId).catch((err: unknown) => {
           this.deps.log.error({ err, serverId }, 'could not offer an update');
+        });
+        void this.reclaimIfDue(serverId).catch((err: unknown) => {
+          this.deps.log.error({ err, serverId }, 'could not free disk on schedule');
         });
       }
     }, UPDATE_SWEEP_MS);
@@ -1025,6 +1038,32 @@ export class Gateway
   }
 
   /**
+   * Frees disk on a server once a day (§19), keeping every version a
+   * person could still roll back to — the same request as the button.
+   *
+   * A day is counted from whichever is latest: the server being added, it
+   * last saying what it freed, or it last being asked. So a new server is
+   * left alone for its first day, and one that never answers is asked
+   * again tomorrow rather than every minute.
+   */
+  private async reclaimIfDue(serverId: string): Promise<void> {
+    const [server] = await this.deps.db
+      .select({ createdAt: servers.createdAt, lastReclaim: servers.lastReclaim })
+      .from(servers)
+      .where(eq(servers.id, serverId));
+    if (!server || !this.connections.has(serverId)) return;
+    const now = this.deps.now().getTime();
+    const since = Math.max(
+      server.createdAt.getTime(),
+      server.lastReclaim ? Date.parse(server.lastReclaim.at) : 0,
+      this.reclaimAsked.get(serverId) ?? 0,
+    );
+    if (now - since < RECLAIM_EVERY_MS) return;
+    this.reclaimAsked.set(serverId, now);
+    this.reclaim(serverId, await rollbackTargets(this.deps, serverId));
+  }
+
+  /**
    * Lists one of a project's permanent folders (§20 Runtime). A listing is a
    * question, so it is asked and answered: nothing is stored about it, and
    * an agent that has gone quiet means an empty answer with a reason rather
@@ -1271,6 +1310,10 @@ export class Gateway
             // A target configured while this server was away is proved now,
             // rather than waiting for someone to notice nothing happened.
             await this.dispatchOffsiteChecks(serverId);
+            // Never a reason to refuse the connection.
+            void this.reclaimIfDue(serverId).catch((err: unknown) => {
+              this.deps.log.error({ err, serverId }, 'could not free disk on schedule');
+            });
             return;
           }
           await this.receive(serverId, server.orgId, frame);

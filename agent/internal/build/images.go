@@ -99,6 +99,20 @@ func (i *Images) Ours(id string) bool {
 	return ok
 }
 
+// Recent reports whether this agent built or received the image within
+// the given time, for any project.
+func (i *Images) Recent(id string, within time.Duration) bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	records, err := i.load()
+	if err != nil {
+		// Unreadable is not a reason to call anything old.
+		return true
+	}
+	record, ok := records[id]
+	return ok && time.Since(record.BuiltAt) < within
+}
+
 // Forget drops images that are no longer on this server, so the record does
 // not grow forever with ids of things that are gone.
 func (i *Images) Forget(ids []string) error {

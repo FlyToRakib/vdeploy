@@ -61,12 +61,20 @@ type Engine interface {
 	PruneBuildCache(ctx context.Context) (int64, error)
 }
 
+// RecentFor is how long an image this agent made or received is kept
+// whatever else is true of it: longer than any build waits to be deployed.
+const RecentFor = 24 * time.Hour
+
 // Runner frees disk on one server.
 type Runner struct {
 	Engine Engine
 	// Ours says whether this agent built an image; without it, only images
 	// with no name at all are ever removed.
 	Ours func(imageID string) bool
+	// Recent says whether this agent made or received an image lately.
+	// Such an image is kept: it may be the one a deploy is about to start,
+	// or one still on its way to another server, and nothing names it yet.
+	Recent func(imageID string) bool
 	// Forget drops removed images from the agent's own record.
 	Forget func(ids []string) error
 	Log    *slog.Logger
@@ -167,6 +175,11 @@ func (r *Runner) removable(image docker.Image, keep map[string]bool) bool {
 		if id, ok := strings.CutPrefix(image.ID, "sha256:"); ok && keep[tag+"@sha256:"+id] {
 			return false
 		}
+	}
+	// A build that has not been deployed yet is not spare, whatever it is
+	// called — and a local build often has no name at all.
+	if r.Recent != nil && r.Recent(image.ID) {
+		return false
 	}
 	// With no name at all, nothing can ever refer to it again.
 	if len(image.RepoTags) == 0 {

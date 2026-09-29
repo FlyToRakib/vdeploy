@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { Browser, startTestApp, type TestApp } from '../test-helpers.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
-import { publicAddress } from './gateway.js';
+import { publicAddress, RECLAIM_EVERY_MS } from './gateway.js';
 import { DESIRED_STATE_SCHEMA_SHA } from './schema-hash.js';
 
 let t: TestApp;
@@ -751,6 +751,38 @@ describe('agent channel', () => {
       })
       .toBe(4 * 1024 ** 3);
     fake.inbox.length = 0;
+  });
+
+  it('frees disk on a server once a day without being asked, and leaves a new one alone', async () => {
+    const fresh = await enroll('new-box');
+    const newBox = new FakeAgent(fresh);
+    await newBox.connect();
+    const daily = await enroll('daily');
+    // Added two days ago, and never freed anything since.
+    await t.database.db
+      .update(servers)
+      .set({ createdAt: new Date(Date.now() - 2 * RECLAIM_EVERY_MS) })
+      .where(eq(servers.id, daily.serverId));
+    const fake = new FakeAgent(daily);
+    await fake.connect();
+
+    const asked = async (agent: FakeAgent) => {
+      try {
+        for (;;) if ((await agent.next(1500)).type === 'reclaim') return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(await asked(fake)).toBe(true);
+    expect(await asked(newBox)).toBe(false);
+
+    // Back again before it has answered: not asked twice.
+    fake.close();
+    const again = new FakeAgent(daily);
+    await again.connect();
+    expect(await asked(again)).toBe(false);
+    again.close();
+    newBox.close();
   });
 
   it('refuses a folder this app does not have, without asking the server', async () => {

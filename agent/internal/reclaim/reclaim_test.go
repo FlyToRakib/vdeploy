@@ -147,6 +147,22 @@ func TestWhatGoesIsWhatVDeployMadeAndWhatHasNoNameLeft(t *testing.T) {
 	}
 }
 
+func TestABuildNotDeployedYetIsKeptWhateverItIsCalled(t *testing.T) {
+	// A local build is often nameless, and until its release starts nothing
+	// names it: without this, a scheduled run between the build and the
+	// deploy would take it, and the deploy would fail.
+	e := engine()
+	var forgotten []string
+	r := runner(e, &forgotten)
+	r.Recent = func(id string) bool { return id == built || id == "sha256:nameless" }
+	r.Run(context.Background(), Request{RequestID: "r1"})
+	for _, id := range []string{built, "sha256:nameless"} {
+		if slices.Contains(e.removed, id) {
+			t.Fatalf("%s, made moments ago, was removed", id)
+		}
+	}
+}
+
 func TestWhatWasFreedIsMeasuredNotEstimated(t *testing.T) {
 	e := engine()
 	result, _ := run(t, e, nil)
