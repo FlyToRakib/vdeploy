@@ -138,6 +138,10 @@ func TestAKeyIsReplacedWholeAndDated(t *testing.T) {
 	if RotationDue(loaded, now.Add(RotateEvery-time.Hour)) || !RotationDue(loaded, now.Add(RotateEvery)) {
 		t.Fatal("due at the wrong time")
 	}
+	// The key it replaced is kept, for a control plane restored from before.
+	if previous := LoadPrevious(dir); previous == nil || !previous.Equal(first) {
+		t.Fatal("the previous key was not kept")
+	}
 	// Nothing half-written is left beside it.
 	if leftovers, _ := filepath.Glob(filepath.Join(dir, "*.next")); len(leftovers) != 0 {
 		t.Fatalf("left behind: %v", leftovers)

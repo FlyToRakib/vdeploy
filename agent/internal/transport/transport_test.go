@@ -11,7 +11,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -452,5 +454,88 @@ func TestAKeyTheAgentDidNotOfferIsNeverKept(t *testing.T) {
 	}
 	if !client.Key.Equal(h.agentKey) {
 		t.Fatal("the agent stopped using its own key")
+	}
+}
+
+// A control plane restored from a backup taken before the agent's last
+// rotation knows only its previous key. The agent is refused once, comes
+// back with the previous key, offers its current one again, and ends up
+// on it — never locked out.
+func TestAnAgentFindsItsWayBackToAControlPlaneRestoredFromBeforeItsRotation(t *testing.T) {
+	h := newHarness(t)
+	oldPub, oldKey, _ := ed25519.GenerateKey(rand.Reader)
+	var mu sync.Mutex
+	known := []ed25519.PublicKey{oldPub} // what the restored database holds
+	var trail []string
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		session := &protocol.Session{ServerID: server, Nonce: "nonce-0123456789abcdef", Now: time.Now}
+		send := func(body any) {
+			wire, _ := protocol.Seal(h.cpKey, body)
+			_ = ws.Write(context.Background(), websocket.MessageText, wire)
+		}
+		send(frame(session.Next(protocol.TypeChallenge), nil))
+		_, wire, err := ws.Read(context.Background())
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		var signer ed25519.PublicKey
+		for _, key := range known {
+			if _, err := protocol.Open(key, wire); err == nil {
+				signer = key
+			}
+		}
+		if signer == nil {
+			trail = append(trail, "refused")
+			mu.Unlock()
+			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
+			return
+		}
+		if signer.Equal(h.agentPub) {
+			trail = append(trail, "current")
+			mu.Unlock()
+			close(done)
+			return
+		}
+		trail = append(trail, "previous")
+		mu.Unlock()
+		_, wire, err = ws.Read(context.Background())
+		if err != nil {
+			return
+		}
+		body, _ := protocol.Open(signer, wire)
+		var rekey rekeyFrame
+		_ = json.Unmarshal(body, &rekey)
+		mu.Lock()
+		if rekey.PublicKey == base64.StdEncoding.EncodeToString(h.agentPub) {
+			known = append(known, h.agentPub) // kept beside the old one
+		}
+		mu.Unlock()
+		send(frame(session.Next(protocol.TypeRekeyed), map[string]any{"publicKey": rekey.PublicKey}))
+		_, _, _ = ws.Read(context.Background())
+	}))
+	t.Cleanup(srv.Close)
+
+	client := h.client(srv.URL)
+	client.StateDir = t.TempDir()
+	client.Identity.KeyRotatedAt = time.Now().UTC().Format(time.RFC3339) // not due itself
+	client.PreviousKey = oldKey
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	go client.Run(ctx)
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatalf("the agent never came back on its own key: %v", trail)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(trail, []string{"refused", "previous", "current"}) {
+		t.Fatalf("trail = %v", trail)
 	}
 }

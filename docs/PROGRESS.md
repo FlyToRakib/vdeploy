@@ -344,7 +344,11 @@ each is one task, one commit.
   a crash leaves one whole key — and reconnect, and that first hello
   makes it the only key, in the audit log. Every step leaves a working
   pair: a lost answer or a crash leaves the old key, still accepted, and
-  a key the agent did not offer is never kept
+  a key the agent did not offer is never kept. And a control plane put
+  back from a backup older than the rotation — the restore drill's own
+  case — knows only the old key: the agent keeps it, tries it once when
+  refused, and offers its current key again, so a restore never locks a
+  server out
 - [x] **uploads no longer fill the database for ever**: every uploaded
   source and dump was kept in Postgres with no end — the "disk fills"
   outage §6 guards against, moved into the database. An hourly sweep now

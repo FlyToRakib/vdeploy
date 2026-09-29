@@ -61,6 +61,13 @@ key and the old one alike until it has seen the new one used.
 */
 func Replace(dir string, id Identity, key ed25519.PrivateKey, now time.Time) (Identity, error) {
 	id.KeyRotatedAt = now.UTC().Format(time.RFC3339)
+	// The key being replaced is kept: a control plane put back from a
+	// backup taken before this moment still knows only that one.
+	if old, err := os.ReadFile(filepath.Join(dir, keyFile)); err == nil { // #nosec G304 -- the agent's own state dir
+		if err := writeAtomic(filepath.Join(dir, previousKeyFile), old); err != nil {
+			return id, fmt.Errorf("keep the previous key: %w", err)
+		}
+	}
 	seed := base64.StdEncoding.EncodeToString(key.Seed())
 	if err := writeAtomic(filepath.Join(dir, keyFile), []byte(seed+"\n")); err != nil {
 		return id, fmt.Errorf("write agent key: %w", err)
@@ -126,6 +133,9 @@ var ErrNotEnrolled = errors.New("this server is not enrolled")
 const (
 	identityFile = "identity.json"
 	keyFile      = "agent.key"
+	// previousKeyFile is the key before the last rotation, kept for a
+	// control plane restored from a backup older than it (§25).
+	previousKeyFile = "agent.key.previous"
 )
 
 // Load reads the identity and private key from dir.
@@ -154,6 +164,19 @@ func Load(dir string) (Identity, ed25519.PrivateKey, ed25519.PublicKey, error) {
 		return id, nil, nil, errors.New("pinned control-plane key is corrupt")
 	}
 	return id, ed25519.NewKeyFromSeed(decoded), ed25519.PublicKey(cpKey), nil
+}
+
+// LoadPrevious reads the key before the last rotation; nil when there is none.
+func LoadPrevious(dir string) ed25519.PrivateKey {
+	seed, err := os.ReadFile(filepath.Join(dir, previousKeyFile)) // #nosec G304 -- the agent's own state dir
+	if err != nil {
+		return nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(bytes.TrimSpace(seed)))
+	if err != nil || len(decoded) != ed25519.SeedSize {
+		return nil
+	}
+	return ed25519.NewKeyFromSeed(decoded)
 }
 
 // CheckURL requires https, except to this machine (a control plane on the same box).

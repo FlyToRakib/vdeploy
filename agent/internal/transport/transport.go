@@ -54,7 +54,11 @@ type Client struct {
 	Identity identity.Identity
 	Key      ed25519.PrivateKey
 	// StateDir is where the identity lives; empty never rotates the key.
-	StateDir     string
+	StateDir string
+	// PreviousKey is the key before the last rotation, tried when a hello
+	// signed with Key is refused: a control plane restored from a backup
+	// taken before the rotation knows only that one (§25).
+	PreviousKey  ed25519.PrivateKey
 	ControlPlane ed25519.PublicKey
 	Facts        identity.Facts
 	// BoxKey is this agent's X25519 public key (base64): secrets are sealed to it.
@@ -117,6 +121,9 @@ type Client struct {
 	// nextKey is the key offered in a rekey frame, until the control plane
 	// says it is kept. Only the receive loop touches it.
 	nextKey ed25519.PrivateKey
+	// usePrevious signs the next hello with PreviousKey, after one signed
+	// with Key was refused. Only the connection loop touches it.
+	usePrevious bool
 }
 
 // errRekeyed ends a session so the next one signs with the new key.
@@ -243,15 +250,25 @@ offerNextKey asks the control plane to keep a new key (§25), signed with
 this one, when this one is due to go. Nothing is written yet: the new key
 becomes this agent's only when the control plane says it is kept.
 */
-func (c *Client) offerNextKey(ctx context.Context, k *conn) error {
-	if c.StateDir == "" || !identity.RotationDue(c.Identity, c.Now()) {
+func (c *Client) offerNextKey(ctx context.Context, k *conn, onPrevious bool) error {
+	if c.StateDir == "" {
 		return nil
 	}
-	pub, priv, err := identity.NewKey()
-	if err != nil {
-		return err
+	var pub ed25519.PublicKey
+	switch {
+	case onPrevious:
+		// Signed in with the old key: the control plane was put back from
+		// before the rotation. The key this agent uses now is offered again.
+		pub, c.nextKey = c.Key.Public().(ed25519.PublicKey), c.Key
+	case identity.RotationDue(c.Identity, c.Now()):
+		fresh, priv, err := identity.NewKey()
+		if err != nil {
+			return err
+		}
+		pub, c.nextKey = fresh, priv
+	default:
+		return nil
 	}
-	c.nextKey = priv
 	return k.send(ctx, protocol.TypeRekey, func(h protocol.Header) any {
 		return rekeyFrame{Header: h, PublicKey: base64.StdEncoding.EncodeToString(pub)}
 	})
@@ -267,6 +284,11 @@ func (c *Client) takeNextKey(kept string) error {
 	if kept != offered {
 		return errors.New("the control plane kept a key this agent did not offer")
 	}
+	if c.nextKey.Equal(c.Key) {
+		// The control plane knows this agent's key again; nothing changes here.
+		c.nextKey, c.usePrevious = nil, false
+		return errRekeyed
+	}
 	id, err := identity.Replace(c.StateDir, c.Identity, c.nextKey, c.Now())
 	if err != nil {
 		// Still the old key on disk, and the control plane accepts it.
@@ -274,7 +296,8 @@ func (c *Client) takeNextKey(kept string) error {
 		c.Log.Warn("could not keep the new key; keeping the old one", "err", err)
 		return nil
 	}
-	c.Identity, c.Key, c.nextKey = id, c.nextKey, nil
+	c.Identity, c.PreviousKey, c.Key, c.nextKey = id, c.Key, c.nextKey, nil
+	c.usePrevious = false
 	return errRekeyed
 }
 
@@ -377,7 +400,12 @@ func (c *Client) session(ctx context.Context) error {
 	defer func() { _ = ws.CloseNow() }()
 	ws.SetReadLimit(maxFrameBytes)
 
-	k := &conn{ws: ws, key: c.Key}
+	key := c.Key
+	onPrevious := c.usePrevious && c.PreviousKey != nil
+	if onPrevious {
+		key = c.PreviousKey
+	}
+	k := &conn{ws: ws, key: key}
 	if err := c.handshake(ctx, k); err != nil {
 		_ = ws.Close(websocket.StatusPolicyViolation, "handshake refused")
 		return err
@@ -397,14 +425,21 @@ func (c *Client) session(ctx context.Context) error {
 	go c.forwardVerifyResults(ctx, k)
 	go c.forwardSnapshotResults(ctx, k)
 	go c.forwardTaskResults(ctx, k)
-	if err := c.offerNextKey(ctx, k); err != nil {
+	if err := c.offerNextKey(ctx, k, onPrevious); err != nil {
 		c.Log.Warn("could not offer a new key; keeping this one", "err", err)
 	}
+	accepted := false
 	for {
 		if err := c.receive(ctx, k); err != nil {
+			// Refused before a single frame came back: the control plane
+			// may know the other key, so the next attempt signs with it.
+			if !accepted && c.PreviousKey != nil && websocket.CloseStatus(err) == websocket.StatusPolicyViolation {
+				c.usePrevious = !onPrevious
+			}
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
 			return err
 		}
+		accepted = true
 	}
 }
 

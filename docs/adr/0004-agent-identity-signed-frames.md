@@ -48,4 +48,10 @@ hello signed with the new key makes it the only one, and the change is in
 the audit log. Every step leaves a working pair: a lost answer or a crash
 leaves the old key, which is still accepted. An agent enrolled before
 this rotates on its next connection.
+
+The agent keeps the key it replaced. A control plane restored from a
+backup taken before the rotation knows only that one, so a hello it
+refuses is tried once more with the previous key, and on that
+connection the agent offers its current key again: the ordinary
+rotation then finishes, and the restore never locks a server out.
 - `docs/vdeploy.md` §25 is illustrative on mTLS; this ADR is normative.
