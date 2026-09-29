@@ -21,6 +21,10 @@ import (
 // CertResolver is the ACME resolver name in Traefik's static configuration.
 const CertResolver = "letsencrypt"
 
+// DNSResolver proves certificates through DNS (§13): the second resolver,
+// present only when the organization named its DNS provider.
+const DNSResolver = "letsencrypt-dns"
+
 type object = map[string]any
 
 // Redirect sends an old hostname, permanently, to the same path on a new one.
@@ -69,7 +73,7 @@ func (t Traffic) all() []Backend {
 func quote(host string) string { return "`" + host + "`" }
 
 func rule(d spec.Domain) string {
-	hostRule := "Host(" + quote(d.Host) + ")"
+	hostRule := hostMatch("Host", d.Host)
 	var prefixes []string
 	for _, p := range d.Paths {
 		if p != "/" {
@@ -80,6 +84,18 @@ func rule(d spec.Domain) string {
 		return hostRule
 	}
 	return hostRule + " && (" + strings.Join(prefixes, " || ") + ")"
+}
+
+/*
+hostMatch matches a name, or for a wildcard domain (*.example.com) every
+name one label below it — as its certificate covers them, and no deeper.
+Traefik's Host matcher takes no wildcards, so those become a regexp.
+*/
+func hostMatch(matcher, host string) string {
+	if base, ok := strings.CutPrefix(host, "*."); ok {
+		return matcher + "Regexp(" + quote(`^[^.]+\.`+regexp.QuoteMeta(base)+"$") + ")"
+	}
+	return matcher + "(" + quote(host) + ")"
 }
 
 // denied turns a deny list into a clause of the router's own rule, so an
@@ -196,6 +212,28 @@ func movedPath(moved spec.MovedPath) object {
 	}}
 }
 
+/*
+tlsFor is how a name gets its certificate (§13): over HTTP by default, or
+through DNS when its domain says so — which is what a name behind
+Cloudflare's proxy needs. A name covered by the wildcard for instant URLs
+(§13.1) asks for that one certificate, so the router keeps a single
+*.base certificate rather than one per project.
+*/
+func tlsFor(d spec.Domain) object {
+	resolver := CertResolver
+	if d.TLS.Challenge == "dns-01" {
+		resolver = DNSResolver
+	}
+	tls := object{"certResolver": resolver}
+	if strings.HasPrefix(d.Host, "*.") {
+		tls["domains"] = []object{{"main": d.Host}}
+	}
+	if d.Wildcard != "" {
+		tls["domains"] = []object{{"main": d.Wildcard, "sans": []string{"*." + d.Wildcard}}}
+	}
+	return tls
+}
+
 // services renders either one service, or a weighted pair sharing traffic.
 func services(key string, n spec.Network, traffic Traffic) object {
 	if !traffic.splitting() {
@@ -275,7 +313,7 @@ func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Re
 		if d.TLS.Provider == "letsencrypt" {
 			routers[name] = object{
 				"rule": rule(d) + deny, "service": key, "entryPoints": []string{"websecure"},
-				"middlewares": chain, "tls": object{"certResolver": CertResolver},
+				"middlewares": chain, "tls": tlsFor(d),
 			}
 			routers[name+"-http"] = object{
 				"rule": rule(d) + deny, "service": key, "entryPoints": []string{"web"},

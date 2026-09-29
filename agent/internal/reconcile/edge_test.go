@@ -34,7 +34,7 @@ func edgeRoute(over func(*spec.EdgeRoute)) spec.EdgeRoute {
 // rendered is the routing file an edge would write, decoded.
 func rendered(t *testing.T, route spec.EdgeRoute) map[string]any {
 	t.Helper()
-	hosts, redirects := edgeHosts(route)
+	hosts, redirects := edgeHosts(route, false)
 	content, ok := routerFile(t, route, hosts, redirects)
 	if !ok {
 		t.Fatal("an edge route rendered nothing")
@@ -78,7 +78,7 @@ func TestAnEdgeAsksOnlyForCertificatesItCanGet(t *testing.T) {
 	if strings.Contains(string(body), "shop.example.com") && strings.Count(string(body), "certResolver") != 1 {
 		t.Fatalf("a certificate was asked for a name that does not point here: %s", body)
 	}
-	hosts, _ := edgeHosts(route)
+	hosts, _ := edgeHosts(route, false)
 	for _, host := range hosts {
 		if host.Host == "shop.example.com" && host.TLS.Provider != "" {
 			t.Fatal("an unverified name was still asked for a certificate")
@@ -94,7 +94,7 @@ func TestAnEdgeServesAnAppWithNoCustomDomain(t *testing.T) {
 		r.Network.Domains = nil
 		r.Hosts.Verified = []string{"shop.apps.vdeploy.test"}
 	})
-	hosts, _ := edgeHosts(route)
+	hosts, _ := edgeHosts(route, false)
 	if len(hosts) != 1 || hosts[0].Host != "shop.apps.vdeploy.test" {
 		t.Fatalf("the instant URL was not served: %v", hosts)
 	}
@@ -107,7 +107,7 @@ func TestAnEdgeWritesNothingForAnAppNothingCanReach(t *testing.T) {
 		r.Network.Domains = nil
 		r.Hosts.Instant = ""
 	})
-	hosts, _ := edgeHosts(route)
+	hosts, _ := edgeHosts(route, false)
 	if len(hosts) != 0 {
 		t.Fatalf("an unreachable app was routed anyway: %v", hosts)
 	}

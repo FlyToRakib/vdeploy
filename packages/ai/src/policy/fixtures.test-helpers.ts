@@ -205,6 +205,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'database.expose': { port: 15432 },
   'registry.add': { host: 'ghcr.io', username: 'acme-bot', password: 'read-only-token' },
   'registry.remove': { registryId: newId('registry') },
+  'dns_provider.set': { provider: 'cloudflare', credentials: { CF_DNS_API_TOKEN: 'token' } },
   'user.invite': { email: 'someone@example.com', role: 'developer' },
   'user.remove': { userId: newId('user') },
   'user.set_role': { userId: newId('user'), role: 'viewer' },

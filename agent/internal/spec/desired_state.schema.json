@@ -1697,6 +1697,11 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "instantWildcard": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
               }
             },
             "required": [
@@ -1749,6 +1754,46 @@
         ],
         "additionalProperties": false
       }
+    },
+    "acmeDns": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "cloudflare",
+            "route53",
+            "digitalocean"
+          ]
+        },
+        "env": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "sealed": {
+                "type": "string",
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "key",
+              "sealed"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "provider",
+        "env"
+      ],
+      "additionalProperties": false
     },
     "databases": {
       "default": [],

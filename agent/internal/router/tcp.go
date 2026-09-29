@@ -3,7 +3,6 @@ package router
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/spec"
 )
@@ -23,28 +22,31 @@ the addresses turned away, the addresses let in, and a blue/green switch,
 which is this file changing.
 */
 func tcpFile(key string, network *spec.Network, hosts []spec.Domain, traffic Traffic) ([]byte, bool) {
-	var names []string
-	for _, d := range hosts {
-		if d.TLS.Provider == CertResolver {
-			names = append(names, "HostSNI("+quote(d.Host)+")")
+	allowName := key + "-allow"
+	allow := network.Middleware.IPAllowList
+	deny := denied(network.Middleware.IPDenyList)
+	// One router per name, so each carries its own certificate settings.
+	routers := object{}
+	for i, d := range hosts {
+		if d.TLS.Provider != CertResolver {
+			continue
 		}
+		rule := hostMatch("HostSNI", d.Host)
+		if deny != "" {
+			rule = "(" + rule + ")" + deny
+		}
+		r := object{"rule": rule, "service": key, "entryPoints": []string{"websecure"}, "tls": tlsFor(d)}
+		if len(allow) > 0 {
+			r["middlewares"] = []string{allowName}
+		}
+		routers[key+"-"+strconv.Itoa(i)] = r
 	}
-	if len(names) == 0 {
+	if len(routers) == 0 {
 		return nil, false
 	}
-	rule := strings.Join(names, " || ")
-	if deny := denied(network.Middleware.IPDenyList); deny != "" {
-		rule = "(" + rule + ")" + deny
-	}
-	router := object{
-		"rule": rule, "service": key, "entryPoints": []string{"websecure"},
-		"tls": object{"certResolver": CertResolver},
-	}
-	tcp := object{"routers": object{key: router}, "services": tcpServices(key, traffic)}
-	if allow := network.Middleware.IPAllowList; len(allow) > 0 {
-		name := key + "-allow"
-		tcp["middlewares"] = object{name: object{"ipAllowList": object{"sourceRange": allow}}}
-		router["middlewares"] = []string{name}
+	tcp := object{"routers": routers, "services": tcpServices(key, traffic)}
+	if len(allow) > 0 {
+		tcp["middlewares"] = object{allowName: object{"ipAllowList": object{"sourceRange": allow}}}
 	}
 	out, _ := json.MarshalIndent(object{"tcp": tcp}, "", "  ")
 	return append(out, '\n'), true

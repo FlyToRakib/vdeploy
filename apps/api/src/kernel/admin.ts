@@ -4,6 +4,7 @@ import { newId, UrlSettings, VDeployError, type OperationName } from '@vdeploy/c
 import {
   apikey,
   bumpDesiredGeneration,
+  dnsProviderOf,
   auditLog,
   databases,
   MESH_DEFAULT_PORT,
@@ -39,6 +40,7 @@ import { FILE_ADMIN } from './files.js';
 import { RECLAIM_ADMIN } from './reclaim.js';
 import { FREEZE_ADMIN } from './freezes.js';
 import { PEOPLE_ADMIN } from './people.js';
+import { DNS_PROVIDER_ADMIN } from './dns-provider.js';
 import { STATUS_ADMIN } from './status.js';
 import type { Handler, HandlerContext } from './context.js';
 
@@ -100,6 +102,7 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
   ...RECLAIM_ADMIN,
   ...FREEZE_ADMIN,
   ...PEOPLE_ADMIN,
+  ...DNS_PROVIDER_ADMIN,
   ...STATUS_ADMIN,
   /**
    * Removing a server (§20 Servers). Only once nothing is on it: a server
@@ -200,7 +203,17 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
   },
   'urls.configure': async ({ deps, actor, args }) => {
     const settings = UrlSettings.parse(args);
+    if (settings.wildcardCertificate && !(await dnsProviderOf(deps.db, actor.orgId))) {
+      throw new VDeployError(
+        'invalid_input',
+        'a wildcard certificate is proved through DNS: set the DNS provider first',
+      );
+    }
     return deps.db.transaction(async (tx) => {
+      const [before] = await tx
+        .select({ settings: urlSettings.settings })
+        .from(urlSettings)
+        .where(eq(urlSettings.orgId, actor.orgId));
       await tx
         .insert(urlSettings)
         .values({ orgId: actor.orgId, settings, updatedAt: deps.now() })
@@ -209,7 +222,17 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
           set: { settings, updatedAt: deps.now() },
         });
       // Every project moves to its new URL; the old one redirects to it.
-      await refreshInstantHosts(tx, { orgId: actor.orgId });
+      const moved = await refreshInstantHosts(tx, { orgId: actor.orgId });
+      // The wildcard certificate is each router's to ask for (§13.1): every
+      // server is told, not only those whose projects moved.
+      if ((before?.settings.wildcardCertificate ?? false) !== settings.wildcardCertificate) {
+        const rows = await tx
+          .select({ id: servers.id })
+          .from(servers)
+          .where(eq(servers.orgId, actor.orgId));
+        for (const row of rows)
+          if (!moved.includes(row.id)) await bumpDesiredGeneration(tx, row.id);
+      }
       const hosts = await tx
         .select({ id: projects.id, name: projects.name, instantHost: projects.instantHost })
         .from(projects)

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Lock, Trash2 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStepUp } from '@/components/step-up';
@@ -316,7 +317,9 @@ export function DomainsSection() {
         {hosts.map((host) => {
           const check = checks?.find((c) => c.host === host);
           const twin = checks?.find((c) => c.twinOf === host);
-          const twinOn = spec.network?.domains.find((d) => d.host === host)?.twin !== false;
+          const domain = spec.network?.domains.find((d) => d.host === host);
+          const twinOn = domain?.twin !== false;
+          const throughDns = domain?.tls?.challenge === 'dns-01';
           const look = DOMAIN_LOOK[check?.status ?? 'pending'] ?? DOMAIN_LOOK.pending;
           return (
             <li key={host} className="grid gap-2 rounded-md border border-border p-3 text-sm">
@@ -377,6 +380,34 @@ export function DomainsSection() {
                   </Status>
                 )}
               </label>
+              {/* A wildcard domain can only be proved through DNS; nothing to choose. */}
+              {!host.startsWith('*.') && (
+                <label className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={throughDns}
+                    onChange={(event) =>
+                      void act(
+                        'tls.configure',
+                        {
+                          projectId,
+                          host,
+                          challenge: event.target.checked ? 'dns-01' : 'http-01',
+                        },
+                        event.target.checked
+                          ? `Proving ${host} through DNS`
+                          : `Proving ${host} over HTTP`,
+                      )
+                    }
+                  />
+                  Prove its certificate through DNS — for an address behind Cloudflare&apos;s proxy.
+                  Needs the DNS provider in{' '}
+                  <Link href="/settings/domains" className="underline">
+                    Domains &amp; certificates
+                  </Link>
+                  .
+                </label>
+              )}
               {twinOn && twin && twin.status !== 'verified' && twin.instructions.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   For {twin.host}, add{' '}

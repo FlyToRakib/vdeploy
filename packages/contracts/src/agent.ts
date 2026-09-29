@@ -18,6 +18,7 @@ import { Mesh } from './mesh.js';
 import { PinnedImage } from './kernel.js';
 import { ApplicationSpec } from './spec/application.js';
 import { Hostname } from './spec/sections.js';
+import { DnsProviderKind } from './dns-provider.js';
 
 /** Bumped on any breaking change to what the agent receives (§25 version negotiation). */
 export const AGENT_PROTOCOL = 2;
@@ -91,6 +92,11 @@ export const DesiredProject = z.strictObject({
       .array(z.strictObject({ from: Hostname, to: Hostname }))
       .max(64)
       .default([]),
+    /**
+     * The base domain whose one wildcard certificate covers the instant
+     * URL (§13.1), when the organization chose that; proved through DNS.
+     */
+    instantWildcard: Hostname.optional(),
   }),
   /**
    * The secret values this release uses, each sealed to the agent's own
@@ -118,6 +124,18 @@ export const DesiredState = z.strictObject({
   serverId: idSchema('server'),
   generation: z.number().int().min(0),
   projects: z.array(DesiredProject).max(200),
+  /**
+   * The organization's DNS provider, for certificates proved through DNS
+   * (§13): its credentials sealed to this agent, for the router alone.
+   */
+  acmeDns: z
+    .strictObject({
+      provider: DnsProviderKind,
+      env: z
+        .array(z.strictObject({ key: z.string().max(64), sealed: z.string().max(10_000) }))
+        .max(8),
+    })
+    .optional(),
   /** The managed databases this server runs (§17.3); absent for older agents. */
   databases: z.array(DesiredDatabase).max(64).default([]),
   /**

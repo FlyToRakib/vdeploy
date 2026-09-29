@@ -380,9 +380,13 @@ func TestRefusedProjectIsNeverStarted(t *testing.T) {
 type fakeRouting struct {
 	files  map[string]string
 	joined map[string]bool
+	dns    *docker.DNSChallenge
 }
 
-func (f *fakeRouting) EnsureRouter(context.Context) error { return nil }
+func (f *fakeRouting) EnsureRouter(_ context.Context, dns *docker.DNSChallenge) error {
+	f.dns = dns
+	return nil
+}
 func (f *fakeRouting) Join(_ context.Context, network string) error {
 	f.joined[network] = true
 	return nil

@@ -22,6 +22,7 @@ import { NewChannelConfig, NotificationTrigger } from '../notifications.js';
 import { ENV_KEY } from '../dotenv.js';
 import { NewDeployFreeze } from '../freezes.js';
 import { RegistryHost } from '../builds.js';
+import { NewDnsProvider } from '../dns-provider.js';
 import { PluginManifest } from '../plugins.js';
 import { PreviewRef } from '../previews.js';
 import { EmailDomain, SsoSettings } from '../sso.js';
@@ -818,6 +819,30 @@ export const OPERATIONS = [
     'Forget the sign-in for a private image registry',
     obj({ registryId: idSchema('registry') }),
     { minRole: 'admin' },
+  ),
+  query(
+    'dns_provider.get',
+    'org',
+    'config',
+    "Which DNS provider this organization's certificates can be proved through (never its credentials)",
+    obj({}),
+  ),
+  // Tier 4 like 'secret.set': it takes credentials that can change DNS.
+  operation(
+    'dns_provider.set',
+    'human_only',
+    'org',
+    'Let certificates be proved through DNS, with credentials for where DNS is hosted: needed for DNS-01 and wildcard certificates',
+    NewDnsProvider,
+    { minRole: 'admin', stepUp: true },
+  ),
+  operation(
+    'dns_provider.remove',
+    'human_only',
+    'org',
+    'Forget the DNS provider; certificates proved through DNS stop renewing',
+    obj({}),
+    { minRole: 'admin', stepUp: true },
   ),
   query(
     'freeze.list',

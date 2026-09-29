@@ -33,3 +33,4 @@ export * from './ai.js';
 export * from './freezes.js';
 export * from './canary.js';
 export * from './registries.js';
+export * from './dns-providers.js';

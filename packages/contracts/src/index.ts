@@ -21,6 +21,7 @@ export * from './sso.js';
 export * from './builds.js';
 export * from './dotenv.js';
 export * from './freezes.js';
+export * from './dns-provider.js';
 export * from './logs.js';
 export * from './mesh.js';
 export * from './backups.js';

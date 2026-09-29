@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
@@ -14,7 +15,9 @@ import (
 // Routing publishes traffic to running replicas. A nil Routing turns it off
 // (a build-only server serves no traffic).
 type Routing interface {
-	EnsureRouter(ctx context.Context) error
+	// EnsureRouter starts the router; dns adds the resolver that proves
+	// names through DNS, and nil leaves it out.
+	EnsureRouter(ctx context.Context, dns *docker.DNSChallenge) error
 	Join(ctx context.Context, network string) error
 	Write(key string, content []byte) error
 	Prune(keep map[string]bool) error
@@ -29,8 +32,52 @@ type TraefikRouting struct {
 }
 
 // EnsureRouter implements Routing.
-func (t TraefikRouting) EnsureRouter(ctx context.Context) error {
-	return t.Engine.EnsureTraefik(ctx, t.Options)
+func (t TraefikRouting) EnsureRouter(ctx context.Context, dns *docker.DNSChallenge) error {
+	opts := t.Options
+	opts.DNS = dns
+	return t.Engine.EnsureTraefik(ctx, opts)
+}
+
+/*
+dnsProviderKeys are the credentials each DNS provider's challenge reads —
+and the only environment the router is ever given from outside. Traefik
+reads its whole configuration from TRAEFIK_* variables too, so a variable
+not on this list would let whoever sent it reconfigure the router: the
+agent passes exactly these names, and refuses the provider otherwise.
+*/
+var dnsProviderKeys = map[string][]string{
+	"cloudflare":   {"CF_DNS_API_TOKEN"},
+	"route53":      {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"},
+	"digitalocean": {"DO_AUTH_TOKEN"},
+}
+
+// dnsChallenge opens the organization's DNS provider for the router, or
+// answers nil — no provider, one the agent does not know, a credential it
+// was not told to expect, or one it could not open.
+func (p *pass) dnsChallenge(state *spec.DesiredState) *docker.DNSChallenge {
+	given := state.AcmeDNS
+	if given == nil || p.r.Secrets == nil {
+		return nil
+	}
+	allowed, known := dnsProviderKeys[given.Provider]
+	if !known {
+		p.event("refused", "", docker.TraefikName, "unknown DNS provider "+given.Provider)
+		return nil
+	}
+	env := make([]string, 0, len(given.Env))
+	for _, e := range given.Env {
+		if !slices.Contains(allowed, e.Key) {
+			p.event("refused", "", docker.TraefikName, "the DNS provider was sent a setting it does not use: "+e.Key)
+			return nil
+		}
+		value, err := p.r.Secrets.Open("dns", e.Key, 1, e.Sealed)
+		if err != nil || strings.ContainsAny(value, "\x00\n") {
+			p.event("failed", "", docker.TraefikName, "the DNS provider's "+e.Key+" could not be opened")
+			return nil
+		}
+		env = append(env, e.Key+"="+value)
+	}
+	return &docker.DNSChallenge{Provider: given.Provider, Env: env}
 }
 
 // Join implements Routing.
@@ -102,7 +149,7 @@ func (p *pass) backends(project spec.DesiredProject, containers []compose.Contai
 // A certificate is requested only for hosts the control plane verified in
 // DNS (§13); until then a host is served on plain HTTP, so an early request
 // can never count toward Let's Encrypt's failed-validation lockout.
-func routes(project spec.DesiredProject) ([]spec.Domain, []router.Redirect) {
+func routes(project spec.DesiredProject, dnsReady bool) ([]spec.Domain, []router.Redirect) {
 	verified := map[string]bool{}
 	for _, host := range project.Hosts.Verified {
 		verified[host] = true
@@ -111,6 +158,12 @@ func routes(project spec.DesiredProject) ([]spec.Domain, []router.Redirect) {
 	own := map[string]bool{}
 	for _, d := range project.Spec.Network.Domains {
 		if d.TLS.Provider == router.CertResolver && !verified[d.Host] {
+			d.TLS.Provider = "none"
+		}
+		// Proved through DNS, which this router cannot do without the
+		// provider: served on plain HTTP until it can, never on a
+		// resolver that is not there.
+		if d.TLS.Challenge == "dns-01" && !dnsReady {
 			d.TLS.Provider = "none"
 		}
 		hosts = append(hosts, d)
@@ -134,6 +187,12 @@ func routes(project spec.DesiredProject) ([]spec.Domain, []router.Redirect) {
 		if verified[instant] {
 			d.TLS.Provider = router.CertResolver
 		}
+		// One wildcard certificate for every instant URL (§13.1), when the
+		// organization chose it and the router can prove it.
+		if base := project.Hosts.InstantWildcard; base != "" && dnsReady && verified[instant] {
+			d.TLS.Challenge = "dns-01"
+			d.Wildcard = base
+		}
 		hosts = append(hosts, d)
 	}
 	for _, old := range project.Hosts.Redirects {
@@ -151,7 +210,8 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 	if routing == nil {
 		return
 	}
-	if err := routing.EnsureRouter(ctx); err != nil {
+	dns := p.dnsChallenge(state)
+	if err := routing.EnsureRouter(ctx, dns); err != nil {
 		p.event("failed", "", docker.TraefikName, err.Error())
 		return
 	}
@@ -167,7 +227,7 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 		}
 		key := compose.ProjectKey(project.ProjectID)
 		traffic := p.backends(project, containers)
-		hosts, redirects := routes(project)
+		hosts, redirects := routes(project, dns != nil)
 		users, opened := p.basicAuthUsers(project)
 		if !opened {
 			// Its password could not be opened: no routing at all rather

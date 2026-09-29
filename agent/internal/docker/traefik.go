@@ -12,6 +12,7 @@ import (
 	"slices"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
+	"github.com/FlyToRakib/vdeploy/agent/internal/router"
 )
 
 // Traefik is the agent's own infrastructure (§13): the only container with
@@ -35,13 +36,23 @@ const (
 	drainSeconds = 10
 )
 
-// TraefikOptions come from the agent's local configuration only.
+// DNSChallenge is what the router needs to prove a name through DNS.
+type DNSChallenge struct {
+	Provider string
+	// Env is the provider's credentials as KEY=value, for the router alone.
+	Env []string
+}
+
+// TraefikOptions come from the agent's local configuration, and the DNS
+// provider from the organization's desired state.
 type TraefikOptions struct {
 	// DynamicDir is the host directory of routing files (mounted read-only).
 	DynamicDir string
 	ACMEEmail  string
 	// ACMEServer overrides Let's Encrypt (a staging or test CA).
 	ACMEServer string
+	// DNS adds the resolver that proves names through DNS; nil leaves it out.
+	DNS *DNSChallenge
 }
 
 type portBinding struct {
@@ -58,6 +69,7 @@ type traefikHostConfig struct {
 type traefikCreate struct {
 	Image        string              `json:"Image"`
 	Cmd          []string            `json:"Cmd"`
+	Env          []string            `json:"Env,omitempty"`
 	Labels       map[string]string   `json:"Labels"`
 	ExposedPorts map[string]struct{} `json:"ExposedPorts"`
 	HostConfig   traefikHostConfig   `json:"HostConfig"`
@@ -97,6 +109,19 @@ func traefikArgs(opts TraefikOptions) []string {
 	}
 	if opts.ACMEServer != "" {
 		args = append(args, "--certificatesresolvers.letsencrypt.acme.caserver="+opts.ACMEServer)
+	}
+	if opts.DNS != nil {
+		resolver := "--certificatesresolvers." + router.DNSResolver + ".acme."
+		args = append(args,
+			resolver+"dnschallenge.provider="+opts.DNS.Provider,
+			resolver+"storage=/acme/acme-dns.json",
+		)
+		if opts.ACMEEmail != "" {
+			args = append(args, resolver+"email="+opts.ACMEEmail)
+		}
+		if opts.ACMEServer != "" {
+			args = append(args, resolver+"caserver="+opts.ACMEServer)
+		}
 	}
 	return args
 }
@@ -158,9 +183,14 @@ func withoutHTTP3(request traefikCreate) traefikCreate {
 
 // traefikRequest is the exact create request for the agent's Traefik.
 func traefikRequest(opts TraefikOptions) traefikCreate {
+	var env []string
+	if opts.DNS != nil {
+		env = opts.DNS.Env
+	}
 	return traefikCreate{
 		Image:  TraefikImage,
 		Cmd:    traefikArgs(opts),
+		Env:    env,
 		Labels: map[string]string{InfraLabel: "traefik"},
 		ExposedPorts: map[string]struct{}{
 			"80/tcp": {}, "443/tcp": {}, "443/udp": {},

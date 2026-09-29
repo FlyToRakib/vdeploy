@@ -217,7 +217,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, state *spec.DesiredState) (R
 	// its own, and it has none: its desired state carries no projects, so
 	// the ordinary pass above did nothing and this one does all of it.
 	if edging := p.edgeRoutes(); len(edging) > 0 {
-		p.edge(ctx, edging)
+		p.edge(ctx, edging, p.dnsChallenge(state))
 	} else {
 		p.route(ctx, state)
 	}

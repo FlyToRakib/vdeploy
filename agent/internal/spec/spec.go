@@ -33,12 +33,26 @@ func SchemaSHA256() string {
 // Protocol is the desired-state protocol version this agent speaks.
 const Protocol = 2
 
+// AcmeDNS is the organization's DNS provider, for certificates proved
+// through DNS (§13): its credentials sealed to this agent.
+type AcmeDNS struct {
+	Provider string          `json:"provider"`
+	Env      []SealedSetting `json:"env"`
+}
+
+// SealedSetting is one named value, sealed to this agent.
+type SealedSetting struct {
+	Key    string `json:"key"`
+	Sealed string `json:"sealed"`
+}
+
 // DesiredState is everything one server should be running.
 type DesiredState struct {
 	Protocol   int              `json:"protocol"`
 	ServerID   string           `json:"serverId"`
 	Generation int64            `json:"generation"`
 	Projects   []DesiredProject `json:"projects"`
+	AcmeDNS    *AcmeDNS         `json:"acmeDns,omitempty"`
 	// Databases are the managed databases this server runs (§17.3). A
 	// database is not a project: it is never deployed blue/green, because two
 	// engines on one volume is how data is lost.
@@ -189,6 +203,9 @@ type Hosts struct {
 	Verified []string `json:"verified"`
 	// Twins are a domain's www or bare twin, sent on to it (§30 ⑤).
 	Twins []Twin `json:"twins"`
+	// InstantWildcard is the base domain whose wildcard certificate covers
+	// the instant URL, proved through DNS (§13.1).
+	InstantWildcard string `json:"instantWildcard,omitempty"`
 }
 
 // Twin is one name that sends its visitors to another the app answers on.
@@ -344,8 +361,13 @@ type Domain struct {
 	Host string `json:"host"`
 	TLS  struct {
 		Provider string `json:"provider"`
+		// Challenge is how its certificate is proved: "http-01" or "dns-01".
+		Challenge string `json:"challenge"`
 	} `json:"tls"`
 	Paths []string `json:"paths"`
+	// Wildcard is the base domain whose one wildcard certificate covers
+	// this name (§13.1); set by the agent, never sent.
+	Wildcard string `json:"-"`
 }
 
 // Middleware shapes traffic on its way in.

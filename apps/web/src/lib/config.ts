@@ -4,7 +4,11 @@ import { parse, stringify } from 'yaml';
 export interface EditableSpec {
   network?: {
     containerPort: number;
-    domains: { host: string; tls?: unknown; twin?: boolean }[];
+    domains: {
+      host: string;
+      tls?: { challenge?: string; [key: string]: unknown };
+      twin?: boolean;
+    }[];
     redirects?: MovedPath[];
     middleware?: Middleware;
     loadBalancer?: LoadBalancer;

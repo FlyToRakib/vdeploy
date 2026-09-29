@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   FolderKanban,
   GitBranch,
+  Globe,
   HardDriveDownload,
   LayoutDashboard,
   Package,
@@ -84,6 +85,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Git',
     icon: GitBranch,
     keywords: ['github', 'gitlab', 'bitbucket', 'repository', 'connect', 'push'],
+  },
+  {
+    href: '/settings/domains',
+    label: 'Domains & certificates',
+    icon: Globe,
+    keywords: ['instant url', 'wildcard', 'https', 'ssl', 'tls', 'cloudflare', 'dns', 'route53'],
   },
   {
     href: '/settings/registries',

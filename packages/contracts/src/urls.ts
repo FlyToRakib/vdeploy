@@ -36,10 +36,21 @@ export const UrlSettings = z
     baseDomain: BaseDomain.nullable().default(null),
     pattern: UrlPattern.default('{project}'),
     ipService: z.enum(IP_URL_SERVICES).default('sslip.io'),
+    /**
+     * One certificate for every instant URL, proved through DNS (§13.1),
+     * instead of one per project over HTTP: no ACME traffic per project,
+     * and project names stay out of certificate transparency logs. It
+     * needs the organization's DNS provider, and is off until asked for.
+     */
+    wildcardCertificate: z.boolean().default(false),
   })
   .refine((s) => s.mode !== 'wildcard' || s.baseDomain !== null, {
     message: 'a wildcard URL needs a base domain, like apps.example.com',
     path: ['baseDomain'],
+  })
+  .refine((s) => !s.wildcardCertificate || s.mode === 'wildcard', {
+    message: 'a wildcard certificate is for wildcard URLs',
+    path: ['wildcardCertificate'],
   });
 export type UrlSettings = z.infer<typeof UrlSettings>;
 

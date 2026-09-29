@@ -156,6 +156,36 @@ describe('administrative operations', () => {
     expect(domains.json<{ result: unknown[] }>().result).toEqual([]);
   });
 
+  it('gives instant URLs one wildcard certificate only once DNS can prove it', async () => {
+    const wildcard = { mode: 'wildcard', baseDomain: 'apps.acme.dev', wildcardCertificate: true };
+    const early = await op(owner, 'urls.configure', wildcard);
+    expect(early.statusCode).toBe(400);
+    expect(early.body).toContain('set the DNS provider first');
+
+    await stepUp(owner);
+    const token = 'cf-token-shown-once';
+    const set = await op(owner, 'dns_provider.set', {
+      provider: 'cloudflare',
+      credentials: { CF_DNS_API_TOKEN: token },
+    });
+    expect(set.statusCode).toBe(200);
+    // Exactly what the provider asks for: nothing the router would read as its own setting.
+    const extra = await op(owner, 'dns_provider.set', {
+      provider: 'cloudflare',
+      credentials: { CF_DNS_API_TOKEN: token, TRAEFIK_API_INSECURE: 'true' },
+    });
+    expect(extra.statusCode).toBe(400);
+    const shown = await op(owner, 'dns_provider.get', {});
+    expect(shown.json<{ result: { provider: string } }>().result.provider).toBe('cloudflare');
+    expect(shown.body).not.toContain(token);
+
+    expect((await op(owner, 'urls.configure', wildcard)).statusCode).toBe(200);
+    expect((await op(owner, 'dns_provider.remove', {})).statusCode).toBe(200);
+    expect((await op(owner, 'dns_provider.get', {})).json<{ result: null }>().result).toBeNull();
+    // Leave the URL settings as later tests expect them.
+    await op(owner, 'urls.configure', { ...wildcard, wildcardCertificate: false });
+  });
+
   it('explains capacity in plain words and refuses to oversubscribe at plan time', async () => {
     const serverId = newId('server');
     await t.database.db.insert(servers).values({

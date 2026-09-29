@@ -34,12 +34,12 @@ So the routing file an edge writes is the same file any server writes. Only
 the backend differs: a local port that the mesh carries to the app server,
 instead of a container on this machine.
 */
-func (p *pass) edge(ctx context.Context, routes []spec.EdgeRoute) {
+func (p *pass) edge(ctx context.Context, routes []spec.EdgeRoute, dns *docker.DNSChallenge) {
 	routing := p.r.Routing
 	if routing == nil || len(routes) == 0 {
 		return
 	}
-	if err := routing.EnsureRouter(ctx); err != nil {
+	if err := routing.EnsureRouter(ctx, dns); err != nil {
 		p.event("failed", "", docker.TraefikName, err.Error())
 		return
 	}
@@ -48,7 +48,7 @@ func (p *pass) edge(ctx context.Context, routes []spec.EdgeRoute) {
 		// The same name an app server would give it: one project, one file.
 		key := compose.ProjectKey(route.ProjectID)
 		network := route.Network
-		hosts, redirects := edgeHosts(route)
+		hosts, redirects := edgeHosts(route, dns != nil)
 		// One backend: the far server's router, at the address the mesh is
 		// actually offering it on. Asked rather than assumed, because what
 		// reads this file is a container, and a container's own loopback is
@@ -88,14 +88,15 @@ server, so the edge is the machine that holds the certificates and the app
 servers behind it never ask for one. A name that has not been verified is
 still served, on plain HTTP, rather than being refused.
 */
-func edgeHosts(route spec.EdgeRoute) ([]spec.Domain, []router.Redirect) {
+func edgeHosts(route spec.EdgeRoute, dnsReady bool) ([]spec.Domain, []router.Redirect) {
 	verified := map[string]bool{}
 	for _, host := range route.Hosts.Verified {
 		verified[host] = true
 	}
 	hosts := make([]spec.Domain, 0, len(route.Network.Domains)+1)
 	for _, domain := range route.Network.Domains {
-		if !verified[domain.Host] {
+		// Unverified, or proved through DNS by a router without the provider.
+		if !verified[domain.Host] || (domain.TLS.Challenge == "dns-01" && !dnsReady) {
 			domain.TLS.Provider = ""
 		}
 		hosts = append(hosts, domain)

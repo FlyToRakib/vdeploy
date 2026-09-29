@@ -296,6 +296,16 @@ export const memberCustomRoles = pgTable(
   (t) => [uniqueIndex('member_custom_roles_org_user').on(t.orgId, t.userId)],
 );
 
+/** The organization's DNS provider, for certificates proved through DNS (§13). */
+export const dnsProviders = pgTable('dns_providers', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id, { onDelete: 'cascade' }),
+  provider: text('provider', { enum: ['cloudflare', 'route53', 'digitalocean'] }).notNull(),
+  credentialsSealed: text('credentials_sealed').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Sign-ins for private image registries (§15), the password sealed. */
 export const registryCredentials = pgTable(
   'registry_credentials',

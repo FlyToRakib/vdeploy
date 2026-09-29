@@ -111,3 +111,32 @@ func TestARouterStartsWithoutHTTP3WhereSomethingElseHoldsTheUDPPort(t *testing.T
 		t.Fatalf("label = %q", created.Labels[configLabel])
 	}
 }
+
+func TestTheDNSProviderReachesTheRouterAsItsOwnResolver(t *testing.T) {
+	plain := traefikRequest(TraefikOptions{DynamicDir: "/d", ACMEEmail: "ops@example.com"})
+	if len(plain.Env) != 0 || strings.Contains(strings.Join(plain.Cmd, " "), "dnschallenge") {
+		t.Fatalf("a router without a DNS provider was given one: %v %v", plain.Cmd, plain.Env)
+	}
+
+	dns := &DNSChallenge{Provider: "cloudflare", Env: []string{"CF_DNS_API_TOKEN=token"}}
+	with := traefikRequest(TraefikOptions{DynamicDir: "/d", ACMEEmail: "ops@example.com", DNS: dns})
+	args := strings.Join(with.Cmd, " ")
+	for _, want := range []string{
+		"--certificatesresolvers.letsencrypt-dns.acme.dnschallenge.provider=cloudflare",
+		"--certificatesresolvers.letsencrypt-dns.acme.storage=/acme/acme-dns.json",
+		"--certificatesresolvers.letsencrypt-dns.acme.email=ops@example.com",
+		// The HTTP resolver stays, for every other name.
+		"--certificatesresolvers.letsencrypt.acme.httpchallenge",
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("router lacks %s", want)
+		}
+	}
+	if strings.Contains(args, "token") || len(with.Env) != 1 || with.Env[0] != "CF_DNS_API_TOKEN=token" {
+		t.Fatalf("the credential belongs in the environment only: %v %v", with.Cmd, with.Env)
+	}
+	// A changed provider is a changed router: it is replaced to take it.
+	if traefikConfig(traefikRequest(TraefikOptions{DynamicDir: "/d"})) == traefikConfig(with) {
+		t.Fatal("the router would keep running without its DNS provider")
+	}
+}

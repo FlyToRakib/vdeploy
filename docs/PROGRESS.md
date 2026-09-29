@@ -258,7 +258,26 @@ each is one task, one commit.
   read HTTP (redirects, passwords, rate limits, sticky sessions, the
   router's health check, retries, a canary's error rate, the escape
   hatch) is refused by name for a TCP app rather than quietly ignored
-- [ ] DNS-01 certificates, and a wildcard certificate as the opt-in (§13, §13.1)
+- [x] **DNS-01 certificates, and a wildcard certificate as the opt-in
+  (§13, §13.1)**: an admin, stepped up, names where the organization's
+  DNS is hosted (Cloudflare, Route 53, DigitalOcean) with exactly the
+  credentials that provider needs — sealed at rest, never shown again,
+  and sealed to each agent for its router alone. The router gains a
+  second resolver that proves names through DNS, and is replaced when
+  the provider changes. The agent passes on only the variables each
+  provider reads: Traefik also takes its whole configuration from
+  TRAEFIK_* variables, so anything else — or a value with a line break —
+  refuses the provider rather than reaching the router. A domain can be
+  proved through DNS (what a name behind Cloudflare's proxy needs, and
+  such a name then counts as ready while proxied); without the provider
+  it is served on plain HTTP rather than on a resolver that is not there.
+  A wildcard domain (`*.example.com`) now matches every name one label
+  below it, which Traefik's Host matcher did not. Instant URLs on the
+  organization's own domain can share one `*.base` certificate —
+  refused until a DNS provider is set, and every server is told when it
+  is turned on or off. A TCP app gets one router per name, each with its
+  own certificate settings. Settings → Domains & certificates is new:
+  the instant URL settings had no screen before
 
 **Data (§17)**
 - [ ] object storage: a bucket you bring, or managed MinIO (§17.1, M5)

@@ -10,7 +10,8 @@ import { notifyDesiredState } from './notify.js';
 import { secretsOwner } from './previews.js';
 import { readSecret } from './secrets.js';
 import { registryCredential } from './registries.js';
-import { builds, projects, releases, servers } from './schema/index.js';
+import { dnsProviderCredentials } from './dns-providers.js';
+import { builds, domainChecks, projects, releases, servers, urlSettings } from './schema/index.js';
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
 /**
@@ -72,12 +73,52 @@ export async function desiredStateFor(
   }
 
   /**
+   * Certificates proved through DNS (§13): the organization's provider,
+   * its credentials sealed to this agent for the router alone.
+   */
+  const boxKey = server?.agentBoxKey;
+  const dnsLogin =
+    boxKey && options.secretsKey
+      ? await dnsProviderCredentials(db, options.secretsKey, server.orgId)
+      : null;
+  const acmeDns = dnsLogin
+    ? {
+        provider: dnsLogin.provider,
+        env: Object.entries(dnsLogin.credentials).map(([key, value]) => ({
+          key,
+          sealed: sealTo(boxKey ?? '', value, deliveryContext(serverId, 'dns', key, 1)),
+        })),
+      }
+    : undefined;
+  /*
+   * A name proved through DNS needs no address pointing here to get its
+   * certificate — which is the point for a site behind Cloudflare's proxy,
+   * whose address is Cloudflare's. Such a name counts as ready when its
+   * check found it proxied, as well as when it points here.
+   */
+  const proxied = new Set(
+    (
+      await db
+        .select({ host: domainChecks.host })
+        .from(domainChecks)
+        .where(and(eq(domainChecks.serverId, serverId), eq(domainChecks.status, 'proxied')))
+    ).map((r) => r.host),
+  );
+  // The one wildcard certificate for instant URLs, when chosen and possible.
+  const [urls] = server
+    ? await db.select().from(urlSettings).where(eq(urlSettings.orgId, server.orgId))
+    : [];
+  const wildcardBase =
+    acmeDns && urls?.settings.wildcardCertificate && urls.settings.mode === 'wildcard'
+      ? urls.settings.baseDomain
+      : null;
+
+  /**
    * The sign-in to pull each project's image with, when its registry is
    * one the organization signed in to (§15). Sealed to this agent under
    * the project, like a secret: it opens only for that project's pull.
    */
   const pulls = new Map<string, { username: string; sealed: string }>();
-  const boxKey = server?.agentBoxKey;
   if (boxKey && options.secretsKey) {
     for (const { project, release } of rows) {
       if (release.image.startsWith('sha256:')) continue; // built here: nothing to pull
@@ -182,17 +223,26 @@ export async function desiredStateFor(
           redirects: project.instantHost ? project.previousHosts : [],
           verified: [
             ...certificateHosts({ ...project, spec }).filter((h) => verified.has(h)),
+            ...(acmeDns
+              ? (spec.network?.domains ?? [])
+                  .filter((dom) => dom.tls.challenge === 'dns-01' && proxied.has(dom.host))
+                  .map((dom) => dom.host)
+              : []),
             ...twins.filter((t) => t.projectId === project.id).map((t) => t.from),
           ],
           twins: twins
             .filter((t) => t.projectId === project.id)
             .map((t) => ({ from: t.from, to: t.to })),
+          ...(wildcardBase && project.instantHost?.endsWith(`.${wildcardBase}`)
+            ? { instantWildcard: wildcardBase }
+            : {}),
         },
         secrets: secrets.get(project.id) ?? [],
         ...(pulls.has(project.id) ? { pullAuth: pulls.get(project.id) } : {}),
       };
     }),
     databases,
+    ...(acmeDns ? { acmeDns } : {}),
     mesh: await meshFor(db, serverId, server?.orgId ?? ''),
   });
 }
