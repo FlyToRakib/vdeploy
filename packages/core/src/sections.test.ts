@@ -54,6 +54,40 @@ describe('operations that change one part of the spec (§24)', () => {
     );
   });
 
+  it('refuses an address another app already answers to, naming that app', () => {
+    const hostsTaken = { 'blog.example.com': 'blog', 'blog.apps.example.com': 'blog' };
+    const add = (host: string) =>
+      buildPlan('domain.add', { projectId: project.id, host }, { project, server, hostsTaken });
+    expect(() => add('blog.example.com')).toThrow(
+      'blog.example.com is already the address of blog. Take it off blog first: two apps cannot answer for one address.',
+    );
+    // An instant URL is an address too.
+    expect(() => add('blog.apps.example.com')).toThrow(/already the address of blog/);
+    expect(add('www.example.com').steps.map((s) => s.kind)).toContain('update_spec');
+    // Going back to a release that had it is bringing it back.
+    expect(() =>
+      buildPlan(
+        'release.rollback',
+        { projectId: project.id, releaseId: 'rel_01J9Z3Q8S7M2K4X6V1B5N0C9D9' },
+        {
+          project,
+          server,
+          hostsTaken,
+          targetRelease: {
+            id: 'rel_01J9Z3Q8S7M2K4X6V1B5N0C9D9',
+            spec: {
+              ...spec,
+              network: {
+                ...spec.network!,
+                domains: [{ ...spec.network!.domains[0]!, host: 'blog.example.com' }],
+              },
+            },
+          },
+        },
+      ),
+    ).toThrow(/already the address of blog/);
+  });
+
   it('changes how one domain gets its certificate, and only that one', () => {
     const two = after('domain.add', { host: 'www.example.com' });
     const changed = specAfter(

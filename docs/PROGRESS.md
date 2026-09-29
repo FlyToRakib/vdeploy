@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** `domain.add` refusing a host another project routes
+**Task:** Undo last change
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -88,7 +88,16 @@ each is one task, one commit.
   the next person who opens the screen. The policy package's 100%
   coverage rule caught an untested wording branch and an unreachable
   fallback; the fallback was removed rather than tested around
-- [ ] `domain.add` refusing a host another project routes (2.4) — the agent refuses it later instead
+- [x] **a hostname another app answers to is refused when it is asked
+  for** (2.4), naming the app that has it. This mattered more than the
+  gap list said: the agent refuses the *whole* desired state when two
+  projects claim one host, so a single mistyped domain would have
+  stopped every other app on that server from receiving changes. The
+  check sits in the one place every spec change passes — domain.add,
+  create, a raw edit, and a rollback to a release that had the address
+  — and counts instant URLs and the old ones that still redirect, since
+  the agent does. The worker re-plans at apply time, so an address taken
+  between planning and applying is caught there too
 
 **§35's completeness test, and the M4/§31 features behind it**
 - [ ] Undo last change (§31 #9, §35.7)
@@ -830,7 +839,7 @@ GitHub.
 - Builds: an agent restarted mid-build loses that build (the worker gives up after its timeout and the plan fails with a plain reason); registry cache and a separate builder server wait for multi-server; unused images and build cache are measured and freed on request, keeping the last ten releases of each app; nothing frees them on a schedule yet; uploads are kept in the database with no retention yet.
 - Governor: the brief blue/green overlap (old and new replicas together) is not counted, disk is not budgeted, and the agent's reserve is a fixed 256 MB.
 - Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); no bulk env import/export yet (2.16); build secrets are stored but used only once builds exist (2.7); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
-- DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale); `domain.add` does not yet refuse a host another project routes (the agent refuses such a frame).
+- DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale).
 
 ## Decisions made
 

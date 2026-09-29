@@ -235,6 +235,49 @@ describe('planned changes', () => {
     expect(t.queued).toContain(body.plan.id);
   });
 
+  it('refuses an address another app already answers to, before the agent has to', async () => {
+    const withDomain = (name: string, host: string) =>
+      ApplicationSpec.parse({
+        ...spec,
+        metadata: { name },
+        network: { containerPort: 80, domains: [{ host }] },
+      });
+    const shop = newId('project');
+    await t.database.db.insert(projects).values({
+      id: shop,
+      orgId,
+      name: 'shop-front',
+      spec: withDomain('shop-front', 'shop.example.com'),
+      specHash: hashOf(spec),
+      currentReleaseId: newId('release'),
+    });
+    const other = newId('project');
+    const portOnly = ApplicationSpec.parse({
+      ...spec,
+      metadata: { name: 'other-app' },
+      network: { containerPort: 80 },
+    });
+    await t.database.db.insert(projects).values({
+      id: other,
+      orgId,
+      name: 'other-app',
+      spec: portOnly,
+      specHash: hashOf(spec),
+      currentReleaseId: newId('release'),
+    });
+    const res = await op(owner, 'domain.add', { projectId: other, host: 'shop.example.com' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: { message: string } }>().error.message).toBe(
+      'shop.example.com is already the address of shop-front. Take it off shop-front first: two apps cannot answer for one address.',
+    );
+    // Its own address is not somebody else's.
+    const own = await op(owner, 'project.update_spec', {
+      projectId: shop,
+      spec: withDomain('shop-front', 'shop.example.com'),
+    });
+    expect(own.statusCode).not.toBe(409);
+  });
+
   it('holds a destructive change for approval, then applies the approved plan', async () => {
     const projectId = await seedProject(orgId, 'to-delete');
     await stepUp(owner);

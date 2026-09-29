@@ -80,12 +80,6 @@ export interface PlanContext {
   targetBackup?: { id: Id<'backup'>; kind: 'dump' | 'volumes'; databaseId: Id<'database'> | null };
   /** The server the project runs (or will run) on, for the governor (§14). */
   server?: ServerBudget | null;
-  /**
-   * Every server this organization could place a new app on, loaded only
-   * when nobody named one. Placement happens in the planner, not later, so
-   * the plan records where the app is going and the governor checks that
-   * server rather than no server at all.
-   */
   /** The staging copy of the project in focus, when it has one (§26 M6). */
   staging?: {
     id: Id<'project'>;
@@ -93,7 +87,19 @@ export interface PlanContext {
     currentReleaseId: Id<'release'> | null;
     image: string | null;
   } | null;
+  /**
+   * Every server this organization could place a new app on, loaded only
+   * when nobody named one. Placement happens in the planner, not later, so
+   * the plan records where the app is going and the governor checks that
+   * server rather than no server at all.
+   */
   candidates?: Candidate[];
+  /**
+   * The addresses the organization's other apps answer to, each with the
+   * name of the app that has it (2.4). Loaded for changes that can bring a
+   * domain with them.
+   */
+  hostsTaken?: Record<string, string>;
   /**
    * Folders where the running app wrote files outside its permanent folders,
    * as its agent last reported (§17.2), minus those marked only temporary.
@@ -184,6 +190,7 @@ function specChange(
   context: PlanContext,
 ): Draft {
   checkFits(context.server, footprint(next, project?.running ?? true));
+  refuseTakenHosts(next, context);
   const before = project?.spec ?? null;
   const lost = removedVolumes(before, next);
   const steps: PlanStep[] = [];
@@ -210,6 +217,24 @@ function specChange(
     },
     atRisk,
   );
+}
+
+/**
+ * Two apps cannot answer for one address. Caught here, where it is a
+ * sentence on the screen of the person adding it; left to the agent, it
+ * refuses the whole server's desired state, and every other app on that
+ * machine stops receiving changes until somebody notices why (2.4).
+ */
+function refuseTakenHosts(spec: ApplicationSpec, context: PlanContext) {
+  for (const { host } of spec.network?.domains ?? []) {
+    const owner = context.hostsTaken?.[host];
+    if (owner) {
+      throw new VDeployError(
+        'conflict',
+        `${host} is already the address of ${owner}. Take it off ${owner} first: two apps cannot answer for one address.`,
+      );
+    }
+  }
 }
 
 /**

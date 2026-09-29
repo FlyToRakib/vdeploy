@@ -51,7 +51,44 @@ export interface PlanWorld {
   } | null;
   server?: ServerBudget | null;
   unsaved?: string[];
+  /** Addresses the organization's other apps answer to, by app name (2.4). */
+  hostsTaken?: Record<string, string>;
 }
+
+/**
+ * Every address the organization's other apps answer to — their domains,
+ * their instant URL and the old ones that still redirect — each with the
+ * app's name, which is what a person needs to read to fix it (2.4).
+ */
+async function hostsTaken(
+  db: Database,
+  orgId: string,
+  except: string | null,
+): Promise<Record<string, string>> {
+  const rows = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      spec: projects.spec,
+      instantHost: projects.instantHost,
+      previousHosts: projects.previousHosts,
+    })
+    .from(projects)
+    .where(and(eq(projects.orgId, orgId), isNull(projects.deletedAt)));
+  const taken: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.id === except) continue;
+    const domains = readSpec(row.spec).network?.domains.map((d) => d.host) ?? [];
+    for (const host of [...domains, row.instantHost, ...row.previousHosts]) {
+      if (host) taken[host] = row.name;
+    }
+  }
+  return taken;
+}
+
+/** A change that can bring a domain with it: a spec, a host, or a release to go back to. */
+const bringsHosts = (args: Record<string, unknown>) =>
+  'spec' in args || 'host' in args || 'releaseId' in args;
 
 /**
  * Folders where the project's running containers wrote files outside its
@@ -202,6 +239,7 @@ export async function loadPlanWorld(
         project: null,
         server: await serverBudget(db, serverId, null),
         ...(database ? { database: database.state } : {}),
+        ...(orgId && bringsHosts(args) ? { hostsTaken: await hostsTaken(db, orgId, null) } : {}),
       };
     }
     // Nobody named a server, so the planner picks one — and needs to see
@@ -212,6 +250,7 @@ export async function loadPlanWorld(
       server: null,
       candidates,
       ...(database ? { database: database.state } : {}),
+      ...(orgId && bringsHosts(args) ? { hostsTaken: await hostsTaken(db, orgId, null) } : {}),
     };
   }
   const [row] = await db.select().from(projects).where(eq(projects.id, projectId));
@@ -245,6 +284,7 @@ export async function loadPlanWorld(
     server: await budgetFor(db, row, requestedServer(args)),
     unsaved: await unsavedFor(db, row),
   };
+  if (bringsHosts(args)) world.hostsTaken = await hostsTaken(db, row.orgId, row.id);
   // Choosing which machine compiles this app needs to see the machines.
   if (args.builder !== undefined && orgId) {
     world.candidates = await placementCandidates(db, orgId);
