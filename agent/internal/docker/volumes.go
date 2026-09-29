@@ -194,19 +194,6 @@ func (c *Client) RemoveImage(ctx context.Context, id string) error {
 		url.Values{"force": {"false"}, "noprune": {"false"}}, nil, nil)
 }
 
-// PruneBuildCache frees the Engine's own builder cache — derived data, and
-// never an image anything could be rolled back to. `all` false keeps what a
-// build is using right now.
-func (c *Client) PruneBuildCache(ctx context.Context) (int64, error) {
-	var out struct {
-		SpaceReclaimed int64 `json:"SpaceReclaimed"`
-	}
-	if err := c.do(ctx, http.MethodPost, "/build/prune", url.Values{"all": {"false"}}, nil, &out); err != nil {
-		return 0, err
-	}
-	return out.SpaceReclaimed, nil
-}
-
 // RemoveVolume deletes one named volume and everything in it.
 //
 // This is the only place the agent ever destroys data, and it refuses on

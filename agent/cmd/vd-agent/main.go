@@ -349,7 +349,9 @@ func serve(configPath string, log *slog.Logger) error {
 				Ours:   images.Ours,
 				Recent: func(id string) bool { return images.Recent(id, reclaim.RecentFor) },
 				Forget: images.Forget,
-				Log:    log,
+				// VDeploy's own build cache, never Docker's (other apps build with that).
+				PruneBuildCache: builder.PruneCache,
+				Log:             log,
 			},
 			Tasks: &task.Runner{
 				Engine:   engine,

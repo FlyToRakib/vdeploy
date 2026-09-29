@@ -15,8 +15,10 @@
 //     running or stopped, whoever made that container;
 //   - the agent adds its own infrastructure images, which are constants in
 //     its own code;
-//   - and of what is left, it removes only images it built itself or that
-//     have no name at all. An image somebody pulled by hand is theirs.
+//   - and of what is left, it removes only images it built itself. An
+//     image somebody pulled by hand is theirs — and so is one with no name
+//     at all: on a server VDeploy shares with other apps, another tool's
+//     old build looks exactly like that.
 //
 // What was actually freed is measured, not estimated: Docker is asked what
 // its disk holds before and after.
@@ -58,7 +60,6 @@ type Engine interface {
 	ListImages(ctx context.Context) ([]docker.Image, error)
 	ImagesOfContainers(ctx context.Context) (map[string]bool, error)
 	RemoveImage(ctx context.Context, id string) error
-	PruneBuildCache(ctx context.Context) (int64, error)
 }
 
 // RecentFor is how long an image this agent made or received is kept
@@ -77,8 +78,11 @@ type Runner struct {
 	Recent func(imageID string) bool
 	// Forget drops removed images from the agent's own record.
 	Forget func(ids []string) error
-	Log    *slog.Logger
-	Now    func() time.Time
+	// PruneBuildCache frees the cache of VDeploy's own builder; nil frees
+	// none. Never Docker's: other apps on the server build with that one.
+	PruneBuildCache func(ctx context.Context) error
+	Log             *slog.Logger
+	Now             func() time.Time
 }
 
 func (r *Runner) now() time.Time {
@@ -130,8 +134,10 @@ func (r *Runner) Run(ctx context.Context, req Request) Result {
 
 	// The builder's cache is derived data: it is never anything anyone
 	// rolls back to, and the next build rebuilds what it needs.
-	if _, err := r.Engine.PruneBuildCache(ctx); err != nil && r.Log != nil {
-		r.Log.Warn("the build cache could not be freed", "error", err)
+	if r.PruneBuildCache != nil {
+		if err := r.PruneBuildCache(ctx); err != nil && r.Log != nil {
+			r.Log.Warn("the build cache could not be freed", "error", err)
+		}
 	}
 
 	after, err := r.Engine.SystemDF(ctx)
@@ -181,12 +187,8 @@ func (r *Runner) removable(image docker.Image, keep map[string]bool) bool {
 	if r.Recent != nil && r.Recent(image.ID) {
 		return false
 	}
-	// With no name at all, nothing can ever refer to it again.
-	if len(image.RepoTags) == 0 {
-		return true
-	}
-	// Otherwise it goes only if this agent built it. An image somebody
-	// pulled themselves is theirs, on their server.
+	// It goes only if this agent built it. An image somebody pulled is
+	// theirs, and one with no name at all may be another tool's old build.
 	return r.Ours != nil && r.Ours(image.ID)
 }
 

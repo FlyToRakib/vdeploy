@@ -47,9 +47,9 @@ func (f *fakeEngine) RemoveImage(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeEngine) PruneBuildCache(context.Context) (int64, error) {
+func (f *fakeEngine) pruneOwnCache(context.Context) error {
 	f.pruned = true
-	return 1 << 30, f.pruneError
+	return f.pruneError
 }
 
 func maps(in map[string]bool) map[string]bool {
@@ -86,6 +86,7 @@ func runner(e *fakeEngine, forgotten *[]string) *Runner {
 			*forgotten = append(*forgotten, ids...)
 			return nil
 		},
+		PruneBuildCache: e.pruneOwnCache,
 	}
 }
 
@@ -125,11 +126,14 @@ func TestAnImageSomebodyPulledThemselvesIsTheirs(t *testing.T) {
 	}
 }
 
-func TestWhatGoesIsWhatVDeployMadeAndWhatHasNoNameLeft(t *testing.T) {
+// A server VDeploy shares with other apps holds their images too, and an
+// image with no name is often one of theirs — another tool's old build. So
+// nothing goes but what this agent built itself.
+func TestWhatGoesIsOnlyWhatVDeployBuiltItself(t *testing.T) {
 	e := engine()
 	result, forgotten := run(t, e, []string{"vd-build/blog:v8"})
 
-	want := []string{built, "sha256:nameless"}
+	want := []string{built}
 	for _, id := range want {
 		if !slices.Contains(e.removed, id) {
 			t.Fatalf("%s was kept; removed = %v", id, e.removed)
@@ -138,11 +142,14 @@ func TestWhatGoesIsWhatVDeployMadeAndWhatHasNoNameLeft(t *testing.T) {
 	if len(e.removed) != len(want) {
 		t.Fatalf("removed = %v", e.removed)
 	}
-	if result.ImagesRemoved != 2 || result.ImagesKept != 4 {
+	if result.ImagesRemoved != 1 || result.ImagesKept != 5 {
 		t.Fatalf("removed %d, kept %d", result.ImagesRemoved, result.ImagesKept)
 	}
-	// And the agent's own record no longer claims to have built them.
-	if len(forgotten) != 2 {
+	if slices.Contains(e.removed, "sha256:nameless") {
+		t.Fatal("an image with no name, which may be another tool's, was removed")
+	}
+	// And the agent's own record no longer claims to have built it.
+	if len(forgotten) != 1 {
 		t.Fatalf("forgotten = %v", forgotten)
 	}
 }
@@ -180,7 +187,7 @@ func TestTheEngineRefusingIsAReasonToKeepNotToStop(t *testing.T) {
 	e.refuse = map[string]bool{built: true}
 	result, forgotten := run(t, e, nil)
 
-	if !result.OK || result.ImagesRemoved != 1 {
+	if !result.OK || result.ImagesRemoved != 0 {
 		t.Fatalf("result = %+v", result)
 	}
 	if slices.Contains(forgotten, built) {
@@ -212,7 +219,8 @@ func TestADigestPinnedReleaseIsRecognisedByEitherName(t *testing.T) {
 	if slices.Contains(e.removed, built) {
 		t.Fatalf("a release named by digest was removed: %v", e.removed)
 	}
-	if result.ImagesRemoved != 1 {
+	// And nothing else here was this agent's to remove.
+	if result.ImagesRemoved != 0 {
 		t.Fatalf("removed %d", result.ImagesRemoved)
 	}
 }

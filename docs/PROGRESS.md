@@ -359,6 +359,14 @@ each is one task, one commit.
   case — knows only the old key: the agent keeps it, tries it once when
   refused, and offers its current key again, so a restore never locks a
   server out
+- [x] **freeing disk takes only what VDeploy made** — found preparing the
+  first live install, on a server shared with other apps: the daily
+  freeing removed any image with no name, whoever made it — another
+  tool's old build looks exactly like that — and emptied Docker's own
+  build cache, which VDeploy never uses (it builds in its own BuildKit,
+  with its own cache) and other apps build with. Now an image goes only
+  if this agent built it, and the cache freed is VDeploy's own, under the
+  builder's lock so it never runs beside a build
 - [x] **a server whose ports 80 and 443 already belong to a web server**
   — found preparing the first live install: the agent's router always
   took 80 and 443, and the preflight's only advice for a server running

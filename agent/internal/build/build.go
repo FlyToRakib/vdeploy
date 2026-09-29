@@ -470,6 +470,40 @@ func (b *Builder) clearStaleLock(ctx context.Context) {
 	}
 }
 
+// PruneCache frees what VDeploy's own builder keeps between builds, under
+// the same lock as a build, so it never runs beside one: two BuildKits on
+// one cache is how a cache is corrupted.
+func (b *Builder) PruneCache(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.clearStaleLock(ctx)
+	code, log, err := b.Engine.RunHelper(ctx, docker.Helper{
+		Name:        "vd-build-prune",
+		Image:       docker.BuildkitImage,
+		Entrypoint:  []string{"buildctl-daemonless.sh"},
+		Cmd:         []string{"prune"},
+		Env:         []string{"BUILDKITD_FLAGS=--oci-worker-no-process-sandbox"},
+		Volumes:     map[string]string{docker.BuildCacheVolume: "/home/user/.local/share/buildkit"},
+		MemoryBytes: 256 << 20,
+		NanoCPUs:    500_000_000,
+		Network:     "none",
+		// The same as a build (ADR 0008): rootless BuildKit needs them.
+		SecurityOpt: []string{"seccomp=unconfined", "apparmor=unconfined"},
+	})
+	if err != nil {
+		return fmt.Errorf("prune the build cache: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("prune the build cache: exit %d: %s", code, lastLine(log))
+	}
+	return nil
+}
+
+func lastLine(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	return lines[len(lines)-1]
+}
+
 func (b *Builder) logf(msg string, args ...any) {
 	if b.Log != nil {
 		b.Log.Warn(msg, args...)
