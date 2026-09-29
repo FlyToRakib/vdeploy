@@ -21,7 +21,7 @@ afterAll(async () => {
 describe('signing in with GitHub or Google (§20.2)', () => {
   it('offers exactly the providers that are fully configured', async () => {
     const methods = await t.app.inject({ method: 'GET', url: '/api/v1/auth/methods' });
-    expect(methods.json()).toEqual({ social: ['github'] });
+    expect(methods.json()).toEqual({ social: ['github'], captcha: null });
   });
 
   it('sends somebody to GitHub with this VDeploy as the place to come back to', async () => {
