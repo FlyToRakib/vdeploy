@@ -58,6 +58,8 @@ export const ID_PREFIXES = {
   deployFreeze: 'frz',
   /** A sign-in for a private image registry (§15). */
   registry: 'reg',
+  /** A role an organization defines: a built-in one, narrowed (§20 Org). */
+  customRole: 'rol',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

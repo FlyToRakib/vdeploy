@@ -2,7 +2,7 @@ import type { HumanActor } from '@vdeploy/ai';
 import { VDeployError, type Id, type PreviewRef } from '@vdeploy/contracts';
 import { previewRefusal, type PullRequest } from '@vdeploy/core';
 import { linkedDatabaseCount, previewFor, previewParents, previewsOf } from '@vdeploy/db';
-import { roleIn } from '../http/actor.js';
+import { membershipIn } from '../http/actor.js';
 import type { KernelDeps } from '../kernel/context.js';
 import { runOperation } from '../kernel/pipeline.js';
 
@@ -36,7 +36,7 @@ export async function webhookActor(
       origin: 'webhook',
       userId: connectedBy as Id<'user'>,
       orgId: orgId as Id<'organization'>,
-      role: await roleIn(db, connectedBy, orgId),
+      ...(await membershipIn(db, connectedBy, orgId)),
       stepUpAt: null,
     };
   } catch {

@@ -126,6 +126,9 @@ export async function ask(
     userId: human.userId,
     orgId: human.orgId,
     role: human.role,
+    // Acting for this person, never wider: their own role and teams go with it.
+    ...(human.allowed ? { allowed: human.allowed } : {}),
+    ...(human.teams ? { teams: human.teams } : {}),
     origin: 'ai',
     aiSessionId: session.id as Id<'aiSession'>,
     model: model.model,

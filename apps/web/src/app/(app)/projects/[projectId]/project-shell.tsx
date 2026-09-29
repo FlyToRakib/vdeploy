@@ -40,6 +40,8 @@ export interface ProjectRow {
   deployLock: { reason: string; by: string; at: string } | null;
   /** The release that takes every request at once, when there is one (§7). */
   promotedRelease: string | null;
+  /** The team that owns it: only its members and admins change it (§20 Org). */
+  teamId: string | null;
 }
 
 interface ProjectContextValue {

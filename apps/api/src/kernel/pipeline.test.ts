@@ -17,6 +17,7 @@ import {
   serverEnrollments,
   servers,
   session,
+  user,
 } from '@vdeploy/db';
 import { verify as verifyBcrypt } from '@node-rs/bcrypt';
 import { and, eq } from 'drizzle-orm';
@@ -60,11 +61,15 @@ async function stepUp(browser: Browser) {
 }
 
 /** The real invitation path: invite → sign up → accept → switch org. */
-async function member(role: 'viewer' | 'developer' | 'admin', email: string): Promise<Browser> {
+async function member(
+  role: 'viewer' | 'developer' | 'admin',
+  email: string,
+  label = `Member/${role}`,
+): Promise<Browser> {
   const invited = await op(owner, 'user.invite', { email, role });
   expect(invited.statusCode).toBe(200);
   const { invitationId } = invited.json<{ result: { invitationId: string } }>().result;
-  const browser = new Browser(t.app, `Member/${role}`);
+  const browser = new Browser(t.app, label);
   expect(
     (
       await browser.request('POST', '/api/auth/sign-up/email', {
@@ -697,6 +702,78 @@ describe('the gate', () => {
     expect(nothing.json<{ error: { message: string } }>().error.message).toBe(
       'Nothing is being applied to this app',
     );
+  });
+
+  it("narrows someone to one of the organization's own roles, and a team's apps to its team", async () => {
+    await stepUp(owner);
+    const developer = await member('developer', 'narrowed@example.com', 'Member/narrowed');
+    const [narrowed] = await t.database.db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, 'narrowed@example.com'));
+    const userId = narrowed!.id;
+    const signInAgain = async () => {
+      await developer.request('POST', '/api/auth/sign-in/email', {
+        email: 'narrowed@example.com',
+        password: PASSWORD,
+      });
+      await developer.request('POST', '/api/auth/organization/set-active', {
+        organizationId: orgId,
+      });
+    };
+    const projectId = await seedProject(orgId, 'team-owned');
+
+    // A role cannot hold what its built-in role could not do.
+    const tooWide = await op(owner, 'role.create', {
+      name: 'Too wide',
+      base: 'developer',
+      operations: ['server.remove'],
+    });
+    expect(tooWide.statusCode).toBe(400);
+    const created = await op(owner, 'role.create', {
+      name: 'Restarter',
+      base: 'developer',
+      operations: ['project.restart'],
+    });
+    const { id: roleId } = created.json<{ result: { id: string } }>().result;
+    expect((await op(owner, 'role.assign', { userId, roleId })).statusCode).toBe(200);
+    // A change of powers ends their sessions: they sign in again under it.
+    expect((await developer.request('GET', '/api/v1/sessions')).statusCode).toBe(401);
+    await signInAgain();
+
+    expect((await op(developer, 'project.restart', { projectId })).statusCode).toBe(202);
+    const refused = await op(developer, 'env.set', { projectId, key: 'A', value: '1' });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json<{ error: { message: string } }>().error.message).toMatch(
+      /your role does not allow env\.set/,
+    );
+    // Reading is whatever the built-in role reads.
+    expect((await op(developer, 'project.list', {})).statusCode).toBe(200);
+
+    // Back to a plain developer, then the app goes to a team they are not in.
+    await op(owner, 'role.assign', { userId, roleId: null });
+    await signInAgain();
+    const madeTeam = await op(owner, 'team.create', { name: 'payments' });
+    const { id: teamId } = madeTeam.json<{ result: { id: string } }>().result;
+    expect((await op(owner, 'project.set_team', { projectId, teamId })).statusCode).toBe(200);
+    const outside = await op(developer, 'env.set', { projectId, key: 'A', value: '1' });
+    expect(outside.statusCode).toBe(403);
+    expect(outside.json<{ error: { message: string } }>().error.message).toMatch(
+      /team-owned belongs to the payments team/,
+    );
+    // Reading it is still allowed: a team holds changes, not sight.
+    expect((await op(developer, 'project.get', { projectId })).statusCode).toBe(200);
+
+    expect((await op(owner, 'team.add_member', { teamId, userId })).statusCode).toBe(200);
+    await signInAgain();
+    expect((await op(developer, 'env.set', { projectId, key: 'A', value: '1' })).statusCode).toBe(
+      202,
+    );
+    const members = await op(owner, 'org.members', {});
+    const listed = members
+      .json<{ result: { members: { email: string; teams: { name: string }[] }[] } }>()
+      .result.members.find((m) => m.email === 'narrowed@example.com');
+    expect(listed?.teams.map((x) => x.name)).toEqual(['payments']);
   });
 
   it('ends the sessions of someone whose role changes', async () => {

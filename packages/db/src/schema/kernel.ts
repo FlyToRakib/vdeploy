@@ -163,6 +163,12 @@ export const projects = pgTable(
     /** Set while nothing new may go live for this app, and why (§20). */
     deployLock: jsonb('deploy_lock').$type<DeployLock>(),
     /**
+     * The team that owns this app (§20 Org): only its members, and admins,
+     * may change it. Null belongs to no team, and anyone whose role allows
+     * may change it.
+     */
+    teamId: text('team_id'),
+    /**
      * A release that goes live at once, without a canary's steps (§7, §20):
      * one a person promoted early, or one gone back to — an earlier
      * version has already proved itself, and walking back to it slowly
@@ -254,6 +260,40 @@ export const plans = pgTable(
     index('plans_project_created').on(t.projectId, t.createdAt),
     index('plans_status').on(t.status),
   ],
+);
+
+/**
+ * An organization's own roles (§20 Org): a built-in role, allowed only the
+ * changes named. What it may read is whatever the built-in one reads.
+ */
+export const customRoles = pgTable(
+  'custom_roles',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    base: text('base', { enum: ['viewer', 'developer', 'admin'] }).notNull(),
+    operations: jsonb('operations').$type<string[]>().notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('custom_roles_org_name').on(t.orgId, t.name)],
+);
+
+/** Who holds which of the organization's own roles; one each, at most. */
+export const memberCustomRoles = pgTable(
+  'member_custom_roles',
+  {
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    roleId: text('role_id')
+      .notNull()
+      .references(() => customRoles.id, { onDelete: 'cascade' }),
+  },
+  (t) => [uniqueIndex('member_custom_roles_org_user').on(t.orgId, t.userId)],
 );
 
 /** Sign-ins for private image registries (§15), the password sealed. */

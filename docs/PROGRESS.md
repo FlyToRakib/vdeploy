@@ -373,7 +373,19 @@ each is one task, one commit.
   still needs the registry in that server's own `allowedRegistries`
   (L6): the control plane cannot widen it, and the page says where to add
   a host that is not allowed by default
-- [ ] teams and custom roles (§20, M1)
+- [x] **teams and custom roles (§20, M1)**: an organization's own role is a
+  built-in one (viewer, developer or admin) allowed only the changes
+  picked — never one its built-in role could not make — and reads what
+  the built-in role reads. It narrows the person and the assistant acting
+  for them alike (the existing capability ceiling, now on every actor,
+  and the tool array), and an API key is held to both its scope and the
+  role. A team owns apps: only its members, and admins, may change them,
+  enforced where every change passes for people and assistant both, while
+  everyone may still see them — a team holds changes, not sight, so no
+  listing anywhere can leak what a filter forgot. Changing anyone's role
+  or teams ends their sessions. The dashboard gains a Members page
+  (people, invitations, roles, teams — the invitation and role operations
+  had no screen until now) and a Team choice on each app's Config
 - [x] **a server's SSH keys, read like its firewall is (§20, ADR 0016)**:
   the agent reads sshd's configuration as sshd does (Includes where they
   stand, the first value winning, nothing after the first Match) and each

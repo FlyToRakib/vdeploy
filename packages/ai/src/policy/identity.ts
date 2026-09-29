@@ -20,8 +20,14 @@ export function checkIdentity(actor: Actor, op: OperationDefinition, now: Date):
   // integration may call what an owner read and allowed, and nothing
   // else — not the rest of what its role would permit, and not an
   // operation VDeploy grows afterwards (ADR 0023).
-  if (actor.kind === 'human' && actor.allowed && !actor.allowed.includes(op.name)) {
-    return deny('L0', 'forbidden', `this integration was not allowed to ${op.name}`);
+  if (actor.allowed && !actor.allowed.includes(op.name)) {
+    return deny(
+      'L0',
+      'forbidden',
+      actor.kind === 'human' && actor.pluginId
+        ? `this integration was not allowed to ${op.name}`
+        : `your role does not allow ${op.name}`,
+    );
   }
   if (!roleAtLeast(actor.role, op.minRole)) {
     return deny('L0', 'forbidden', `${op.name} requires the ${op.minRole} role`);

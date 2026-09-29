@@ -7,6 +7,15 @@ interface ActorBase {
   /** The organization the request acts in; the user's role is their role there. */
   orgId: Id<'organization'>;
   role: Role;
+  /**
+   * The only operations this actor may call, beneath its role: an
+   * integration's declared capability (ADR 0023), or one of the
+   * organization's own roles (§20 Org). Absent means whatever the role
+   * allows. The AI, acting for a person, carries that person's.
+   */
+  allowed?: readonly string[];
+  /** The teams the person is in (§20 Org): a team's apps change only by its members. */
+  teams?: readonly string[];
 }
 
 export interface HumanActor extends ActorBase {
@@ -19,12 +28,6 @@ export interface HumanActor extends ActorBase {
   origin: 'dashboard' | 'api' | 'cli' | 'webhook' | 'plugin';
   /** When the user last re-authenticated (§20.2 step-up), if ever this session. */
   stepUpAt: Date | null;
-  /**
-   * The only operations this actor may call, when it is something with a
-   * declared capability rather than a person (ADR 0023). Absent means
-   * whatever the role allows, which is what a person has.
-   */
-  allowed?: readonly string[];
   /** Which plugin is acting, for the audit log; set alongside `allowed`. */
   pluginId?: string;
 }

@@ -57,6 +57,7 @@ import { PLUGIN_QUERIES } from './plugins.js';
 import { SSO_QUERIES } from './sso.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
 import { FREEZE_QUERIES } from './freezes.js';
+import { PEOPLE_QUERIES } from './people.js';
 import type { Handler, KernelDeps } from './context.js';
 
 const id = (args: Record<string, unknown>, field: string): string => String(args[field]);
@@ -111,6 +112,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
   ...OFFSITE_QUERIES,
   ...NOTIFICATION_QUERIES,
   ...FREEZE_QUERIES,
+  ...PEOPLE_QUERIES,
   ...GITHUB_QUERIES,
   ...PREVIEW_QUERIES,
   ...STAGING_QUERIES,

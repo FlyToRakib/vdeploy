@@ -1,10 +1,14 @@
 import type { HumanActor } from '@vdeploy/ai';
-import { idSchema, Role, VDeployError, type Id } from '@vdeploy/contracts';
+import { idSchema, OPERATIONS, Role, VDeployError, type Id } from '@vdeploy/contracts';
 import {
+  customRoles,
   member,
+  memberCustomRoles,
   pluginById,
   pluginUsed,
   session as sessionTable,
+  team,
+  teamMember,
   type Database,
 } from '@vdeploy/db';
 import { and, eq } from 'drizzle-orm';
@@ -49,6 +53,37 @@ export async function roleIn(db: Database, userId: string, orgId: string): Promi
   return role.data;
 }
 
+/** Every read: what one of the organization's own roles reads is its built-in role's. */
+const QUERIES = OPERATIONS.filter((op) => !op.mutates).map((op) => op.name);
+
+/**
+ * What a person is in an organization beyond their role (§20 Org): one of
+ * its own roles, which narrows what they may change, and the teams whose
+ * apps they may change.
+ */
+export async function membershipIn(
+  db: Database,
+  userId: string,
+  orgId: string,
+): Promise<{ role: Role; allowed?: string[]; teams: string[] }> {
+  const role = await roleIn(db, userId, orgId);
+  const [custom] = await db
+    .select({ operations: customRoles.operations })
+    .from(memberCustomRoles)
+    .innerJoin(customRoles, eq(customRoles.id, memberCustomRoles.roleId))
+    .where(and(eq(memberCustomRoles.orgId, orgId), eq(memberCustomRoles.userId, userId)));
+  const teams = (
+    await db
+      .select({ id: teamMember.teamId })
+      .from(teamMember)
+      .innerJoin(team, eq(team.id, teamMember.teamId))
+      .where(and(eq(teamMember.userId, userId), eq(team.organizationId, orgId)))
+  ).map((row) => row.id);
+  // The owner is never narrowed: someone has to be able to undo a role.
+  if (!custom || role === 'owner') return { role, teams };
+  return { role, allowed: [...QUERIES, ...custom.operations], teams };
+}
+
 async function fromApiKey(auth: Auth, db: Database, key: string): Promise<ResolvedActor> {
   const result = await auth.api.verifyApiKey({ body: { key } });
   const metadata = ApiKeyMetadata.safeParse(result.key?.metadata);
@@ -56,7 +91,8 @@ async function fromApiKey(auth: Auth, db: Database, key: string): Promise<Resolv
     throw new VDeployError('unauthenticated', 'The API key is not valid');
   }
   const userId = result.key.referenceId as Id<'user'>;
-  const memberRole = await roleIn(db, userId, metadata.data.orgId);
+  const membership = await membershipIn(db, userId, metadata.data.orgId);
+  const memberRole = membership.role;
   const ceiling = SCOPE_ROLE[metadata.data.scope];
   /**
    * A key belonging to an integration carries that integration's grant
@@ -83,7 +119,16 @@ async function fromApiKey(auth: Auth, db: Database, key: string): Promise<Resolv
       role: RANK[memberRole] <= RANK[ceiling] ? memberRole : ceiling,
       // API keys never satisfy step-up: sensitive account actions need a person.
       stepUpAt: null,
-      ...(plugin ? { allowed: plugin.operations, pluginId: plugin.id } : {}),
+      teams: membership.teams,
+      // Both ceilings, when there are two: never wider than either.
+      ...(plugin || membership.allowed
+        ? {
+            allowed: (plugin?.operations ?? membership.allowed ?? []).filter(
+              (name) => !membership.allowed || membership.allowed.includes(name),
+            ),
+          }
+        : {}),
+      ...(plugin ? { pluginId: plugin.id } : {}),
     },
     sessionId: null,
   };
@@ -151,13 +196,16 @@ export async function resolveActor(
     typeof header === 'string' ? header : signedIn.activeOrganizationId,
   );
   if (!orgId.success) throw new VDeployError('forbidden', 'Choose an organization first');
+  const membership = await membershipIn(db, signedIn.userId, orgId.data);
   return {
     actor: {
       kind: 'human',
       origin: 'dashboard',
       userId: signedIn.userId,
       orgId: orgId.data,
-      role: await roleIn(db, signedIn.userId, orgId.data),
+      role: membership.role,
+      teams: membership.teams,
+      ...(membership.allowed ? { allowed: membership.allowed } : {}),
       stepUpAt: signedIn.stepUpAt,
     },
     sessionId: signedIn.sessionId,

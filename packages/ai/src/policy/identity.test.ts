@@ -87,3 +87,19 @@ describe('L0 identity — an integration with a declared capability (ADR 0023)',
     expect(checkIdentity(human('admin', { stepUpAt: fresh }), serverList, now)).toBeNull();
   });
 });
+
+describe("L0 identity — one of the organization's own roles (§20 Org)", () => {
+  const restart = findOperation('project.restart')!;
+  const redeploy = findOperation('project.redeploy')!;
+  const allowed = ['project.restart', 'project.list'];
+
+  it('allows exactly its changes, for the person and for their AI alike', () => {
+    expect(checkIdentity(human('developer', { allowed }), restart, now)).toBeNull();
+    expect(checkIdentity(ai('developer', { allowed }), restart, now)).toBeNull();
+    expect(checkIdentity(human('developer', { allowed }), redeploy, now)?.reason).toMatch(
+      /your role does not allow project\.redeploy/,
+    );
+    // The assistant, acting for them, is narrowed the same way.
+    expect(checkIdentity(ai('developer', { allowed }), redeploy, now)?.code).toBe('forbidden');
+  });
+});

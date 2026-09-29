@@ -3,6 +3,7 @@ import {
   approvalReasons,
   checkIdentity,
   evaluate,
+  roleAtLeast,
   type Actor,
   type Target,
 } from '@vdeploy/ai';
@@ -21,7 +22,15 @@ import {
   VALUE_BEARING_OPERATIONS,
 } from '@vdeploy/contracts';
 import { buildPlan, isPlannable } from '@vdeploy/core';
-import { aiGrants, appendAudit, idempotencyKeys, plans, type ActorRecord } from '@vdeploy/db';
+import {
+  aiGrants,
+  appendAudit,
+  idempotencyKeys,
+  plans,
+  projects,
+  team,
+  type ActorRecord,
+} from '@vdeploy/db';
 import { and, count, eq, gt, sql } from 'drizzle-orm';
 import { ADMIN } from './admin.js';
 import type { KernelDeps } from './context.js';
@@ -116,6 +125,22 @@ async function persistPlan(
     .returning();
   if (!row) throw new VDeployError('internal', 'The plan could not be saved');
   return planView(row);
+}
+
+/**
+ * A team's apps change only by its members, and by admins and owners (§20
+ * Org). Reads are the organization's; this holds the one thing a team is
+ * for, and it holds for the assistant too, which acts as the person.
+ */
+async function teamRefusal(deps: KernelDeps, actor: Actor, target: Target): Promise<string | null> {
+  if (target.kind !== 'project' || !target.id || roleAtLeast(actor.role, 'admin')) return null;
+  const [row] = await deps.db
+    .select({ teamId: projects.teamId, name: projects.name, teamName: team.name })
+    .from(projects)
+    .leftJoin(team, eq(team.id, projects.teamId))
+    .where(eq(projects.id, target.id));
+  if (!row?.teamId || actor.teams?.includes(row.teamId)) return null;
+  return `${row.name} belongs to the ${row.teamName ?? 'other'} team: only its members, and admins, can change it`;
 }
 
 async function audit(
@@ -222,6 +247,11 @@ export async function runOperation(
       ...('violation' in decision ? { violation: true } : {}),
     });
     throw new VDeployError(decision.code, decision.reason);
+  }
+  const outsideTeam = op.mutates ? await teamRefusal(deps, actor, target) : null;
+  if (outsideTeam) {
+    await audit(deps, actor, name, target, 'denied', { code: 'forbidden', reason: outsideTeam });
+    throw new VDeployError('forbidden', outsideTeam);
   }
 
   const context = { deps, actor, args: decision.args };

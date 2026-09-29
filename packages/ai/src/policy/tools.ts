@@ -20,6 +20,8 @@ export { toolName };
 export function isBound(actor: AiActor, op: OperationDefinition, grants: AiGrants): boolean {
   if (!grants.enabled || op.tier === 'human_only') return false;
   if (!roleAtLeast(actor.role, op.minRole)) return false;
+  // The person's own role narrows it too: never a tool they could not use.
+  if (actor.allowed && !actor.allowed.includes(op.name)) return false;
   if (op.reads) return grants.read[op.reads];
   if (actor.mode === 'ask') return false;
   if (op.scope === 'org') return grants.scope.projects === 'all';

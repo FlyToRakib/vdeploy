@@ -10,6 +10,7 @@ import {
   AccessSection,
   CloneSection,
   DeployLockSection,
+  TeamSection,
   DomainsSection,
   ExportSection,
   HealthSection,
@@ -151,6 +152,7 @@ export function ProjectConfig() {
       <PreviewsSection />
       <ServerSection />
       <BuildServerSection />
+      <TeamSection />
       <DeployLockSection />
       <CloneSection />
       <ExportSection />

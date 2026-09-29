@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Snowflake,
   Sparkles,
+  UserCog,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -59,6 +60,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Status page',
     icon: Activity,
     keywords: ['uptime', 'public', 'incidents', 'outage', 'visitors'],
+  },
+  {
+    href: '/settings/members',
+    label: 'Members',
+    icon: UserCog,
+    keywords: ['people', 'invite', 'roles', 'teams', 'users', 'permissions'],
   },
   {
     href: '/settings/notifications',

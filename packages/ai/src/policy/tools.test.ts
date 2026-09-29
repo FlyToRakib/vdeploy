@@ -83,3 +83,13 @@ describe('L2 tool binding', () => {
     });
   });
 });
+
+describe("L2 — a person with one of the organization's own roles", () => {
+  it('never hands the assistant a tool the person could not use', () => {
+    const restart = findOperation('project.restart')!;
+    const redeploy = findOperation('project.redeploy')!;
+    const actor = ai('developer', { mode: 'autopilot', allowed: ['project.restart'] });
+    expect(isBound(actor, restart, DEFAULT_AI_GRANTS)).toBe(true);
+    expect(isBound(actor, redeploy, DEFAULT_AI_GRANTS)).toBe(false);
+  });
+});

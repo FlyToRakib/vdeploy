@@ -713,6 +713,44 @@ export function MovedPagesSection() {
   );
 }
 
+/** Which team owns this app (§20 Org): only its members, and admins, change it. */
+export function TeamSection() {
+  const { projectId, row, act } = useProject();
+  const [teams, setTeams] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => {
+    void query<{ id: string; name: string }[]>('team.list').then(setTeams, () => {
+      setTeams([]);
+    });
+  }, []);
+  if (!teams?.length) return null;
+  return (
+    <Section
+      title="Team"
+      hint="An app that belongs to a team can be changed only by that team's members and by admins. Everyone can still see it."
+    >
+      <select
+        aria-label="The team that owns this app"
+        value={row.teamId ?? ''}
+        onChange={(event) =>
+          void act(
+            'project.set_team',
+            { projectId, teamId: event.target.value || null },
+            'Changing its team',
+          )
+        }
+        className="h-10 justify-self-start rounded-md border border-border bg-surface-raised px-3 text-sm"
+      >
+        <option value="">No team: anyone whose role allows can change it</option>
+        {teams.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+    </Section>
+  );
+}
+
 /** Holding this app's deploys (§20): nothing new goes live until it is unlocked. */
 export function DeployLockSection() {
   const { projectId, row, act } = useProject();
