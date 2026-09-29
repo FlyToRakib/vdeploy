@@ -263,6 +263,9 @@ func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Re
 	if a := network.Middleware.Auth; a != nil && a.Type == "basic" && len(users) == 0 {
 		return nil, false
 	}
+	if network.Protocol == "tcp" {
+		return tcpFile(key, network, hosts, traffic)
+	}
 	middlewareDefs, chain := middlewares(key, *network, users)
 	deny := denied(network.Middleware.IPDenyList)
 	toHTTPS := key + "-to-https"

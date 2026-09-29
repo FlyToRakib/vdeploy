@@ -112,6 +112,77 @@ function checkStatefulGuards(spec: Shape, ctx: z.core.$RefinementCtx): void {
   }
 }
 
+/**
+ * A TCP app (§13) is reached on 443 by the name its client asks TLS for,
+ * and the router passes the bytes on without reading them. So it needs a
+ * certificate for each name, and nothing that reads HTTP applies — each
+ * such setting is refused by name rather than quietly doing nothing.
+ */
+function checkTcp(spec: Shape, ctx: z.core.$RefinementCtx): void {
+  const network = spec.network;
+  if (!network) return;
+  const http: [boolean, (string | number)[], string][] = [
+    [network.redirects.length > 0, ['network', 'redirects'], 'a TCP app has no pages to move'],
+    [
+      !!network.middleware.auth,
+      ['network', 'middleware', 'auth'],
+      'a password in front needs HTTP',
+    ],
+    [
+      !!network.middleware.rateLimit,
+      ['network', 'middleware', 'rateLimit'],
+      'rate limits count HTTP requests',
+    ],
+    [
+      network.middleware.custom.length > 0,
+      ['network', 'middleware', 'custom'],
+      "Traefik's HTTP middlewares need HTTP",
+    ],
+    [
+      network.loadBalancer.sticky.enabled,
+      ['network', 'loadBalancer', 'sticky'],
+      'sticky sessions ride on an HTTP cookie',
+    ],
+    [
+      !!network.loadBalancer.healthCheck,
+      ['network', 'loadBalancer', 'healthCheck'],
+      "the router's health check asks over HTTP",
+    ],
+    [
+      !!network.loadBalancer.circuitBreaker,
+      ['network', 'loadBalancer', 'circuitBreaker'],
+      'the circuit breaker counts HTTP answers',
+    ],
+    [
+      !!network.loadBalancer.retry,
+      ['network', 'loadBalancer', 'retry'],
+      'retries resend HTTP requests',
+    ],
+    [
+      !!network.loadBalancer.responseTimeout,
+      ['network', 'loadBalancer', 'responseTimeout'],
+      'a response timeout waits for an HTTP answer',
+    ],
+    [
+      spec.deploy.strategy === 'canary',
+      ['deploy', 'strategy'],
+      'a canary watches HTTP answers, so a TCP app switches at once (blue/green)',
+    ],
+  ];
+  for (const [set, path, why] of http) {
+    if (set) issue(ctx, path, `not for a TCP app: ${why}`);
+  }
+  network.domains.forEach((domain, index) => {
+    if (domain.tls.provider !== 'letsencrypt') {
+      issue(
+        ctx,
+        ['network', 'domains', index, 'tls'],
+        'a TCP app is told apart by the name its client asks TLS for, so each name needs a certificate',
+      );
+    }
+  });
+}
+
 function checkConsistency(spec: Shape, ctx: z.core.$RefinementCtx): void {
   const { source, build, scaling, runtime, deploy, network } = spec;
   if (source.type === 'image' && build.strategy !== 'image') {
@@ -143,6 +214,7 @@ function checkConsistency(spec: Shape, ctx: z.core.$RefinementCtx): void {
   if (deploy.strategy === 'canary' && !deploy.canary) {
     issue(ctx, ['deploy', 'canary'], 'the canary strategy needs canary steps');
   }
+  if (network?.protocol === 'tcp') checkTcp(spec, ctx);
   network?.domains.forEach((domain, index) => {
     if (domain.host.startsWith('*.') && domain.tls.challenge !== 'dns-01') {
       issue(

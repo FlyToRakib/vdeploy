@@ -290,11 +290,13 @@ type Volume struct {
 
 // Network is how traffic reaches the application.
 type Network struct {
-	ContainerPort int          `json:"containerPort"`
-	Domains       []Domain     `json:"domains"`
-	Redirects     []MovedPath  `json:"redirects"`
-	Middleware    Middleware   `json:"middleware"`
-	LoadBalancer  LoadBalancer `json:"loadBalancer"`
+	ContainerPort int `json:"containerPort"`
+	// Protocol is "http", or "tcp" for an app the router passes bytes to (§13).
+	Protocol     string       `json:"protocol"`
+	Domains      []Domain     `json:"domains"`
+	Redirects    []MovedPath  `json:"redirects"`
+	Middleware   Middleware   `json:"middleware"`
+	LoadBalancer LoadBalancer `json:"loadBalancer"`
 }
 
 // MovedPath sends a path, and everything under it, somewhere else (§13).

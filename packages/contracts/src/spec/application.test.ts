@@ -198,6 +198,48 @@ describe('the Traefik escape hatch', () => {
   });
 });
 
+describe('a TCP app (§13)', () => {
+  const tcp = (network: Record<string, unknown>, extra: Record<string, unknown> = {}): unknown => ({
+    ...spec(),
+    ...extra,
+    network: {
+      containerPort: 1883,
+      protocol: 'tcp',
+      domains: [{ host: 'mqtt.example.com' }],
+      ...network,
+    },
+  });
+
+  it('is fine with a certificate per name and nothing that reads HTTP', () => {
+    expect(errorsOf(tcp({}))).toEqual([]);
+  });
+
+  it('refuses, by name, each setting that would need to read HTTP', () => {
+    expect(errorsOf(tcp({ redirects: [{ from: '/a', to: '/b' }] })).join()).toMatch(
+      /network\.redirects: not for a TCP app/,
+    );
+    expect(errorsOf(tcp({ middleware: { rateLimit: { average: 1, burst: 1 } } })).join()).toMatch(
+      /rate limits count HTTP requests/,
+    );
+    expect(
+      errorsOf(
+        tcp(
+          {},
+          {
+            deploy: {
+              strategy: 'canary',
+              canary: { steps: [10], stepDuration: '1m', autoRollbackErrorRate: 0.1 },
+            },
+          },
+        ),
+      ).join(),
+    ).toMatch(/a TCP app switches at once/);
+    expect(
+      errorsOf(tcp({ domains: [{ host: 'mqtt.example.com', tls: { provider: 'none' } }] })).join(),
+    ).toMatch(/each name needs a certificate/);
+  });
+});
+
 describe('quantities', () => {
   it('converts memory and durations', () => {
     expect(memoryBytes('512Mi')).toBe(512 * 1024 * 1024);

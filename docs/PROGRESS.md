@@ -248,7 +248,16 @@ each is one task, one commit.
   middlewares that act on the app's own requests, so none can name
   another app's service, read a file on the server, or load code. The
   agent's adversarial suite refuses each of those
-- [ ] `network.protocol: tcp`
+- [x] **`network.protocol: tcp`**: found on the way that the contract
+  accepted it and the agent's types had no such field, so a TCP app was
+  routed as HTTP. Now the router serves it on 443 by the name its client
+  asks TLS for (SNI), ending TLS and passing the bytes on — checked
+  against the pinned Traefik, weighted blue/green and allow list
+  included — and only for names that have a certificate. The addresses
+  turned away and let in carry over; every setting that would need to
+  read HTTP (redirects, passwords, rate limits, sticky sessions, the
+  router's health check, retries, a canary's error rate, the escape
+  hatch) is refused by name for a TCP app rather than quietly ignored
 - [ ] DNS-01 certificates, and a wildcard certificate as the opt-in (§13, §13.1)
 
 **Data (§17)**
