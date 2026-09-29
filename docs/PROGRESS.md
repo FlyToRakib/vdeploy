@@ -362,7 +362,13 @@ each is one task, one commit.
   an assistant's, because it holds the alarm that would otherwise sound
 - [ ] `registry.add`: pulling from a private registry (§15, §24)
 - [ ] teams and custom roles (§20, M1)
-- [ ] a server's SSH keys, read like its firewall is (§20, ADR 0016)
+- [x] **a server's SSH keys, read like its firewall is (§20, ADR 0016)**:
+  the agent reads sshd's configuration as sshd does (Includes where they
+  stand, the first value winning, nothing after the first Match) and each
+  account's authorized_keys, and the server page lists who can sign in —
+  each key by the fingerprint `ssh-keygen -l` prints (checked against it)
+  and its comment, never the key — with the one line to change when
+  password login is on. Read, never written: a key is added on the server
 - [x] **agent version, self-update by channel, staged rollout, clean
   uninstall (§25, §34.2)**: an agent says which build it is and which
   desired-state schema it reads, by hash. When either differs from what

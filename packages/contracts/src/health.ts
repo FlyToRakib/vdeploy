@@ -76,6 +76,37 @@ export const ReclaimResult = z.strictObject({
 export type ReclaimResult = z.infer<typeof ReclaimResult>;
 
 /**
+ * Who can sign in to the server over SSH (§20 Servers), read from sshd's
+ * configuration and each account's authorized_keys — never changed from
+ * here (ADR 0016). A key is its type, fingerprint and comment: what a
+ * person matches against the keys they hold, and never the key itself.
+ */
+export const SshAccess = z.strictObject({
+  /** False when sshd's configuration could not be read: the rest are its defaults. */
+  readable: z.boolean(),
+  passwordLogin: z.boolean(),
+  rootLogin: z.string().max(32),
+  accounts: z
+    .array(
+      z.strictObject({
+        user: z.string().max(64),
+        keys: z
+          .array(
+            z.strictObject({
+              type: z.string().max(64),
+              fingerprint: z.string().max(128),
+              comment: z.string().max(256),
+              restricted: z.boolean(),
+            }),
+          )
+          .max(100),
+      }),
+    )
+    .max(50),
+});
+export type SshAccess = z.infer<typeof SshAccess>;
+
+/**
  * What the server's own firewall lets through (§20 Servers, §30).
  *
  * Supporting detail, never the verdict: the check that matters is the one
@@ -129,6 +160,8 @@ export const ServerHealth = z.strictObject({
     .optional(),
   /** What the server's own firewall lets in; absent from older agents. */
   firewall: FirewallReport.optional(),
+  /** Who can sign in over SSH, and how; absent from older agents. */
+  ssh: SshAccess.optional(),
   /** The certificates its router serves; absent from older agents. */
   certificates: z.array(ServedCertificate).max(500).optional(),
 });

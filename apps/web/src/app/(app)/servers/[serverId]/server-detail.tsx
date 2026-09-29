@@ -18,6 +18,7 @@ import { ago, serverHealth, splitCommand } from '@/lib/servers';
 import {
   FirewallNote,
   HealthPanel,
+  SshAccessCard,
   type LastReclaim,
   type ServerHealth,
   type ServerUsing,
@@ -597,6 +598,7 @@ export function ServerDetail({ serverId }: { serverId: string }) {
             {server.maintenanceSince ? 'End maintenance' : 'Start maintenance'}
           </Button>
         </Card>
+        {server.health?.ssh && <SshAccessCard ssh={server.health.ssh} />}
       </div>
     </div>
   );

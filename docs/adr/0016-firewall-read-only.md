@@ -62,3 +62,11 @@ The catalogued operation stays a read (`server.status` carries it). There is
 no `firewall.allow` operation, and adding one later would mean revisiting
 this decision rather than extending an existing surface — which is the
 right shape for a decision about locking people out of their own servers.
+
+The same holds for **SSH access** (§20 Servers: "SSH keys"), which came
+later: the agent reads `sshd_config` (with its `Include`s, first value
+winning, as sshd reads it) and every account's `authorized_keys`, and
+reports each key as its type, fingerprint and comment — never the key
+itself — beside whether password and root logins are allowed. Adding or
+removing a key stays something done on the server, for the reason above:
+it is the other thing that can lock an owner out of their own machine.

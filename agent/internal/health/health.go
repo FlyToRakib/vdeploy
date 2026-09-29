@@ -28,6 +28,7 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/firewall"
 	"github.com/FlyToRakib/vdeploy/agent/internal/protocol"
+	"github.com/FlyToRakib/vdeploy/agent/internal/sshaccess"
 )
 
 // Every is how often the server's make-up is measured.
@@ -94,6 +95,8 @@ type Report struct {
 	Folders        protocol.List[Folder] `json:"folders"`
 	// Firewall is what this server's own firewall lets in (§20 Servers).
 	Firewall firewall.Report `json:"firewall"`
+	// SSH is who can sign in to this server, and how (§20 Servers).
+	SSH sshaccess.Report `json:"ssh"`
 	// Certificates are what the router serves, and until when (§30 ⑦).
 	Certificates protocol.List[Certificate] `json:"certificates"`
 }
@@ -113,6 +116,8 @@ type Reader struct {
 	ProcMeminfo string
 	// FirewallRoot is prefixed to the firewall's own config paths, for tests.
 	FirewallRoot string
+	// SSHRoot is prefixed to sshd's and the accounts' paths, for tests.
+	SSHRoot string
 	// ACME reads the router's certificate store; nil reports none.
 	ACME func(ctx context.Context) ([]byte, error)
 }
@@ -135,6 +140,7 @@ func (r *Reader) Read(ctx context.Context, wanted map[string]bool, now time.Time
 		}
 	}
 	report.Firewall = (&firewall.Reader{Root: r.FirewallRoot}).Read()
+	report.SSH = (&sshaccess.Reader{Root: r.SSHRoot}).Read()
 	report.SwapUsedBytes, report.SwapTotalBytes = r.swap()
 	report.InodesUsed, report.InodesTotal = r.inodes()
 	usage, err := r.Engine.SystemDF(ctx)

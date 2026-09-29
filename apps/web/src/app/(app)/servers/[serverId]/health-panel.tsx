@@ -25,6 +25,16 @@ export interface ServerHealth {
   };
   orphans: { volume: string; projectId: string; sizeBytes: number; createdAt: string }[];
   firewall?: { tool: string; active: boolean; openPorts: number[]; readable: boolean };
+  /** Who can sign in over SSH (§20 Servers); absent from older agents. */
+  ssh?: {
+    readable: boolean;
+    passwordLogin: boolean;
+    rootLogin: string;
+    accounts: {
+      user: string;
+      keys: { type: string; fingerprint: string; comment: string; restricted: boolean }[];
+    }[];
+  };
 }
 
 /**
@@ -36,6 +46,62 @@ export interface ServerHealth {
  * click in a hosting panel. VDeploy reads it and says what to type; it does
  * not reach in and change the one thing that can lock somebody out.
  */
+/** Who can sign in over SSH (§20 Servers), and the one setting worth changing if it is on. */
+export function SshAccessCard({ ssh }: { ssh: NonNullable<ServerHealth['ssh']> }) {
+  const keys = ssh.accounts.reduce((n, a) => n + a.keys.length, 0);
+  return (
+    <Card className="grid content-start gap-3 md:col-span-2">
+      <h2 className="font-medium">Who can sign in over SSH</h2>
+      {ssh.passwordLogin && (
+        <div className="grid gap-1 text-sm text-status-warning">
+          <p>
+            Password login is on{ssh.readable ? '' : ' (as far as VDeploy can tell)'}: anyone can
+            try passwords against this server, and bots do, all day. With a key set up, turn it off
+            in /etc/ssh/sshd_config and restart ssh:
+          </p>
+          <code className="rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs">
+            PasswordAuthentication no
+          </code>
+        </div>
+      )}
+      {ssh.rootLogin === 'yes' && (
+        <p className="text-sm text-status-warning">
+          root can sign in with a password too. `PermitRootLogin prohibit-password` keeps it to
+          keys.
+        </p>
+      )}
+      {keys === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No account on this server has a key that can sign in.
+        </p>
+      ) : (
+        <ul className="grid gap-2 text-sm">
+          {ssh.accounts.map((account) => (
+            <li key={account.user} className="grid gap-1">
+              <span className="font-medium">{account.user}</span>
+              <ul className="grid gap-0.5">
+                {account.keys.map((key, i) => (
+                  <li key={`${key.fingerprint}-${String(i)}`} className="flex flex-wrap gap-2">
+                    <span className="font-mono text-xs break-all">{key.fingerprint}</span>
+                    <span className="text-muted-foreground">
+                      {key.comment || key.type}
+                      {key.restricted ? ' · limited to what its line allows' : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Read from the server, never changed from here: a key is added or removed on the server
+        itself. Compare a fingerprint with `ssh-keygen -lf` on the computer that holds the key.
+      </p>
+    </Card>
+  );
+}
+
 export function FirewallNote({ firewall }: { firewall: NonNullable<ServerHealth['firewall']> }) {
   if (firewall.tool === '') {
     return (
