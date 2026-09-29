@@ -460,7 +460,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
    */
   'project.clone': (args, context) => {
     const parent = requireProject(context);
-    const name = String(args.name);
+    const { name } = args;
     if (context.appNames?.includes(name)) {
       throw new VDeployError('conflict', `There is already an app called ${name}`);
     }

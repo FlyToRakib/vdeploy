@@ -85,7 +85,7 @@ function importEnv(spec: ApplicationSpec, args: OperationArgs<'env.import'>): Ap
         key: entry.key,
         target: 'runtime',
         ...(entry.value === undefined ? { secretRef: entry.secretRef } : { value: entry.value }),
-      } as OperationArgs<'env.set'>),
+      }),
     spec,
   );
 }
