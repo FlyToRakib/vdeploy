@@ -513,6 +513,33 @@ describe('the gate', () => {
     expect(write.statusCode).toBe(403);
   });
 
+  it('lets a key be used more than ten times a day, and follow the plan it started', async () => {
+    await stepUp(owner);
+    const created = await op(owner, 'api_key.create', { name: 'cli', scope: 'deploy' });
+    const { key } = created.json<{ result: { key: string } }>().result;
+    const projectId = await seedProject(orgId, 'followed');
+    const as = (method: 'GET' | 'POST', url: string, body?: unknown) =>
+      t.app.inject({
+        method,
+        url,
+        headers: { 'x-api-key': key, 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { payload: JSON.stringify(body) }),
+      });
+    // A CLI following one deploy asks every second; the library's default
+    // allowed ten requests a day, so the eleventh was a "refused key".
+    for (let i = 0; i < 15; i++) {
+      expect((await as('POST', '/api/v1/operations/project.list', { input: {} })).statusCode).toBe(
+        200,
+      );
+    }
+    const started = await as('POST', '/api/v1/operations/project.restart', {
+      input: { projectId },
+    });
+    const { plan } = started.json<{ plan: { id: string } }>();
+    const followed = await as('GET', `/api/v1/plans/${plan.id}`);
+    expect(followed.statusCode).toBe(200);
+  });
+
   it('ends the sessions of someone whose role changes', async () => {
     const developer = await member('developer', 'dev@example.com');
     const [devMember] = await t.database.db

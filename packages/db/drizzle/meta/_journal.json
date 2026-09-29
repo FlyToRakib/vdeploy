@@ -309,6 +309,13 @@
       "when": 1790655387220,
       "tag": "0043_agent-updates",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790657168469,
+      "tag": "0044_api-key-limits",
+      "breakpoints": true
     }
   ]
 }

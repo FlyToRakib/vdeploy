@@ -181,7 +181,21 @@ export function createAuth(deps: AuthDeps) {
         defaultPrefix: 'vd_',
         requireName: true,
         enableMetadata: true,
-        keyExpiration: { defaultExpiresIn: 90 * 24 * 60 * 60 * 1000 },
+        /*
+         * No default expiry. A key a person makes says its own (api_key.create
+         * asks for days); an integration's key lasts exactly as long as the
+         * integration is installed, and removing it revokes the key. The
+         * plugin's own default is also documented in milliseconds and read in
+         * seconds, which is a unit nobody should have to get right twice.
+         */
+        keyExpiration: { defaultExpiresIn: null },
+        /*
+         * The plugin's default is ten requests a key a day, which leaves a
+         * CLI following one deploy locked out after ten seconds. A key gets
+         * what a person gets from one address: enough for any honest script,
+         * and a stop for a runaway one.
+         */
+        rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 300 },
       }),
       haveIBeenPwned({
         enabled: deps.breachedPasswordCheck,
