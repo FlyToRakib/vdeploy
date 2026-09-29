@@ -281,6 +281,15 @@ each is one task, one commit.
 
 **Data (§17)**
 - [ ] object storage: a bucket you bring, or managed MinIO (§17.1, M5)
+- [x] **managed Redis ran without its password**: found on the way that
+  the official image reads no password from its environment, so the
+  generated one was handed over and never asked for — Redis answered
+  anything on its network, and anyone once its port was opened.
+  Confirmed against redis:8. The agent now starts Redis from a config
+  file the entrypoint writes from that variable (never a command line
+  the server's process list would show), still as the redis user, and
+  records how it started it: a Redis an older agent started is replaced
+  once, in place, to take its password
 - [x] **a database's public port, as a warned opt-in (§17.3)**: a person,
   stepped up, can open a managed database on a port of its server (never
   a privileged one, never the private-traffic port, never one another

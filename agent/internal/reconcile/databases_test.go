@@ -231,3 +231,41 @@ func TestAPortSomethingElseHoldsLeavesTheDatabaseRunningAsItWas(t *testing.T) {
 		t.Fatalf("the database stopped: %v", engine.running())
 	}
 }
+
+func TestRedisStartsWithItsPasswordAndAnOpenOneIsReplaced(t *testing.T) {
+	engine := newFake()
+	d := testDatabase("five")
+	d.Engine, d.Image, d.Port, d.DataPath = "redis", "redis:8", 6379, "/data"
+	d.Env = nil
+	d.Credentials[0].Key = "REDIS_PASSWORD"
+	c := compose.PlanDatabase(d)
+	// The password is read from the environment into a file, never onto a
+	// command line; the image's entrypoint still drops to the redis user.
+	script := strings.Join(c.Cmd, " ")
+	if !strings.Contains(script, `"$REDIS_PASSWORD"`) || strings.Contains(script, "hunter2") ||
+		!strings.Contains(script, "exec docker-entrypoint.sh redis-server /tmp/vdeploy-redis.conf") {
+		t.Fatalf("cmd = %q", c.Cmd)
+	}
+	if compose.PlanDatabase(testDatabase("pg")).Cmd != nil {
+		t.Fatal("an engine whose image reads its password was given a command")
+	}
+
+	state := &spec.DesiredState{Protocol: spec.Protocol, Generation: 1, Databases: []spec.DesiredDatabase{d}}
+	r := newReconciler(engine)
+	r.Secrets = &fakeSecrets{}
+	reconcile(t, r, state)
+	engine.calls = nil
+	reconcile(t, r, state)
+	if slices.ContainsFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "create ") }) {
+		t.Fatalf("a current Redis was replaced: %v", engine.calls)
+	}
+
+	// One an older agent started, without its password, is replaced.
+	for _, existing := range engine.containers {
+		delete(existing.Labels, compose.LaunchLabel)
+	}
+	reconcile(t, r, state)
+	if !slices.Contains(engine.calls, "create "+compose.DatabaseName(d.DatabaseID)) {
+		t.Fatalf("an open Redis was left running: %v", engine.calls)
+	}
+}

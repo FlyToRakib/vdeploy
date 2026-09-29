@@ -4,6 +4,8 @@
 package compose
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strconv"
@@ -219,6 +221,38 @@ const RevisionLabel = "io.vdeploy.revision"
 // PublicPortLabel records the server port a database container holds.
 const PublicPortLabel = "io.vdeploy.public-port"
 
+// LaunchLabel records how a database's engine was started, so a change to
+// it replaces the container as a new image would.
+const LaunchLabel = "io.vdeploy.launch"
+
+/*
+redisLaunch starts Redis with its password. The official image reads none
+from its environment — REDIS_PASSWORD alone leaves it answering anyone on
+its network, and anyone at all once its port is opened. The password goes
+into a file only the redis user can read, never onto a command line where
+the server's process list would show it, and the image's own entrypoint
+still drops to that user before Redis starts.
+*/
+const redisLaunch = `umask 077 && printf 'requirepass "%s"\n' "$REDIS_PASSWORD" > /tmp/vdeploy-redis.conf && chown redis /tmp/vdeploy-redis.conf && exec docker-entrypoint.sh redis-server /tmp/vdeploy-redis.conf`
+
+// databaseCommand is how an engine is started where its image's own
+// default would not do; nil keeps the image's.
+func databaseCommand(engine string) []string {
+	if engine == "redis" {
+		return []string{"sh", "-c", redisLaunch}
+	}
+	return nil
+}
+
+// launchOf names a start command, for LaunchLabel; the image's own is "".
+func launchOf(cmd []string) string {
+	if len(cmd) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.Join(cmd, "\x00")))
+	return hex.EncodeToString(sum[:6])
+}
+
 // DatabaseKey is the short, name-safe form of a database id.
 func DatabaseKey(databaseID string) string {
 	return strings.ToLower(strings.TrimPrefix(databaseID, "db_"))
@@ -254,6 +288,7 @@ func PlanDatabase(d spec.DesiredDatabase) Container {
 	container := Container{
 		Name:    DatabaseName(d.DatabaseID),
 		Image:   d.Image,
+		Cmd:     databaseCommand(d.Engine),
 		Env:     env,
 		Network: DatabaseNetwork(d.DatabaseID),
 		Volumes: []Mount{{Volume: DatabaseVolume(d.DatabaseID), Target: d.DataPath}},
@@ -273,6 +308,9 @@ func PlanDatabase(d spec.DesiredDatabase) Container {
 	}
 	if d.PublicPort > 0 {
 		container.Labels[PublicPortLabel] = strconv.Itoa(d.PublicPort)
+	}
+	if launch := launchOf(container.Cmd); launch != "" {
+		container.Labels[LaunchLabel] = launch
 	}
 	return container
 }

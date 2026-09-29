@@ -78,8 +78,10 @@ func (p *pass) convergeDatabase(ctx context.Context, d spec.DesiredDatabase, c c
 			return fmt.Errorf("volume: %w", err)
 		}
 	}
-	// A changed image or revision replaces the container — never alongside the old one.
-	replace := existing.Image != c.Image || compose.DatabaseRevision(existing.Labels) != d.Revision
+	// A changed image, revision or start command replaces the container —
+	// never alongside the old one.
+	replace := existing.Image != c.Image || compose.DatabaseRevision(existing.Labels) != d.Revision ||
+		existing.Labels[compose.LaunchLabel] != c.Labels[compose.LaunchLabel]
 	// Not for a port something else on the server holds: removing the
 	// running database first and then failing to start the new one would
 	// trade a setting that cannot apply for an outage.
