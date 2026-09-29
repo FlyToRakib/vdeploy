@@ -160,6 +160,44 @@ describe('ApplicationSpec rejects', () => {
   });
 });
 
+describe('the Traefik escape hatch', () => {
+  const withCustom = (custom: unknown[]): unknown => ({
+    ...spec(),
+    network: { containerPort: 3000, domains: [], middleware: { custom } },
+  });
+
+  it("takes Traefik's own middlewares, as Traefik's documentation writes them", () => {
+    const custom = [
+      {
+        headers: {
+          accessControlAllowMethods: ['GET', 'OPTIONS'],
+          accessControlAllowOriginList: ['https://shop.example.com'],
+          accessControlMaxAge: 600,
+          customResponseHeaders: { 'X-Robots-Tag': 'noindex', Server: '' },
+        },
+      },
+      { stripPrefix: { prefixes: ['/api'] } },
+      { replacePathRegex: { regex: '^/blog/(.*)', replacement: '/posts/$1' } },
+      { inFlightReq: { amount: 50 } },
+    ];
+    expect(errorsOf(withCustom(custom))).toEqual([]);
+  });
+
+  it('refuses what could reach past the app, or that Traefik would not read', () => {
+    for (const custom of [
+      { errors: { service: 'vd-other@file', status: ['500'] } },
+      { chain: { middlewares: ['vd-other-auth@file'] } },
+      { basicAuth: { usersFile: '/etc/shadow' } },
+      { stripPrefix: { prefixes: ['/api'], forceSlash: true } },
+      { addPrefix: { prefix: '/a' }, replacePath: { path: '/b' } },
+      { replacePathRegex: { regex: '(', replacement: '/' } },
+      { headers: { customRequestHeaders: { 'X-A': 'one\r\nX-Injected: two' } } },
+    ]) {
+      expect(errorsOf(withCustom([custom])), JSON.stringify(custom)).not.toEqual([]);
+    }
+  });
+});
+
 describe('quantities', () => {
   it('converts memory and durations', () => {
     expect(memoryBytes('512Mi')).toBe(512 * 1024 * 1024);

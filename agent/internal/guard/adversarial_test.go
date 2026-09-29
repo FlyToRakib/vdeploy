@@ -44,6 +44,12 @@ func volume(frame map[string]any) map[string]any {
 	return runtime(frame)["volumes"].([]any)[0].(map[string]any)
 }
 
+// custom puts one Traefik middleware in the app's escape hatch.
+func custom(frame map[string]any, middleware map[string]any) {
+	m := appSpec(frame)["network"].(map[string]any)["middleware"].(map[string]any)
+	m["custom"] = []any{middleware}
+}
+
 func digest(ref string) string { return ref + "@sha256:" + strings.Repeat("b", 64) }
 
 func admit(t *testing.T, frame map[string]any) error {
@@ -78,6 +84,21 @@ func TestHostileFramesAreRefused(t *testing.T) {
 		{"sysctls", func(f map[string]any) { runtime(f)["sysctls"] = map[string]any{"kernel.panic": "1"} }, "contract"},
 		{"host network", func(f map[string]any) { appSpec(f)["network"].(map[string]any)["networkMode"] = "host" }, "contract"},
 		{"container network", func(f map[string]any) { runtime(f)["networkMode"] = "container:revoye-api" }, "contract"},
+		// The Traefik escape hatch names only middlewares that stay inside
+		// the app, and only fields Traefik knows: one unknown field makes
+		// Traefik refuse every app's routing on the server.
+		{"another app's service through errors", func(f map[string]any) {
+			custom(f, map[string]any{"errors": map[string]any{"service": "vd-other@file", "status": []any{"500"}}})
+		}, "contract"},
+		{"a middleware that reads a file", func(f map[string]any) {
+			custom(f, map[string]any{"basicAuth": map[string]any{"usersFile": "/etc/shadow"}})
+		}, "contract"},
+		{"a field Traefik does not know", func(f map[string]any) {
+			custom(f, map[string]any{"stripPrefix": map[string]any{"prefixes": []any{"/a"}, "forceSlashes": true}})
+		}, "contract"},
+		{"two middlewares in one", func(f map[string]any) {
+			custom(f, map[string]any{"addPrefix": map[string]any{"prefix": "/a"}, "replacePath": map[string]any{"path": "/b"}})
+		}, "contract"},
 		{"host pid namespace", func(f map[string]any) { runtime(f)["pidMode"] = "host" }, "contract"},
 		{"host ipc namespace", func(f map[string]any) { runtime(f)["ipcMode"] = "host" }, "contract"},
 		{"docker socket bind", func(f map[string]any) {

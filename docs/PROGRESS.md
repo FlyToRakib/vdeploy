@@ -238,7 +238,16 @@ each is one task, one commit.
   for `X-Auth-User`) are dropped at the door, so a visitor cannot forge
   the identity forward-auth hands an app. The Config screen gains a Load
   balancing section (sticky sessions, retries, the response timeout)
-- [ ] the raw Traefik escape hatch (§20)
+- [x] **the raw Traefik escape hatch (§20)**: `network.middleware.custom`
+  is a list of Traefik's own middlewares with Traefik's own field names —
+  headers and CORS, prefix stripping and adding, path rewriting, a cap on
+  requests in flight, buffering — applied last, in order. Typed rather
+  than passed through (ADR 0025), because checked against the pinned
+  Traefik one routing file with one unknown field makes it refuse the
+  whole directory, every app on the server with it; and bounded to
+  middlewares that act on the app's own requests, so none can name
+  another app's service, read a file on the server, or load code. The
+  agent's adversarial suite refuses each of those
 - [ ] `network.protocol: tcp`
 - [ ] DNS-01 certificates, and a wildcard certificate as the opt-in (§13, §13.1)
 

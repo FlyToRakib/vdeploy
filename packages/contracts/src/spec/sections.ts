@@ -32,6 +32,101 @@ const Cidr = z.union([z.cidrv4(), z.cidrv6(), z.ipv4(), z.ipv6()]);
 /** An HTTP header name: letters, digits and hyphens. */
 const HeaderName = z.string().regex(/^[A-Za-z0-9-]{1,64}$/, 'must be a header name like X-Api-Key');
 
+/** A header's value; an empty one removes the header. */
+const HeaderValue = z
+  .string()
+  .max(1024)
+  .regex(/^[^\r\n]*$/, 'must be on one line');
+const Headers = z.record(HeaderName, HeaderValue).refine((h) => Object.keys(h).length <= 32, {
+  message: 'at most 32 headers',
+});
+const UrlPath = z
+  .string()
+  .max(256)
+  .regex(/^\/[^\s]*$/, 'must be a path like /api');
+const Pattern = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((source) => {
+    try {
+      new RegExp(source);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'must be a regular expression');
+const ByteCount = z
+  .number()
+  .int()
+  .min(1)
+  .max(2 ** 40);
+
+/**
+ * The raw Traefik escape hatch (§20 Network): Traefik's own middlewares,
+ * written with Traefik's own field names, for what the settings above do
+ * not cover — CORS, rewriting a path, a cap on requests in flight.
+ *
+ * Bounded twice, on purpose. Only middlewares that act on this app's own
+ * requests are here: none that can name another app's service (chain,
+ * errors), read a file on the server, or load code (plugins). And only
+ * the fields listed: Traefik refuses a routing file with a single field it
+ * does not know, and refuses it for every app on the server, not only the
+ * one that wrote it.
+ */
+const TraefikMiddleware = z.union([
+  z.strictObject({
+    headers: z.strictObject({
+      customRequestHeaders: Headers.optional(),
+      customResponseHeaders: Headers.optional(),
+      accessControlAllowCredentials: z.boolean().optional(),
+      accessControlAllowHeaders: z.array(HeaderName).max(32).optional(),
+      accessControlAllowMethods: z
+        .array(z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']))
+        .max(7)
+        .optional(),
+      accessControlAllowOriginList: z
+        .array(z.union([z.literal('*'), z.url().max(256)]))
+        .max(32)
+        .optional(),
+      accessControlExposeHeaders: z.array(HeaderName).max(32).optional(),
+      accessControlMaxAge: z.number().int().min(0).max(86_400).optional(),
+      addVaryHeader: z.boolean().optional(),
+      contentSecurityPolicy: HeaderValue.optional(),
+      permissionsPolicy: HeaderValue.optional(),
+      referrerPolicy: HeaderValue.optional(),
+    }),
+  }),
+  z.strictObject({
+    stripPrefix: z.strictObject({ prefixes: z.array(UrlPath).min(1).max(16) }),
+  }),
+  z.strictObject({
+    stripPrefixRegex: z.strictObject({ regex: z.array(Pattern).min(1).max(16) }),
+  }),
+  z.strictObject({ addPrefix: z.strictObject({ prefix: UrlPath }) }),
+  z.strictObject({ replacePath: z.strictObject({ path: UrlPath }) }),
+  z.strictObject({
+    replacePathRegex: z.strictObject({
+      regex: Pattern,
+      replacement: z
+        .string()
+        .max(512)
+        .regex(/^\/[^\s]*$/, 'must be a path, which may use $1'),
+    }),
+  }),
+  z.strictObject({
+    inFlightReq: z.strictObject({ amount: z.number().int().min(1).max(100_000) }),
+  }),
+  z.strictObject({
+    buffering: z.strictObject({
+      maxRequestBodyBytes: ByteCount.optional(),
+      memRequestBodyBytes: ByteCount.optional(),
+      maxResponseBodyBytes: ByteCount.optional(),
+      memResponseBodyBytes: ByteCount.optional(),
+    }),
+  }),
+]);
+
 export const Source = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('git'),
@@ -220,6 +315,8 @@ export const Network = z.strictObject({
       headers: z
         .strictObject({ hsts: z.boolean().default(true), frameDeny: z.boolean().default(true) })
         .prefault({}),
+      /** Traefik middlewares as Traefik writes them, applied last, in order. */
+      custom: z.array(TraefikMiddleware).max(16).default([]),
     })
     .prefault({}),
   loadBalancer: z

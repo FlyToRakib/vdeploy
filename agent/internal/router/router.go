@@ -98,7 +98,7 @@ func denied(cidrs []string) string {
 func middlewares(key string, n spec.Network, users []string) (object, []string) {
 	defs := object{}
 	var chain []string
-	add := func(name string, def object) {
+	add := func(name string, def any) {
 		full := key + "-" + name
 		defs[full] = def
 		chain = append(chain, full)
@@ -165,6 +165,11 @@ func middlewares(key string, n spec.Network, users []string) (object, []string) 
 	}
 	if lb.Retry != nil && lb.Retry.Attempts > 0 {
 		add("retry", object{"retry": object{"attempts": lb.Retry.Attempts}})
+	}
+	// The escape hatch last, in the order written: it can add to anything
+	// above, and nothing above has to guess what it did.
+	for i, custom := range m.Custom {
+		add("custom-"+strconv.Itoa(i), custom)
 	}
 	return defs, chain
 }

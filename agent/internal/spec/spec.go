@@ -349,6 +349,63 @@ type Middleware struct {
 		HSTS      bool `json:"hsts"`
 		FrameDeny bool `json:"frameDeny"`
 	} `json:"headers"`
+	// Custom are Traefik's own middlewares, applied last (§20).
+	Custom []CustomMiddleware `json:"custom"`
+}
+
+/*
+CustomMiddleware is one of Traefik's own middlewares, with Traefik's own
+field names: the escape hatch (§20). Exactly one field is set.
+
+These types are the whole of what reaches the router, on purpose. Traefik
+refuses every routing file on the server over one field it does not know,
+so nothing is passed through that is not named here — and a type that
+could reach past this app (chain, errors, plugins, anything reading a
+file) is not here to be named.
+*/
+type CustomMiddleware struct {
+	Headers     *CustomHeaders `json:"headers,omitempty"`
+	StripPrefix *struct {
+		Prefixes []string `json:"prefixes"`
+	} `json:"stripPrefix,omitempty"`
+	StripPrefixRegex *struct {
+		Regex []string `json:"regex"`
+	} `json:"stripPrefixRegex,omitempty"`
+	AddPrefix *struct {
+		Prefix string `json:"prefix"`
+	} `json:"addPrefix,omitempty"`
+	ReplacePath *struct {
+		Path string `json:"path"`
+	} `json:"replacePath,omitempty"`
+	ReplacePathRegex *struct {
+		Regex       string `json:"regex"`
+		Replacement string `json:"replacement"`
+	} `json:"replacePathRegex,omitempty"`
+	InFlightReq *struct {
+		Amount int64 `json:"amount"`
+	} `json:"inFlightReq,omitempty"`
+	Buffering *struct {
+		MaxRequestBodyBytes  int64 `json:"maxRequestBodyBytes,omitempty"`
+		MemRequestBodyBytes  int64 `json:"memRequestBodyBytes,omitempty"`
+		MaxResponseBodyBytes int64 `json:"maxResponseBodyBytes,omitempty"`
+		MemResponseBodyBytes int64 `json:"memResponseBodyBytes,omitempty"`
+	} `json:"buffering,omitempty"`
+}
+
+// CustomHeaders sets headers and CORS, as Traefik's headers middleware.
+type CustomHeaders struct {
+	CustomRequestHeaders          map[string]string `json:"customRequestHeaders,omitempty"`
+	CustomResponseHeaders         map[string]string `json:"customResponseHeaders,omitempty"`
+	AccessControlAllowCredentials bool              `json:"accessControlAllowCredentials,omitempty"`
+	AccessControlAllowHeaders     []string          `json:"accessControlAllowHeaders,omitempty"`
+	AccessControlAllowMethods     []string          `json:"accessControlAllowMethods,omitempty"`
+	AccessControlAllowOriginList  []string          `json:"accessControlAllowOriginList,omitempty"`
+	AccessControlExposeHeaders    []string          `json:"accessControlExposeHeaders,omitempty"`
+	AccessControlMaxAge           int64             `json:"accessControlMaxAge,omitempty"`
+	AddVaryHeader                 bool              `json:"addVaryHeader,omitempty"`
+	ContentSecurityPolicy         string            `json:"contentSecurityPolicy,omitempty"`
+	PermissionsPolicy             string            `json:"permissionsPolicy,omitempty"`
+	ReferrerPolicy                string            `json:"referrerPolicy,omitempty"`
 }
 
 // LoadBalancer spreads traffic across replicas.

@@ -771,13 +771,326 @@
                           "frameDeny"
                         ],
                         "additionalProperties": false
+                      },
+                      "custom": {
+                        "default": [],
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "headers": {
+                                  "type": "object",
+                                  "properties": {
+                                    "customRequestHeaders": {
+                                      "type": "object",
+                                      "propertyNames": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      },
+                                      "additionalProperties": {
+                                        "type": "string",
+                                        "maxLength": 1024,
+                                        "pattern": "^[^\\r\\n]*$"
+                                      }
+                                    },
+                                    "customResponseHeaders": {
+                                      "type": "object",
+                                      "propertyNames": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      },
+                                      "additionalProperties": {
+                                        "type": "string",
+                                        "maxLength": 1024,
+                                        "pattern": "^[^\\r\\n]*$"
+                                      }
+                                    },
+                                    "accessControlAllowCredentials": {
+                                      "type": "boolean"
+                                    },
+                                    "accessControlAllowHeaders": {
+                                      "maxItems": 32,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      }
+                                    },
+                                    "accessControlAllowMethods": {
+                                      "maxItems": 7,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "enum": [
+                                          "GET",
+                                          "HEAD",
+                                          "POST",
+                                          "PUT",
+                                          "PATCH",
+                                          "DELETE",
+                                          "OPTIONS"
+                                        ]
+                                      }
+                                    },
+                                    "accessControlAllowOriginList": {
+                                      "maxItems": 32,
+                                      "type": "array",
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "*"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "maxLength": 256,
+                                            "format": "uri"
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "accessControlExposeHeaders": {
+                                      "maxItems": 32,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      }
+                                    },
+                                    "accessControlMaxAge": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 86400
+                                    },
+                                    "addVaryHeader": {
+                                      "type": "boolean"
+                                    },
+                                    "contentSecurityPolicy": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "pattern": "^[^\\r\\n]*$"
+                                    },
+                                    "permissionsPolicy": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "pattern": "^[^\\r\\n]*$"
+                                    },
+                                    "referrerPolicy": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "pattern": "^[^\\r\\n]*$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "headers"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "stripPrefix": {
+                                  "type": "object",
+                                  "properties": {
+                                    "prefixes": {
+                                      "minItems": 1,
+                                      "maxItems": 16,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "maxLength": 256,
+                                        "pattern": "^\\/[^\\s]*$"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "prefixes"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "stripPrefix"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "stripPrefixRegex": {
+                                  "type": "object",
+                                  "properties": {
+                                    "regex": {
+                                      "minItems": 1,
+                                      "maxItems": 16,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 512
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "regex"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "stripPrefixRegex"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "addPrefix": {
+                                  "type": "object",
+                                  "properties": {
+                                    "prefix": {
+                                      "type": "string",
+                                      "maxLength": 256,
+                                      "pattern": "^\\/[^\\s]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "prefix"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "addPrefix"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "replacePath": {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string",
+                                      "maxLength": 256,
+                                      "pattern": "^\\/[^\\s]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "path"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "replacePath"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "replacePathRegex": {
+                                  "type": "object",
+                                  "properties": {
+                                    "regex": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 512
+                                    },
+                                    "replacement": {
+                                      "type": "string",
+                                      "maxLength": 512,
+                                      "pattern": "^\\/[^\\s]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "regex",
+                                    "replacement"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "replacePathRegex"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "inFlightReq": {
+                                  "type": "object",
+                                  "properties": {
+                                    "amount": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 100000
+                                    }
+                                  },
+                                  "required": [
+                                    "amount"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "inFlightReq"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "buffering": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRequestBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    },
+                                    "memRequestBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    },
+                                    "maxResponseBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    },
+                                    "memResponseBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "buffering"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
                       }
                     },
                     "required": [
                       "compression",
                       "ipAllowList",
                       "ipDenyList",
-                      "headers"
+                      "headers",
+                      "custom"
                     ],
                     "additionalProperties": false
                   },
@@ -1999,13 +2312,326 @@
                           "frameDeny"
                         ],
                         "additionalProperties": false
+                      },
+                      "custom": {
+                        "default": [],
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "headers": {
+                                  "type": "object",
+                                  "properties": {
+                                    "customRequestHeaders": {
+                                      "type": "object",
+                                      "propertyNames": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      },
+                                      "additionalProperties": {
+                                        "type": "string",
+                                        "maxLength": 1024,
+                                        "pattern": "^[^\\r\\n]*$"
+                                      }
+                                    },
+                                    "customResponseHeaders": {
+                                      "type": "object",
+                                      "propertyNames": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      },
+                                      "additionalProperties": {
+                                        "type": "string",
+                                        "maxLength": 1024,
+                                        "pattern": "^[^\\r\\n]*$"
+                                      }
+                                    },
+                                    "accessControlAllowCredentials": {
+                                      "type": "boolean"
+                                    },
+                                    "accessControlAllowHeaders": {
+                                      "maxItems": 32,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      }
+                                    },
+                                    "accessControlAllowMethods": {
+                                      "maxItems": 7,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "enum": [
+                                          "GET",
+                                          "HEAD",
+                                          "POST",
+                                          "PUT",
+                                          "PATCH",
+                                          "DELETE",
+                                          "OPTIONS"
+                                        ]
+                                      }
+                                    },
+                                    "accessControlAllowOriginList": {
+                                      "maxItems": 32,
+                                      "type": "array",
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "*"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "maxLength": 256,
+                                            "format": "uri"
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "accessControlExposeHeaders": {
+                                      "maxItems": 32,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9-]{1,64}$"
+                                      }
+                                    },
+                                    "accessControlMaxAge": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 86400
+                                    },
+                                    "addVaryHeader": {
+                                      "type": "boolean"
+                                    },
+                                    "contentSecurityPolicy": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "pattern": "^[^\\r\\n]*$"
+                                    },
+                                    "permissionsPolicy": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "pattern": "^[^\\r\\n]*$"
+                                    },
+                                    "referrerPolicy": {
+                                      "type": "string",
+                                      "maxLength": 1024,
+                                      "pattern": "^[^\\r\\n]*$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "headers"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "stripPrefix": {
+                                  "type": "object",
+                                  "properties": {
+                                    "prefixes": {
+                                      "minItems": 1,
+                                      "maxItems": 16,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "maxLength": 256,
+                                        "pattern": "^\\/[^\\s]*$"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "prefixes"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "stripPrefix"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "stripPrefixRegex": {
+                                  "type": "object",
+                                  "properties": {
+                                    "regex": {
+                                      "minItems": 1,
+                                      "maxItems": 16,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 512
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "regex"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "stripPrefixRegex"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "addPrefix": {
+                                  "type": "object",
+                                  "properties": {
+                                    "prefix": {
+                                      "type": "string",
+                                      "maxLength": 256,
+                                      "pattern": "^\\/[^\\s]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "prefix"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "addPrefix"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "replacePath": {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string",
+                                      "maxLength": 256,
+                                      "pattern": "^\\/[^\\s]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "path"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "replacePath"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "replacePathRegex": {
+                                  "type": "object",
+                                  "properties": {
+                                    "regex": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 512
+                                    },
+                                    "replacement": {
+                                      "type": "string",
+                                      "maxLength": 512,
+                                      "pattern": "^\\/[^\\s]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "regex",
+                                    "replacement"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "replacePathRegex"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "inFlightReq": {
+                                  "type": "object",
+                                  "properties": {
+                                    "amount": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 100000
+                                    }
+                                  },
+                                  "required": [
+                                    "amount"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "inFlightReq"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "buffering": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRequestBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    },
+                                    "memRequestBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    },
+                                    "maxResponseBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    },
+                                    "memResponseBodyBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 1099511627776
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "buffering"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
                       }
                     },
                     "required": [
                       "compression",
                       "ipAllowList",
                       "ipDenyList",
-                      "headers"
+                      "headers",
+                      "custom"
                     ],
                     "additionalProperties": false
                   },

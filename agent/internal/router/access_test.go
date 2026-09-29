@@ -1,6 +1,7 @@
 package router
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -79,5 +80,32 @@ func TestARateLimitCanCountByHeader(t *testing.T) {
 	source := limit["sourceCriterion"].(map[string]any)
 	if source["requestHeaderName"] != "X-Api-Key" {
 		t.Fatalf("rate limit = %v", limit)
+	}
+}
+
+func TestTheEscapeHatchIsWrittenAsTraefikWritesItLastInTheChain(t *testing.T) {
+	n := network()
+	var cors spec.CustomMiddleware
+	cors.Headers = &spec.CustomHeaders{AccessControlAllowOriginList: []string{"https://shop.example.com"}}
+	var strip spec.CustomMiddleware
+	if err := json.Unmarshal([]byte(`{"stripPrefix":{"prefixes":["/api"]}}`), &strip); err != nil {
+		t.Fatal(err)
+	}
+	n.Middleware.Custom = []spec.CustomMiddleware{cors, strip}
+	raw, ok := File("abc", n, []spec.Domain{domain("shop.example.com", "letsencrypt")}, nil,
+		Traffic{Backends: []Backend{{"vd-abc-v1-r0-0", 3000}}}, nil)
+	if !ok {
+		t.Fatal("no routing produced")
+	}
+	http := decode(t, raw)
+	chain := http["routers"].(map[string]any)["abc-0"].(map[string]any)["middlewares"].([]any)
+	if got := chain[len(chain)-2:]; got[0] != "abc-custom-0" || got[1] != "abc-custom-1" {
+		t.Fatalf("the escape hatch is not last, in order: %v", chain)
+	}
+	defs := http["middlewares"].(map[string]any)
+	written, _ := json.Marshal([]any{defs["abc-custom-0"], defs["abc-custom-1"]})
+	want := `[{"headers":{"accessControlAllowOriginList":["https://shop.example.com"]}},{"stripPrefix":{"prefixes":["/api"]}}]`
+	if string(written) != want {
+		t.Fatalf("written as\n%s\nwant\n%s", written, want)
 	}
 }

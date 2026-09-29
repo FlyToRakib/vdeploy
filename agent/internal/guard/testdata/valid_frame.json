@@ -77,7 +77,11 @@
               "hsts": true,
               "frameDeny": true
             },
-            "ipDenyList": []
+            "ipDenyList": [],
+            "custom": [
+              { "headers": { "accessControlAllowOriginList": ["https://shop.example.com"] } },
+              { "stripPrefix": { "prefixes": ["/api"] } }
+            ]
           },
           "loadBalancer": {
             "algorithm": "wrr",
