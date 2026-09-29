@@ -56,7 +56,7 @@ export function evaluate(request: PolicyRequest): Decision {
   }
   const validated = checkValidation(actor, op, request.input, target, call);
   if (validated.effect === 'deny') return validated;
-  const reasons = approvalReasons(actor, op, target, grants, call);
+  const reasons = approvalReasons(actor, op, target, grants, call, now);
   if (reasons.length) return { effect: 'approval_required', args: validated.args, reasons };
   return {
     effect: 'allow',

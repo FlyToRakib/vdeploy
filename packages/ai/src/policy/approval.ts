@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { AiGrants, OperationDefinition } from '@vdeploy/contracts';
+import type { AiGrants, DeployWindow, OperationDefinition } from '@vdeploy/contracts';
 import { checkIdentity } from './identity.js';
 import { deny, type Actor, type Denied, type HumanActor, type Target } from './types.js';
 
@@ -8,6 +8,46 @@ export const APPROVAL_TTL_MS = 15 * 60 * 1000;
 export interface Guardrails {
   /** Auto-applies the org's AI made in the last hour. */
   autoAppliesLastHour: number;
+}
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+const minutes = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
+
+/**
+ * Whether `now` falls inside the window, in the window's own time zone.
+ * One that ends before it starts runs overnight, and the hours after
+ * midnight belong to the day it started: a Friday 22:00–06:00 window is
+ * open at 03:00 on Saturday.
+ */
+export function insideWindow(window: DeployWindow, now: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: window.timezone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const part: Record<string, string> = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  const day = DAYS.indexOf(part.weekday as (typeof DAYS)[number]);
+  const at = Number(part.hour) * 60 + Number(part.minute);
+  const from = minutes(window.from);
+  const to = minutes(window.to);
+  if (from < to) return window.days.includes(day) && at >= from && at < to;
+  if (at >= from) return window.days.includes(day);
+  return at < to && window.days.includes((day + 6) % 7);
+}
+
+/** "weekdays 09:00–17:00 Europe/Berlin", for the reason a person reads. */
+export function windowWords(window: DeployWindow): string {
+  const days = [...window.days].sort((x, y) => x - y);
+  const which =
+    days.length === 7
+      ? 'every day'
+      : days.join() === '1,2,3,4,5'
+        ? 'weekdays'
+        : days.map((d) => DAYS[d]).join(', ');
+  return `${which} ${window.from}–${window.to} ${window.timezone}`;
 }
 
 /**
@@ -21,6 +61,7 @@ export function approvalReasons(
   target: Target,
   grants: AiGrants,
   guardrails: Guardrails,
+  now: Date,
 ): string[] {
   if (!op.mutates) return [];
   if (actor.kind === 'human') {
@@ -41,6 +82,10 @@ export function approvalReasons(
   }
   if (guardrails.autoAppliesLastHour >= grants.guardrails.maxAutoAppliesPerHour) {
     reasons.push('The hourly limit of automatic AI changes is reached');
+  }
+  const window = grants.guardrails.deployWindow;
+  if (window && !insideWindow(window, now)) {
+    reasons.push(`Outside the hours the AI may change things on its own (${windowWords(window)})`);
   }
   return reasons;
 }

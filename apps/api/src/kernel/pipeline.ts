@@ -247,7 +247,7 @@ export async function runOperation(
       });
       throw new VDeployError(identity.code, identity.reason);
     }
-    const reasons = approvalReasons(actor, effective, target, grants, call);
+    const reasons = approvalReasons(actor, effective, target, grants, call, now);
     const view = await persistPlan(deps, actor, plan, decision.args, reasons);
     await audit(deps, actor, name, target, 'allowed', {
       planId: view.id,

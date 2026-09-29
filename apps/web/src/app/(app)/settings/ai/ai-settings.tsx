@@ -16,9 +16,12 @@ import {
   money,
   READ_WORDS,
   spendWords,
+  WINDOW_DAYS,
+  windowDays,
   type AiGrants,
   type AiProposal,
   type AiSettings,
+  type DeployWindow,
   type ReadCategory,
 } from '@/lib/ai';
 import { followPlan, OperationError, post, query, runOperation } from '@/lib/operations';
@@ -381,6 +384,15 @@ export function AiSettingsPanel() {
             />
           </label>
         </div>
+        <WindowPicker
+          value={draft.guardrails.deployWindow}
+          onChange={(deployWindow) => {
+            edit((grants) => ({
+              ...grants,
+              guardrails: { ...grants.guardrails, deployWindow },
+            }));
+          }}
+        />
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={busy || !dirty}
@@ -426,5 +438,91 @@ export function AiSettingsPanel() {
         )}
       </div>
     </div>
+  );
+}
+
+const SELECT = 'h-10 rounded-md border border-border bg-surface-raised px-3 text-sm';
+
+/**
+ * When the AI may change things by itself (§8 L1). Outside these hours it
+ * still looks and proposes; a person applies. The hours are the viewer's
+ * own time zone, which is stored with them, so "9 to 5" means the same
+ * thing to the next person who opens this screen from elsewhere.
+ */
+function WindowPicker({
+  value,
+  onChange,
+}: {
+  value: DeployWindow | null;
+  onChange: (next: DeployWindow | null) => void;
+}) {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const named = value ? windowDays(value.days) : null;
+  return (
+    <fieldset className="grid gap-2 text-sm">
+      <legend className="font-medium">When it may change things by itself</legend>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="When it may change things by itself"
+          className={SELECT}
+          value={value ? 'hours' : 'any'}
+          onChange={(event) => {
+            onChange(
+              event.target.value === 'any'
+                ? null
+                : { days: [...WINDOW_DAYS.weekdays], from: '09:00', to: '17:00', timezone: zone },
+            );
+          }}
+        >
+          <option value="any">Any time</option>
+          <option value="hours">Only during set hours</option>
+        </select>
+        {value && (
+          <>
+            <select
+              aria-label="On which days"
+              className={SELECT}
+              value={named ?? 'custom'}
+              onChange={(event) => {
+                const days = WINDOW_DAYS[event.target.value as keyof typeof WINDOW_DAYS];
+                onChange({ ...value, days: [...days] });
+              }}
+            >
+              <option value="weekdays">Weekdays</option>
+              <option value="every">Every day</option>
+              <option value="weekends">Weekends</option>
+              {!named && <option value="custom">The days set before</option>}
+            </select>
+            <span>from</span>
+            <input
+              type="time"
+              aria-label="From"
+              value={value.from}
+              onChange={(event) => {
+                onChange({ ...value, from: event.target.value });
+              }}
+              className={SELECT}
+            />
+            <span>to</span>
+            <input
+              type="time"
+              aria-label="To"
+              value={value.to}
+              onChange={(event) => {
+                onChange({ ...value, to: event.target.value });
+              }}
+              className={SELECT}
+            />
+          </>
+        )}
+      </div>
+      <span className="text-muted-foreground">
+        {value
+          ? `In ${value.timezone}. Outside these hours it still looks and suggests; a person applies.${
+              value.to < value.from ? ' It runs overnight, into the next morning.' : ''
+            }`
+          : 'Outside the limits above, it may change things whenever it needs to.'}
+      </span>
+    </fieldset>
   );
 }

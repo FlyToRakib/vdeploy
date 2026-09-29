@@ -9,6 +9,35 @@ function selection<K extends 'project' | 'server'>(kind: K) {
   ]);
 }
 
+const ClockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must look like 09:00');
+
+/**
+ * When the AI may change things without asking (§8 L1). Outside it, the
+ * AI still diagnoses and proposes; a person applies. A window that ends
+ * before it starts runs overnight: 22:00–06:00 is one night, not nothing.
+ */
+export const DeployWindow = z
+  .strictObject({
+    /** 0 is Sunday, as JavaScript counts them. */
+    days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+    from: ClockTime,
+    to: ClockTime,
+    timezone: z
+      .string()
+      .min(1)
+      .max(64)
+      .refine((zone) => {
+        try {
+          new Intl.DateTimeFormat('en-US', { timeZone: zone });
+          return true;
+        } catch {
+          return false;
+        }
+      }, 'must be a time zone like Europe/Berlin or UTC'),
+  })
+  .refine((w) => w.from !== w.to, 'must start and end at different times');
+export type DeployWindow = z.infer<typeof DeployWindow>;
+
 /**
  * The AI grant matrix (§8 L1) — what an organization's owner allows the AI to
  * see and do. Defaults are the §8 defaults: read everything except source,
@@ -45,6 +74,8 @@ export const AiGrants = z.strictObject({
     .strictObject({
       maxAutoAppliesPerHour: z.number().int().min(0).max(1000).default(10),
       freezeProduction: z.boolean().default(false),
+      /** When it may act unattended; null is any time. */
+      deployWindow: DeployWindow.nullable().default(null),
       requireSecondApprover: z.boolean().default(true),
       monthlySpendCapUsd: z.number().min(0).max(100_000).default(50),
     })

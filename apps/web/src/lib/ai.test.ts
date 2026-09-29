@@ -8,6 +8,7 @@ import {
   READ_WORDS,
   spendWords,
   type ReadCategory,
+  windowDays,
 } from './ai';
 
 const CATEGORIES: ReadCategory[] = [
@@ -53,5 +54,15 @@ describe('the assistant in plain words', () => {
     expect(projectFromPath('/projects/prj_123')).toBe('prj_123');
     expect(projectFromPath('/projects')).toBeUndefined();
     expect(projectFromPath('/servers/srv_1')).toBeUndefined();
+  });
+});
+
+describe('windowDays', () => {
+  it('names the day sets the screen offers, and nothing else', () => {
+    expect(windowDays([5, 1, 2, 3, 4])).toBe('weekdays');
+    expect(windowDays([6, 0])).toBe('weekends');
+    expect(windowDays([0, 1, 2, 3, 4, 5, 6])).toBe('every');
+    // A mix somebody set through the API is kept, not rounded to a name.
+    expect(windowDays([1, 3])).toBeNull();
   });
 });

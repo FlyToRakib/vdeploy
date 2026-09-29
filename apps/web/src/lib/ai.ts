@@ -20,8 +20,33 @@ export interface AiGrants {
     freezeProduction: boolean;
     requireSecondApprover: boolean;
     monthlySpendCapUsd: number;
+    deployWindow: DeployWindow | null;
   };
   [key: string]: unknown;
+}
+
+/** When the AI may change things by itself; 0 is Sunday. */
+export interface DeployWindow {
+  days: number[];
+  from: string;
+  to: string;
+  timezone: string;
+}
+
+/** The day sets the screen offers, by name. */
+export const WINDOW_DAYS = {
+  weekdays: [1, 2, 3, 4, 5],
+  every: [0, 1, 2, 3, 4, 5, 6],
+  weekends: [0, 6],
+} as const;
+
+/** Which named set a window's days are, or null for any other mix (kept as it is). */
+export function windowDays(days: readonly number[]): keyof typeof WINDOW_DAYS | null {
+  const key = [...days].sort((a, b) => a - b).join();
+  for (const [name, set] of Object.entries(WINDOW_DAYS)) {
+    if (set.join() === key) return name as keyof typeof WINDOW_DAYS;
+  }
+  return null;
 }
 
 export type ReadCategory =

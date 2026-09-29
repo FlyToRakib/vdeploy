@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** the AI's deploy-window guardrail
+**Task:** `domain.add` refusing a host another project routes
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -77,7 +77,17 @@ each is one task, one commit.
   audit log, which does not record reads — and unattended changes are
   counted from the plans themselves, so that ceiling holds across
   restarts. Both new tests fail against the constant
-- [ ] the AI's deploy-window guardrail (§8 L1) — on the grant matrix in the spec, not in the grants
+- [x] **the AI's deploy window (§8 L1)**: the hours the AI may change
+  things by itself, in a named time zone. Outside them it still looks
+  and proposes, and the reason a person reads says which hours
+  ("weekdays 09:00–17:00 Asia/Dhaka"). A window that ends before it
+  starts runs overnight, and the hours after midnight belong to the
+  night it started. It holds the AI back, never a person. The grant
+  matrix asks it as "When it may change things by itself", in the
+  viewer's own time zone, stored with the hours so they mean the same to
+  the next person who opens the screen. The policy package's 100%
+  coverage rule caught an untested wording branch and an unreachable
+  fallback; the fallback was removed rather than tested around
 - [ ] `domain.add` refusing a host another project routes (2.4) — the agent refuses it later instead
 
 **§35's completeness test, and the M4/§31 features behind it**

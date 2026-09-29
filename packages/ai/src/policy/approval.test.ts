@@ -5,6 +5,8 @@ import {
   APPROVAL_TTL_MS,
   approvalReasons,
   checkApprover,
+  insideWindow,
+  windowWords,
   signApproval,
   verifyApproval,
   type ApprovalClaims,
@@ -19,22 +21,56 @@ const del = findOperation('project.delete')!;
 const logs = findOperation('project.logs')!;
 const quiet = { autoAppliesLastHour: 0 };
 
+describe('insideWindow', () => {
+  const office = { days: [1, 2, 3, 4, 5], from: '09:00', to: '17:00', timezone: 'Asia/Dhaka' };
+
+  it('reads the clock in the window’s own time zone', () => {
+    // 12:00 UTC on a Saturday is 18:00 in Dhaka: a weekend evening there.
+    expect(insideWindow(office, now)).toBe(false);
+    // Monday 05:00 UTC is 11:00 in Dhaka.
+    expect(insideWindow(office, new Date('2026-09-21T05:00:00Z'))).toBe(true);
+    // Monday 11:00 UTC is 17:00 in Dhaka: the window has just closed.
+    expect(insideWindow(office, new Date('2026-09-21T11:00:00Z'))).toBe(false);
+  });
+
+  it('runs an overnight window into the next morning, counted from the night it started', () => {
+    const nights = { days: [5], from: '22:00', to: '06:00', timezone: 'UTC' };
+    expect(insideWindow(nights, new Date('2026-09-25T23:00:00Z'))).toBe(true); // Fri 23:00
+    expect(insideWindow(nights, new Date('2026-09-26T03:00:00Z'))).toBe(true); // Sat 03:00
+    expect(insideWindow(nights, new Date('2026-09-26T07:00:00Z'))).toBe(false); // Sat 07:00
+    expect(insideWindow(nights, new Date('2026-09-26T23:00:00Z'))).toBe(false); // Sat 23:00
+  });
+});
+
 describe('approvalReasons', () => {
   const target = projectTarget({ projectAutoApply: ['safe', 'sensitive'] });
 
   it('never asks about reads', () => {
     expect(
-      approvalReasons(ai('owner', { mode: 'propose' }), logs, target, DEFAULT_AI_GRANTS, quiet),
+      approvalReasons(
+        ai('owner', { mode: 'propose' }),
+        logs,
+        target,
+        DEFAULT_AI_GRANTS,
+        quiet,
+        now,
+      ),
     ).toEqual([]);
   });
 
   it('asks a person only to confirm destructive changes', () => {
-    expect(approvalReasons(human('admin'), restart, target, DEFAULT_AI_GRANTS, quiet)).toEqual([]);
-    expect(approvalReasons(human('admin'), del, target, DEFAULT_AI_GRANTS, quiet)).toHaveLength(1);
+    expect(approvalReasons(human('admin'), restart, target, DEFAULT_AI_GRANTS, quiet, now)).toEqual(
+      [],
+    );
+    expect(
+      approvalReasons(human('admin'), del, target, DEFAULT_AI_GRANTS, quiet, now),
+    ).toHaveLength(1);
   });
 
   it('lets an autopilot session run a granted safe change', () => {
-    expect(approvalReasons(ai('owner'), restart, target, DEFAULT_AI_GRANTS, quiet)).toEqual([]);
+    expect(approvalReasons(ai('owner'), restart, target, DEFAULT_AI_GRANTS, quiet, now)).toEqual(
+      [],
+    );
   });
 
   it('collects every reason that applies', () => {
@@ -47,6 +83,7 @@ describe('approvalReasons', () => {
       projectTarget({ production: true }),
       frozen,
       { autoAppliesLastHour: 1 },
+      now,
     );
     expect(reasons).toEqual([
       'The AI session is in propose mode',
@@ -57,10 +94,41 @@ describe('approvalReasons', () => {
     ]);
   });
 
+  it('keeps an autopilot session to proposals outside its hours, and says which hours', () => {
+    const office = AiGrants.parse({
+      guardrails: {
+        deployWindow: { days: [1, 2, 3, 4, 5], from: '09:00', to: '17:00', timezone: 'UTC' },
+      },
+    });
+    // now is a Saturday.
+    expect(approvalReasons(ai('owner'), restart, target, office, quiet, now)).toEqual([
+      'Outside the hours the AI may change things on its own (weekdays 09:00–17:00 UTC)',
+    ]);
+    const monday = new Date('2026-09-21T10:00:00Z');
+    expect(approvalReasons(ai('owner'), restart, target, office, quiet, monday)).toEqual([]);
+    // People are not the AI: the window never holds a person back.
+    expect(approvalReasons(human('admin'), restart, target, office, quiet, now)).toEqual([]);
+  });
+
+  it('names the days in words a person reads', () => {
+    const at = (days: number[]) => ({ days, from: '22:00', to: '06:00', timezone: 'UTC' });
+    expect(windowWords(at([0, 1, 2, 3, 4, 5, 6]))).toBe('every day 22:00–06:00 UTC');
+    expect(windowWords(at([6, 0]))).toBe('Sun, Sat 22:00–06:00 UTC');
+  });
+
+  it('refuses a window that is not one', () => {
+    const bad = (deployWindow: unknown) =>
+      AiGrants.safeParse({ guardrails: { deployWindow } }).success;
+    expect(bad({ days: [1], from: '09:00', to: '09:00', timezone: 'UTC' })).toBe(false);
+    expect(bad({ days: [1], from: '9am', to: '17:00', timezone: 'UTC' })).toBe(false);
+    expect(bad({ days: [1], from: '09:00', to: '17:00', timezone: 'Mars/Olympus' })).toBe(false);
+    expect(bad({ days: [], from: '09:00', to: '17:00', timezone: 'UTC' })).toBe(false);
+  });
+
   it('needs both the org grant and the project opt-in for sensitive changes', () => {
     const generous = AiGrants.parse({ autoApply: { sensitive: true } });
-    expect(approvalReasons(ai('owner'), env, target, generous, quiet)).toEqual([]);
-    expect(approvalReasons(ai('owner'), env, target, DEFAULT_AI_GRANTS, quiet)).toEqual([
+    expect(approvalReasons(ai('owner'), env, target, generous, quiet, now)).toEqual([]);
+    expect(approvalReasons(ai('owner'), env, target, DEFAULT_AI_GRANTS, quiet, now)).toEqual([
       'Auto-apply is not granted for sensitive changes here',
     ]);
     expect(
@@ -70,6 +138,7 @@ describe('approvalReasons', () => {
         projectTarget({ projectAutoApply: ['safe'] }),
         generous,
         quiet,
+        now,
       ),
     ).toEqual(['Auto-apply is not granted for sensitive changes here']);
   });
