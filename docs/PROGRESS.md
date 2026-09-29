@@ -3,7 +3,7 @@
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
 **Task:** M6 — 54 checks locally, 53 on the VPS, baseline unchanged
 **Status:** in progress
-**Updated:** 2026-09-30 10:05 UTC
+**Updated:** 2026-09-30 11:20 UTC
 
 ## M6 — the ecosystem
 
@@ -523,6 +523,24 @@ GitHub.
   re-confirmed this time is the four multi-server checks M5 already
   passed there — placement, the builder, the mesh and the edge — which
   come after the point it stopped
+- [x] **the three M6 screens, opened in a real browser** — previews and
+  staging on a project's Config screen, and Integrations. Everything
+  they drive is proved by the API run; what was not proved is that the
+  screens render against a running system and that their controls reach
+  the same operations, which is exactly the kind of thing that is fine
+  in a test and broken on the page. `node scripts/e2e.mjs --screens`
+  sets up an owner, connects a server with the pasted command, deploys
+  an app from a public repository, then **ticks previews on**, **makes a
+  staging copy** and **allows an integration** — reading the key that is
+  shown once and watching the list empty when it is removed. **It found
+  one**: the previews checkbox **sprang back to off the moment it was
+  ticked**, because it was bound straight to the stored spec and turning
+  previews on is a plan that takes a few seconds — so the box said "off"
+  while the toast beside it said "turning on". It now holds the answer
+  the person gave, remembered *against the spec it was asked about*, so
+  a reloaded row lets go of it by itself — including when the change
+  failed, because the row is reloaded either way and the spec is still
+  what is true
 - [x] **the M6 exit on the VPS testbed, run through to the end — 53
   checks passed**, on a fresh testbed with both images rebuilt first,
   and the baseline verified unchanged before and after. Everything the
@@ -629,15 +647,17 @@ GitHub.
 - Previews: an app that reads a managed database cannot have one until a
   database is copied per preview (the refusal says so). Nothing is written
   back to the pull request — no status check, no comment with the link;
-  the webhook's answer and the dashboard carry the outcome. The previews
-  panel on a project's Config screen has not been opened in a browser; its
-  data path is covered by the API and worker tests.
+  the webhook's answer and the dashboard carry the outcome. The panel on
+  a project's Config screen is now opened in a browser, with previews
+  turned on from it; what no browser has seen is the list with a preview
+  in it, because that needs a pull request from a real provider.
 - Staging: a copy is placed on the app's machine, which is what makes
   promoting an image work without moving it; staging elsewhere needs the
   transfer that moving an app already uses. Copied secrets do not track
   the app's afterwards, which is the point but is said only once. Staging
-  gets no database of its own. Its dashboard card has not been opened in a
-  browser; the apply path is covered by the worker tests.
+  gets no database of its own. Its dashboard card is now opened in a
+  browser, and a staging copy made from it; promoting from that button
+  is covered by the API run rather than by a click.
 - Provisioning is written from each provider's documented API and tested
   against a stand-in, not a live account: the image name, the encoding
   and the placeholder address are asserted, but nobody has watched a real
@@ -651,10 +671,10 @@ GitHub.
   Installing one is pasting a manifest: there is no registry, because a
   catalogue is a trust decision nobody has made. The `enabled` column has
   no operation on it yet, so the dashboard removes a plugin rather than
-  pausing one. Its screen has not been opened in a browser; the API path
-  is tested, including that a granted key cannot call anything else —
-  and that refusal has now been seen in a browser against a running
-  system rather than only in a test.
+  pausing one. Its screen is now opened in a browser: a manifest pasted,
+  the operations read, the key shown once, and the list empty again
+  after removing it. That a granted key cannot call anything else is
+  covered by the API run.
 - SSO: the two dashboard screens are now checked, but no identity
   provider has ever answered one: OIDC discovery and SAML assertions are
   exercised against stand-ins, not against Entra, Okta or Google. No
@@ -664,9 +684,7 @@ GitHub.
   arrives as a viewer and is promoted by hand. The SAML form asks for the
   sign-in URL, issuer and certificate rather than reading them out of a
   metadata document (which is accepted and stored, but not parsed).
-  `fetchableOrigin` checks what was typed, not what it resolves to. The
-  two dashboard screens — company sign-in, and the button on the sign-in
-  page — have not been opened in a browser; the API path is tested.
+  `fetchableOrigin` checks what was typed, not what it resolves to.
 - Step-up re-auth accepts the account password only; TOTP and passkey step-up still to add (passkey-only users cannot step up yet).
 - Session list shows IP, not approximate location (needs a GeoIP source).
 - Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).

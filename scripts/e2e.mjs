@@ -10,6 +10,8 @@
 //   add --teardown to remove the testbed afterwards
 //   add --walkthrough for the M2 non-coder walkthrough instead (Playwright,
 //   driving the testbed's dashboard in an installed Edge or Chrome)
+//   add --screens for the M6 screens in the same browser: previews and
+//   staging on a project's Config screen, and Integrations
 //
 // Build first: the vdeploy-test/control-plane:e2e image, which carries the
 // agent the one-command installer puts on the testbed —
@@ -29,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const vps = process.argv.includes('--vps');
 const walkthrough = process.argv.includes('--walkthrough');
+const screens = process.argv.includes('--screens');
 const TESTBED = vps ? 'vdeploy-test-testbed' : 'vdeploy-test-dind';
 /**
  * A second machine, for everything M5 is about (§13, §14, §15): placing an
@@ -2062,26 +2065,48 @@ async function drill() {
  * (scripts/walkthrough/walkthrough.spec.mjs). The server gets what a VPS has:
  * curl, and — the testbed being Alpine — permission to run there.
  */
-function nonCoderWalkthrough() {
+function inBrowser(spec) {
   inTestbed(
     [
       'command -v curl >/dev/null || apk add --no-cache -q curl',
       `mkdir -p /etc/vdeploy && echo '${JSON.stringify({ reconcileSeconds: 5, allowUnsupportedOS: true, acmeServer: 'https://127.0.0.1:14000/dir' })}' > /etc/vdeploy/agent.json`,
     ].join(' && '),
   );
-  log('non-coder walkthrough: the dashboard in a real browser');
   execFileSync(
     process.platform === 'win32' ? 'npx.cmd' : 'npx',
     ['playwright', 'test', '--config', `${root}scripts/walkthrough/playwright.config.mjs`],
     {
       stdio: 'inherit',
       shell: process.platform === 'win32',
-      env: { ...process.env, BASE_URL: API, TESTBED, TESTBED_SSH: sshTarget },
+      env: {
+        ...process.env,
+        BASE_URL: API,
+        TESTBED,
+        TESTBED_SSH: sshTarget,
+        WALKTHROUGH_SPEC: spec,
+      },
     },
   );
+}
+
+function nonCoderWalkthrough() {
+  log('non-coder walkthrough: the dashboard in a real browser');
+  inBrowser('walkthrough.spec.mjs');
   pass(
     'non-coder walkthrough: setup, one-command server, folder online, live logs, broken version survived',
   );
+}
+
+/**
+ * M6 exit: the three screens the API run cannot check, opened for real
+ * (scripts/walkthrough/m6.spec.mjs). What they drive is tested elsewhere;
+ * what is tested here is that they render against a running system and
+ * that their controls reach the same operations.
+ */
+function m6Screens() {
+  log('M6 screens: previews, staging and integrations in a real browser');
+  inBrowser('m6.spec.mjs');
+  pass('previews turned on, a staging copy made and an integration allowed, all from the screens');
 }
 
 try {
@@ -2094,6 +2119,8 @@ try {
   await openTunnel();
   if (walkthrough) {
     nonCoderWalkthrough();
+  } else if (screens) {
+    m6Screens();
   } else {
     await run();
     await drill();

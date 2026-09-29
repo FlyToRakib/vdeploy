@@ -5,7 +5,8 @@ import { defineConfig } from '@playwright/test';
 // default (WALKTHROUGH_CHANNEL=chrome for Chrome), with a throwaway profile.
 export default defineConfig({
   testDir: '.',
-  testMatch: 'walkthrough.spec.mjs',
+  // The M2 walkthrough by default; `--screens` asks for the M6 one.
+  testMatch: process.env.WALKTHROUGH_SPEC ?? 'walkthrough.spec.mjs',
   timeout: 45 * 60_000,
   workers: 1,
   reporter: [['list']],

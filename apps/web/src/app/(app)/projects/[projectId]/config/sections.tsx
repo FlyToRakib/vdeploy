@@ -764,6 +764,13 @@ export function ScheduleSection() {
   );
 }
 
+interface PreviewSettings {
+  enabled: boolean;
+  fromForks: boolean;
+  max: number;
+  expireAfterDays: number;
+}
+
 interface PreviewView {
   id: string;
   name: string;
@@ -785,7 +792,26 @@ export function PreviewsSection() {
   const { projectId, act } = useProject();
   const spec = useSpec();
   const [previews, setPreviews] = useState<PreviewView[] | null>(null);
-  const preview = spec.preview ?? { enabled: false, fromForks: false, max: 5, expireAfterDays: 7 };
+  /**
+   * What was asked for, until the spec says it happened.
+   *
+   * A box bound straight to the spec springs back the moment it is
+   * ticked — the change is a plan, and the plan takes a few seconds —
+   * so the screen said "off" while the toast beside it said "turning
+   * on". This holds the answer the person gave until the spec catches
+   * up, and lets go if the change failed, because the spec is still
+   * what is true.
+   */
+  const [asked, setAsked] = useState<{
+    spec: EditableSpec;
+    values: Partial<PreviewSettings>;
+  } | null>(null);
+  const stored = spec.preview ?? { enabled: false, fromForks: false, max: 5, expireAfterDays: 7 };
+  // Remembered against the spec it was asked about, so a reloaded row
+  // lets go of it by itself — including when the change failed, because
+  // the row is reloaded either way and the spec is still what is true.
+  const waiting = asked?.spec === spec ? asked.values : null;
+  const preview = { ...stored, ...waiting };
 
   useEffect(() => {
     void query<PreviewView[]>('preview.list', { projectId }).then(setPreviews, () => {
@@ -793,8 +819,10 @@ export function PreviewsSection() {
     });
   }, [projectId, spec]);
 
-  const configure = (next: Record<string, unknown>, what: string) =>
-    void act('preview.configure', { projectId, preview: { ...preview, ...next } }, what);
+  const configure = (next: Partial<PreviewSettings>, what: string) => {
+    setAsked({ spec, values: { ...waiting, ...next } });
+    void act('preview.configure', { projectId, preview: { ...stored, ...next } }, what);
+  };
 
   const fromGit = spec.source?.type === 'git';
   return (
@@ -812,6 +840,7 @@ export function PreviewsSection() {
             <input
               type="checkbox"
               checked={preview.enabled}
+              disabled={waiting !== null}
               onChange={(event) => {
                 configure(
                   { enabled: event.target.checked },
@@ -827,6 +856,7 @@ export function PreviewsSection() {
                 <input
                   type="checkbox"
                   checked={preview.fromForks}
+                  disabled={waiting !== null}
                   onChange={(event) => {
                     configure(
                       { fromForks: event.target.checked },
