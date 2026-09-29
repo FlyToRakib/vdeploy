@@ -8,6 +8,7 @@ import {
   databases,
   deployments,
   idempotencyKeys,
+  observedState,
   organization,
   plans,
   projects,
@@ -154,6 +155,49 @@ describe('administrative operations', () => {
     const domains = await op(owner, 'domain.status', { projectId });
     expect(domains.statusCode).toBe(200);
     expect(domains.json<{ result: unknown[] }>().result).toEqual([]);
+  });
+
+  it('says where each copy of an app stands against its health checks', async () => {
+    const projectId = await seedProject(orgId, 'checked');
+    const serverId = newId('server');
+    await t.database.db.insert(servers).values({ id: serverId, orgId, name: 'checked-box' });
+    await t.database.db.update(projects).set({ serverId }).where(eq(projects.id, projectId));
+    const before = await op(owner, 'health.check', { projectId });
+    expect(before.json<{ result: { checkedAt: null; replicas: [] } }>().result).toMatchObject({
+      checkedAt: null,
+      replicas: [],
+      healthy: false,
+    });
+    await t.database.db.insert(observedState).values({
+      serverId,
+      generation: 1,
+      report: {
+        generation: 1,
+        projects: [
+          {
+            projectId,
+            replicas: [
+              { name: 'vd-a-r0', state: 'ready', release: 'rel_1' },
+              { name: 'vd-a-r1', state: 'not_ready', release: 'rel_1' },
+            ],
+          },
+        ],
+        events: [],
+      },
+    } as never);
+    const res = await op(owner, 'health.check', { projectId });
+    expect(res.statusCode).toBe(200);
+    const { result } = res.json<{
+      result: {
+        healthy: boolean;
+        checkedAt: string;
+        replicas: { healthy: boolean; words: string }[];
+      };
+    }>();
+    expect(result.healthy).toBe(false);
+    expect(result.checkedAt).not.toBeNull();
+    expect(result.replicas.map((r) => r.healthy)).toEqual([true, false]);
+    expect(result.replicas[1]?.words).toContain('cannot take visitors');
   });
 
   it('puts a session made by signing in again in the person’s organization', async () => {

@@ -299,6 +299,12 @@ each is one task, one commit.
   you bring is the project's Object storage section — presets for S3, R2,
   B2 and Spaces — storing the key as a secret and the same five settings
   in one deploy. A compose file's `minio/minio` imports as this engine
+- [x] **`health.check` answers**: the AI, CLI and MCP could ask for an
+  app's health and were told "not available yet". The agent runs every
+  check on its own schedule whether anyone asks or not, so the answer is
+  its latest reading: each copy's state in words — passing and taking
+  visitors, not ready, restarting after its liveness check — which checks
+  the app has, and when the reading was taken
 - [x] **static sites, "built then served by a minimal container" (§15)**:
   the contract accepted `build.strategy: static` and a deploy answered
   "not available yet". Now a spec names the folder the finished site is

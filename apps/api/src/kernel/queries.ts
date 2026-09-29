@@ -72,9 +72,20 @@ const DEFAULT_APP = {
   build: { strategy: 'image' },
 };
 
-/** Reads that need live data from the agent answer honestly until that data exists. */
-const notYet: Handler = () =>
-  Promise.reject(new VDeployError('unavailable', 'This information is not available yet'));
+/** What a replica's state means, as the dashboard says it. */
+const HEALTH_WORDS: Record<string, string> = {
+  ready: 'is passing its checks and taking visitors',
+  starting: 'has started and has not passed its first check yet',
+  not_ready: 'is running, but its readiness check says it cannot take visitors',
+  unhealthy: 'stopped answering its liveness check, and is being restarted',
+  exited: 'is not running',
+};
+
+/** A check as a person reads it: "HTTP /health every 10s", or "TCP every 10s". */
+function describeCheck(check: { type: string; path?: string | undefined; interval: string }) {
+  const what = check.type === 'http' ? `HTTP ${check.path ?? '/'}` : 'TCP';
+  return `${what} every ${check.interval}`;
+}
 
 /**
  * Read handlers. The gate has already checked role, grants and that the
@@ -603,5 +614,42 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         : null,
     };
   },
-  'health.check': notYet,
+  /*
+   * Where each copy of an app stands against its health checks (§18). The
+   * agent runs every check on its own schedule, whether or not anyone
+   * asks — at least every five seconds for a check that wants it — so the
+   * answer is its latest reading, with when it was taken.
+   */
+  'health.check': async ({ deps, args }) => {
+    const projectId = id(args, 'projectId');
+    const [row] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    const spec = readSpec(row.spec);
+    const checks = {
+      startup: spec.health.startup ? describeCheck(spec.health.startup) : null,
+      liveness: spec.health.liveness ? describeCheck(spec.health.liveness) : null,
+      readiness: spec.health.readiness ? describeCheck(spec.health.readiness) : null,
+    };
+    const [observed] = row.serverId
+      ? await deps.db
+          .select({ report: observedState.report, receivedAt: observedState.receivedAt })
+          .from(observedState)
+          .where(eq(observedState.serverId, row.serverId))
+      : [];
+    const mine = observed?.report.projects?.find((p) => p.projectId === projectId);
+    const replicas = (mine?.replicas ?? []).map((r) => ({
+      name: r.name,
+      state: r.state,
+      healthy: r.state === 'ready',
+      words: HEALTH_WORDS[r.state] ?? `is ${r.state}`,
+    }));
+    return {
+      projectId,
+      checks,
+      replicas,
+      healthy: replicas.length > 0 && replicas.every((r) => r.healthy),
+      error: mine?.error ?? null,
+      checkedAt: observed?.receivedAt.toISOString() ?? null,
+    };
+  },
 };
