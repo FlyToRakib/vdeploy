@@ -299,6 +299,13 @@ each is one task, one commit.
   you bring is the project's Object storage section — presets for S3, R2,
   B2 and Spaces — storing the key as a secret and the same five settings
   in one deploy. A compose file's `minio/minio` imports as this engine
+- [x] **the web terminal opens** — found by a new test that every
+  operation the catalog offers has something behind it: the terminal's
+  route asks the gate first, the gate let the request through and then
+  found no handler, and answered "not available yet" — so no terminal
+  had ever opened since it was built, and nothing tested the route. The
+  gate now completes, with its audit entry, and the route opens the
+  shell; the end-to-end run types a command into one and reads the answer
 - [x] **`health.check` answers**: the AI, CLI and MCP could ask for an
   app's health and were told "not available yet". The agent runs every
   check on its own schedule whether anyone asks or not, so the answer is

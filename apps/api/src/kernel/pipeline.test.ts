@@ -157,6 +157,19 @@ describe('administrative operations', () => {
     expect(domains.json<{ result: unknown[] }>().result).toEqual([]);
   });
 
+  it('lets a person through the gate in front of the terminal, and records it', async () => {
+    const projectId = await seedProject(orgId, 'shell');
+    await stepUp(owner);
+    const res = await op(owner, 'terminal.open', { projectId, replica: 1 });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ result: unknown }>().result).toEqual({ projectId, replica: 1 });
+    const [entry] = await t.database.db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.action, 'terminal.open'), eq(auditLog.target, projectId)));
+    expect(entry?.outcome).toBe('succeeded');
+  });
+
   it('says where each copy of an app stands against its health checks', async () => {
     const projectId = await seedProject(orgId, 'checked');
     const serverId = newId('server');

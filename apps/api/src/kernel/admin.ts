@@ -310,6 +310,17 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
         actor: { userId: actor.userId, origin: actor.origin },
       }),
     ),
+  /*
+   * The gate in front of the terminal (§19). Its route asks here first, so
+   * who may open one, and the audit entry saying they did, are the same as
+   * for any other change; the route then opens the shell itself. Without
+   * this the gate let the request through and found nothing behind it, and
+   * no terminal ever opened.
+   */
+  'terminal.open': async ({ args }) => ({
+    projectId: String(args.projectId),
+    replica: Number(args.replica ?? 0),
+  }),
   'secret.read_value': async ({ deps, args }) =>
     readSecret(deps.db, deps.secretsKey, String(args.projectId), String(args.secretId)),
   'storage.ignore_path': async ({ deps, args }) => {
