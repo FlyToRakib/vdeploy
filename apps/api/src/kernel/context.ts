@@ -11,6 +11,7 @@ import type {
 } from '../agents/gateway.js';
 import type { PortProbe } from '../agents/reachability.js';
 import type { Mailer } from '../auth/mailer.js';
+import type { AiCallWindow } from './ai-calls.js';
 
 /** Hands an approved plan to the worker that applies it. */
 export interface ApplyQueue {
@@ -54,6 +55,8 @@ export interface KernelDeps {
   fetch?: typeof fetch;
   /** The model behind the assistant; without one the assistant is off (§26).*/
   model?: ModelClient;
+  /** Each AI session's calls in the last minute, for the rate limit (§8 L3). */
+  aiCalls: AiCallWindow;
 }
 
 export interface GithubDeps {

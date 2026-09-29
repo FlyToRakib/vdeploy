@@ -18,6 +18,7 @@ import type { ApiConfig } from './config.js';
 import { handleError } from './errors.js';
 import { accountRoutes } from './routes/account.js';
 import { authRoutes } from './routes/auth.js';
+import { AiCallWindow } from './kernel/ai-calls.js';
 import type { ApplyQueue } from './kernel/context.js';
 import { healthRoutes } from './routes/health.js';
 import { referenceRoutes } from './routes/reference.js';
@@ -197,6 +198,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     connected: (serverId: string) => gateway.isConnected(serverId),
     probe,
     resolveTxt,
+    aiCalls: new AiCallWindow(),
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(github ? { github } : {}),
     ...(model ? { model } : {}),

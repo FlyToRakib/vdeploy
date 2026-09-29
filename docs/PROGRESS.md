@@ -67,6 +67,16 @@ each is one task, one commit.
   runs one pass at a time and stopping it waits — the pattern the
   databases suite already had. The pause in the middle of one test no
   longer guesses with a 300 ms sleep either
+- [x] **the AI's call rate (§8 L3) and its hourly limit of unattended
+  changes (§8 L1) were never counted.** Both rules were written and
+  unit-tested in the policy package; the pipeline that runs every real
+  call handed them a constant zero, so a runaway loop was never slowed
+  and "at most 10 automatic changes an hour" was a number on a screen.
+  Calls are now counted per session in a one-minute window where every
+  call passes — reads included, which is why it is not read out of the
+  audit log, which does not record reads — and unattended changes are
+  counted from the plans themselves, so that ceiling holds across
+  restarts. Both new tests fail against the constant
 - [ ] the AI's deploy-window guardrail (§8 L1) — on the grant matrix in the spec, not in the grants
 - [ ] `domain.add` refusing a host another project routes (2.4) — the agent refuses it later instead
 

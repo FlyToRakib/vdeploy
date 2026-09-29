@@ -187,6 +187,54 @@ describe('the assistant', () => {
     expect(plan?.reasons.join(' ')).toContain('external content');
   });
 
+  it('stops changing things unattended once the hourly limit is reached', async () => {
+    await setGrants({ guardrails: { ...DEFAULT_AI_GRANTS.guardrails, maxAutoAppliesPerHour: 1 } });
+    const restart = () => {
+      model.script([
+        { text: 'Restarting.', toolCalls: [{ name: 'project_restart', input: { projectId } }] },
+        { text: 'Done.' },
+      ]);
+    };
+    restart();
+    const first = (
+      await ask({ message: 'Restart the blog', projectId, mode: 'autopilot' })
+    ).json<AskBody>();
+    expect(first.applied).toHaveLength(1);
+
+    restart();
+    const second = await ask({
+      message: 'Restart it again',
+      projectId,
+      sessionId: first.sessionId,
+      mode: 'autopilot',
+    });
+    const body = second.json<AskBody>();
+    // The limit was a number on a screen that nothing counted against.
+    expect(body.applied).toHaveLength(0);
+    const [plan] = await t.database.db
+      .select()
+      .from(plans)
+      .where(eq(plans.id, body.proposals[0]?.planId ?? ''));
+    expect(plan?.reasons).toContain('The hourly limit of automatic AI changes is reached');
+    await setGrants({});
+  });
+
+  it('stops a session that calls faster than a person could read, reads included', async () => {
+    const reads = Array.from({ length: 31 }, () => ({
+      name: 'project_get',
+      input: { projectId },
+    }));
+    model.script([{ text: 'Looking.', toolCalls: reads }, { text: 'Done.' }]);
+    const res = await ask({ message: 'Look at the blog very hard', projectId });
+    const { sessionId } = res.json<AskBody>();
+    const results = await t.database.db
+      .select({ text: aiMessages.text })
+      .from(aiMessages)
+      .where(eq(aiMessages.sessionId, sessionId));
+    const limited = results.filter((m) => m.text.includes('Too many AI actions in a minute'));
+    expect(limited).toHaveLength(1);
+  });
+
   it('stops before spending past the monthly cap, and says so in plain words', async () => {
     await setGrants({ guardrails: { ...DEFAULT_AI_GRANTS.guardrails, monthlySpendCapUsd: 0 } });
     const before = model.seen.length;

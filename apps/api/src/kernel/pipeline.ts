@@ -22,7 +22,7 @@ import {
 } from '@vdeploy/contracts';
 import { buildPlan, isPlannable } from '@vdeploy/core';
 import { aiGrants, appendAudit, idempotencyKeys, plans, type ActorRecord } from '@vdeploy/db';
-import { and, eq } from 'drizzle-orm';
+import { and, count, eq, gt, sql } from 'drizzle-orm';
 import { ADMIN } from './admin.js';
 import type { KernelDeps } from './context.js';
 import { QUERIES } from './queries.js';
@@ -37,6 +37,26 @@ export function actorRecord(actor: Actor): ActorRecord {
     // rather than the name of whoever installed it (ADR 0023).
     ...(actor.kind === 'human' && actor.pluginId ? { pluginId: actor.pluginId } : {}),
   };
+}
+
+/**
+ * Changes the AI made this hour without anybody approving them (§8 L1):
+ * its plans that went straight to the queue, counted from the plans
+ * themselves so the ceiling holds across restarts and API processes.
+ */
+async function autoAppliesSince(deps: KernelDeps, orgId: string, since: Date): Promise<number> {
+  const [row] = await deps.db
+    .select({ n: count() })
+    .from(plans)
+    .where(
+      and(
+        eq(plans.orgId, orgId),
+        gt(plans.createdAt, since),
+        sql`${plans.actor} ? 'aiSessionId'`,
+        sql`${plans.reasons} = '[]'::jsonb`,
+      ),
+    );
+  return row?.n ?? 0;
 }
 
 export async function loadGrants(deps: KernelDeps, orgId: string): Promise<AiGrants> {
@@ -174,10 +194,16 @@ export async function runOperation(
   const target = await resolveTarget(deps.db, op, request.input, actor.orgId);
   const grants = await loadGrants(deps, actor.orgId);
   const now = deps.now();
+  // The two brakes on an AI (§8 L1, L3), measured rather than assumed:
+  // how fast this session is calling, and how much it changed unattended.
+  const ai = actor.kind === 'ai';
   const call = {
-    aiCallsLastMinute: 0,
+    aiCallsLastMinute: ai ? deps.aiCalls.hit(actor.aiSessionId, now.getTime()) : 0,
     idempotencyKey: request.idempotencyKey ?? null,
-    autoAppliesLastHour: 0,
+    autoAppliesLastHour:
+      ai && op.mutates
+        ? await autoAppliesSince(deps, actor.orgId, new Date(now.getTime() - 3_600_000))
+        : 0,
   };
   const decision = evaluate({
     actor,
