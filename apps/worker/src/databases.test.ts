@@ -89,7 +89,8 @@ let agentTimer: NodeJS.Timeout;
 /** What the stand-in agent reports about the next backup it is asked for. */
 let restoreWorks = true;
 let agentStopped = false;
-let ticking: Promise<void> = Promise.resolve();
+/** The pass in flight, if any: a new one is skipped rather than queued behind it. */
+let ticking: Promise<void> | null = null;
 let backupOutcome = {
   ok: true,
   sizeBytes: 4096,
@@ -222,8 +223,12 @@ beforeAll(async () => {
   // One agent, one thing at a time — and nothing in flight when the test
   // database goes away, which would otherwise fail a passing run.
   agentTimer = setInterval(() => {
-    if (agentStopped) return;
-    ticking = ticking.then(() => agentTick()).catch(() => undefined);
+    if (agentStopped || ticking) return;
+    ticking = agentTick()
+      .catch(() => undefined)
+      .finally(() => {
+        ticking = null;
+      });
   }, 50);
 }, 120_000);
 

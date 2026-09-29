@@ -69,7 +69,8 @@ function spec(overrides: Partial<ApplicationSpecInput> = {}) {
 /** A stand-in agent: runs whatever it is told, except releases from crashFrom on. */
 let crashFrom = Number.POSITIVE_INFINITY;
 let agentTimer: NodeJS.Timeout | undefined;
-let ticking: Promise<void> = Promise.resolve();
+/** The pass in flight, if any: a new one is skipped rather than queued behind it. */
+let ticking: Promise<void> | null = null;
 
 /**
  * The stand-in agent: one pass at a time, as a real one runs — and nothing
@@ -78,7 +79,14 @@ let ticking: Promise<void> = Promise.resolve();
  */
 function startAgent() {
   agentTimer = setInterval(() => {
-    ticking = ticking.then(() => agentTick()).catch(() => undefined);
+    // Queued passes pile up when a machine is busy and one takes longer
+    // than the interval; skipping keeps it to one, as a real agent is.
+    if (ticking) return;
+    ticking = agentTick()
+      .catch(() => undefined)
+      .finally(() => {
+        ticking = null;
+      });
   }, 50);
 }
 
