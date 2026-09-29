@@ -147,6 +147,28 @@ describe('operations that change one part of the spec (§24)', () => {
 });
 
 describe('the catalog and the planners agree', () => {
+  it('sets a whole .env in one change, a later line winning', () => {
+    const plan = buildPlan(
+      'env.import',
+      {
+        projectId: project.id,
+        entries: [
+          { key: 'A', value: '1' },
+          { key: 'TOKEN', secretRef: 'sec_01K0000000000000000000000A' },
+          { key: 'A', value: '2' },
+        ],
+      },
+      { project, server },
+    );
+    expect(plan.steps.filter((s) => s.kind === 'update_spec')).toHaveLength(1);
+    const after = specAfter(
+      'env.import',
+      { entries: [{ key: 'A', value: '1' }, { key: 'A', value: '2' }] },
+      project.spec,
+    );
+    expect(after.runtime.env.filter((e) => e.key === 'A')).toEqual([{ key: 'A', value: '2' }]);
+  });
+
   it('has a planner for every section edit', () => {
     for (const name of SECTION_EDITS) {
       expect(isSectionEdit(name)).toBe(true);
@@ -163,6 +185,7 @@ describe('the catalog and the planners agree', () => {
       'project.create',
       'project.update_spec',
       'env.set',
+      'env.import',
       'env.unset',
       'project.deploy_upload',
       'storage.make_persistent',
@@ -201,6 +224,7 @@ function sample(name: OperationName): Record<string, unknown> {
     'loadbalancer.configure': { loadBalancer: {} },
     'volume.create': { volume: { name: 'data', mountPath: '/data' } },
     'env.set': { key: 'A', value: '1' },
+    'env.import': { entries: [{ key: 'A', value: '1' }] },
     'env.unset': { key: 'A' },
     'project.update_spec': { spec },
     'project.scale': { replicas: 1 },

@@ -19,6 +19,7 @@ export * from './previews.js';
 export * from './secrets.js';
 export * from './sso.js';
 export * from './builds.js';
+export * from './dotenv.js';
 export * from './logs.js';
 export * from './mesh.js';
 export * from './backups.js';

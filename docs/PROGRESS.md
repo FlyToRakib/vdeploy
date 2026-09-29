@@ -270,7 +270,13 @@ each is one task, one commit.
 - [ ] cancel a deploy, and promote a canary early (§7, §20)
 - [ ] deploy locks and freeze windows (§20)
 - [ ] clone a project (§20)
-- [ ] env import and export in bulk (§20)
+- [x] **env import and export in bulk (§20)**: a pasted `.env` is read the
+  way the common loaders read it (`export`, comments, both quotes, a
+  quoted value over several lines) and says which lines it could not
+  read. Its values are stored encrypted first, each on its own, and then
+  every setting goes in as one `env.import` change, so the app deploys
+  once rather than once a line. The download writes a `.env` that reads
+  back the same, with each encrypted value's line there and empty
 - [ ] maintenance mode for a server (§20)
 - [ ] `registry.add`: pulling from a private registry (§15, §24)
 - [ ] teams and custom roles (§20, M1)

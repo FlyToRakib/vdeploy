@@ -31,6 +31,7 @@ const OPERATION_WORDS: Record<string, string> = {
   'project.scale': 'Change how many copies run',
   'release.rollback': 'Go back to an earlier version',
   'env.set': 'Set a setting',
+  'env.import': 'Set several settings at once',
   'env.unset': 'Remove a setting',
   'secret.rotate': 'Replace a secret with a new value',
   'storage.make_persistent': 'Keep a folder’s files',

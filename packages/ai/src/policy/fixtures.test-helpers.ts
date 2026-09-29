@@ -229,6 +229,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'secret.generate': { name: 'session_key' },
   'secret.set': { name: 'stripe_key', value: 'sk_test_x' },
   'project.basic_auth': { users: [{ name: 'sam', password: 'twelve chars ok' }] },
+  'env.import': { entries: [{ key: 'LOG_LEVEL', value: 'info' }] },
   'source.upload': { sha256: 'a'.repeat(64), size: 1024 },
   'source.detect': { serverId: newId('server'), uploadId: newId('upload') },
   'build.get': { buildId: newId('build') },

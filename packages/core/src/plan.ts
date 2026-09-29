@@ -594,6 +594,11 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
     const project = requireProject(context);
     return specChange(project, specAfter('env.unset', args, project.spec), 'sensitive', context);
   },
+  // Many settings, one change: a pasted .env deploys once, not once a line.
+  'env.import': (args, context) => {
+    const project = requireProject(context);
+    return specChange(project, specAfter('env.import', args, project.spec), 'sensitive', context);
+  },
   // A scheduled job is part of the spec (§17.6), so changing one is a planned
   // change: approved, versioned with the release, and rolled back with it.
   'cron.create': (args, context) => {

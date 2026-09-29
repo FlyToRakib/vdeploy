@@ -26,7 +26,7 @@ import { formText } from '@/lib/forms';
 import { OperationError, query, runOperation } from '@/lib/operations';
 import { ago, sizeWords, type BackupSummary } from '@/lib/databases';
 import type { ServerSummary } from '@/lib/servers';
-import type { TaskView } from '@vdeploy/contracts';
+import { parseDotenv, toDotenv, type TaskView } from '@vdeploy/contracts';
 import { useProject } from '../project-shell';
 
 export function useSpec(): EditableSpec {
@@ -55,10 +55,52 @@ export function SettingsSection() {
   const { projectId, act } = useProject();
   const spec = useSpec();
   const [secrets, setSecrets] = useState<Secret[]>([]);
+  const [problems, setProblems] = useState<string[]>([]);
 
   useEffect(() => {
     void query<Secret[]>('secret.list', { projectId }).then(setSecrets, () => undefined);
   }, [projectId, spec]);
+
+  /**
+   * A pasted .env, as one change: secret values are stored encrypted first,
+   * each on its own, and then every setting goes in together, so the app
+   * deploys once rather than once a line.
+   */
+  async function importFile(form: FormData) {
+    const { entries, problems: found } = parseDotenv(formText(form, 'dotenv'));
+    setProblems(
+      entries.length === 0 && found.length === 0 ? ['There are no settings in that.'] : found,
+    );
+    if (entries.length === 0) return;
+    // An empty value is not a secret, and could not be stored as one.
+    const hidden = form.get('secret') === 'on' ? entries.filter((e) => e.value !== '') : [];
+    for (const e of hidden) {
+      await act(
+        'secret.set',
+        { projectId, name: secretNameFor(e.key), value: e.value },
+        `Storing ${e.key} encrypted`,
+      );
+    }
+    const stored = hidden.length ? await query<Secret[]>('secret.list', { projectId }) : [];
+    const refs = new Map(stored.map((x) => [x.name, x.id]));
+    const missing = hidden.filter((e) => !refs.has(secretNameFor(e.key))).map((e) => e.key);
+    if (missing.length) {
+      setProblems([`Not imported: ${missing.join(', ')} could not be stored encrypted.`]);
+      return;
+    }
+    await act(
+      'env.import',
+      {
+        projectId,
+        entries: entries.map((e) =>
+          hidden.includes(e)
+            ? { key: e.key, secretRef: refs.get(secretNameFor(e.key)) }
+            : { key: e.key, value: e.value },
+        ),
+      },
+      `Setting ${String(entries.length)} settings`,
+    );
+  }
 
   async function add(form: FormData) {
     const key = formText(form, 'key').trim();
@@ -128,6 +170,48 @@ export function SettingsSection() {
           Keep it secret: stored encrypted, never shown again
         </label>
       </form>
+      <details className="text-sm">
+        <summary className="cursor-pointer">Import a .env file, or download these settings</summary>
+        <form action={importFile} className="mt-3 grid gap-3">
+          <label htmlFor="dotenv">Paste the contents of a .env file</label>
+          <textarea
+            id="dotenv"
+            name="dotenv"
+            rows={6}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder={'DATABASE_URL=postgres://…\nLOG_LEVEL=info'}
+            className="rounded-md border border-border bg-surface-raised p-2 font-mono text-sm"
+          />
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="secret" defaultChecked className="size-4" />
+            Keep every value secret: stored encrypted, never shown again
+          </label>
+          {problems.length > 0 && (
+            <ul role="alert" className="grid gap-1 text-status-failed">
+              {problems.map((problem) => (
+                <li key={problem}>{problem}</li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit">Import</Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={spec.runtime.env.length === 0}
+              onClick={() => {
+                save('.env', toDotenv(spec.runtime.env));
+              }}
+            >
+              Download as .env
+            </Button>
+          </div>
+          <p className="text-muted-foreground">
+            The download leaves out values stored encrypted: their lines are there, empty.
+          </p>
+        </form>
+      </details>
     </Section>
   );
 }

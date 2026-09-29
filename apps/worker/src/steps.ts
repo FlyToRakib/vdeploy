@@ -180,6 +180,7 @@ const SPEC_EDITS = new Set([
   'project.create',
   'project.update_spec',
   'env.set',
+  'env.import',
   'env.unset',
   'project.deploy_upload',
   'storage.make_persistent',

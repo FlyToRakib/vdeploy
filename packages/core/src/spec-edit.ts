@@ -76,6 +76,20 @@ function setEnv(spec: ApplicationSpec, args: OperationArgs<'env.set'>): Applicat
   return valid({ ...spec, runtime: { ...spec.runtime, env: next } });
 }
 
+/** Each entry set as `env.set` would, in order: a later line wins, as in a .env file. */
+function importEnv(spec: ApplicationSpec, args: OperationArgs<'env.import'>): ApplicationSpec {
+  return args.entries.reduce(
+    (current, entry) =>
+      setEnv(current, {
+        projectId: args.projectId,
+        key: entry.key,
+        target: 'runtime',
+        ...(entry.value === undefined ? { secretRef: entry.secretRef } : { value: entry.value }),
+      } as OperationArgs<'env.set'>),
+    spec,
+  );
+}
+
 function unsetEnv(spec: ApplicationSpec, args: OperationArgs<'env.unset'>): ApplicationSpec {
   if (args.target === 'build') {
     if (!Object.hasOwn(spec.build.args, args.key)) {
@@ -123,6 +137,7 @@ export function specAfter(
     | 'project.create'
     | 'project.update_spec'
     | 'env.set'
+    | 'env.import'
     | 'env.unset'
     | 'project.deploy_upload'
     | 'cron.create'
@@ -171,6 +186,7 @@ export function specAfter(
   }
   if (name === 'cron.delete') return removeCron(current, String(args.name));
   if (isSectionEdit(name)) return editSection(name, args, current);
+  if (name === 'env.import') return importEnv(current, args as OperationArgs<'env.import'>);
   return name === 'env.set'
     ? setEnv(current, args as OperationArgs<'env.set'>)
     : unsetEnv(current, args as OperationArgs<'env.unset'>);

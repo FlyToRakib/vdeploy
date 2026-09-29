@@ -19,6 +19,7 @@ import { RestoreMode } from '../backups.js';
 import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { FolderPath } from '../files.js';
 import { NewChannelConfig, NotificationTrigger } from '../notifications.js';
+import { ENV_KEY } from '../dotenv.js';
 import { PluginManifest } from '../plugins.js';
 import { PreviewRef } from '../previews.js';
 import { EmailDomain, SsoSettings } from '../sso.js';
@@ -496,6 +497,29 @@ export const OPERATIONS = [
       target: z.enum(['runtime', 'build']).default('runtime'),
     }).refine((i) => (i.value === undefined) !== (i.secretRef === undefined), {
       message: 'exactly one of value or secretRef',
+    }),
+  ),
+  operation(
+    'env.import',
+    'sensitive',
+    'project',
+    'Set many environment variables in one change, as from a .env file (secrets by reference only)',
+    obj({
+      ...P,
+      entries: z
+        .array(
+          z
+            .strictObject({
+              key: z.string().regex(ENV_KEY),
+              value: z.string().max(32_768).optional(),
+              secretRef: idSchema('secret').optional(),
+            })
+            .refine((e) => (e.value === undefined) !== (e.secretRef === undefined), {
+              message: 'exactly one of value or secretRef',
+            }),
+        )
+        .min(1)
+        .max(200),
     }),
   ),
   operation(
