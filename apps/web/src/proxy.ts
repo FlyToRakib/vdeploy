@@ -23,6 +23,11 @@ export function proxy(request: NextRequest): NextResponse {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
+    // The CAPTCHA after repeated failed sign-ins (§20.2) is Cloudflare's
+    // frame, and only the sign-in page may show it.
+    ...(request.nextUrl.pathname === '/sign-in'
+      ? ['frame-src https://challenges.cloudflare.com']
+      : []),
     ...(https ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
 

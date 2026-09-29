@@ -29,6 +29,15 @@ export async function lockedUntil(db: Database, email: string): Promise<Date | n
   return until && until.getTime() > Date.now() ? until : null;
 }
 
+/** How many sign-ins have failed for an address since it last succeeded. */
+export async function failureCount(db: Database, email: string): Promise<number> {
+  const [row] = await db
+    .select({ count: signInFailures.count })
+    .from(signInFailures)
+    .where(eq(signInFailures.email, normalize(email)));
+  return row?.count ?? 0;
+}
+
 export async function recordFailure(db: Database, email: string): Promise<void> {
   const key = normalize(email);
   const [row] = await db

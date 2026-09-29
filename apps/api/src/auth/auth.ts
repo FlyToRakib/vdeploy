@@ -15,6 +15,7 @@ import { createAccessControl } from 'better-auth/plugins/access';
 import { createHooks } from './hooks.js';
 import { ssoPlugin } from './sso.js';
 import type { Locate } from './geoip.js';
+import type { Captcha } from './hooks.js';
 import type { Mailer } from './mailer.js';
 import { hashPassword, verifyPassword } from './password.js';
 
@@ -82,6 +83,8 @@ export interface AuthDeps {
   social?: SocialSignIn;
   /** Where an address roughly is, for the new-device email (§20.2). */
   locate?: Locate;
+  /** A CAPTCHA after repeated failed sign-ins, when configured (§20.2). */
+  captcha?: Captcha;
 }
 
 export interface SocialSignIn {

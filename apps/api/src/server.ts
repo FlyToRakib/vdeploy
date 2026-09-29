@@ -14,6 +14,8 @@ import { agentRoutes, Gateway } from './agents/gateway.js';
 import { privateKeyFromSeed } from './agents/frames.js';
 import { createAuth, socialSignIn } from './auth/auth.js';
 import { openGeoIp, type Locate } from './auth/geoip.js';
+import { turnstile } from './auth/captcha.js';
+import type { Captcha } from './auth/hooks.js';
 import { logMailer, smtpMailer, type Mailer } from './auth/mailer.js';
 import type { ApiConfig } from './config.js';
 import { handleError } from './errors.js';
@@ -77,6 +79,8 @@ export interface ServerDeps {
   model?: ModelClient;
   /** Where an address roughly is; from GEOIP_DATABASE when unset. Tests replace it. */
   locate?: Locate;
+  /** The CAPTCHA; Turnstile from the environment when unset. Tests replace it. */
+  captcha?: Captcha;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -112,6 +116,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       ? smtpMailer(config.SMTP_URL, config.MAIL_FROM)
       : logMailer(app.log, config.NODE_ENV === 'development'));
   const locate = deps.locate ?? (await openGeoIp(config.GEOIP_DATABASE));
+  const captcha =
+    deps.captcha ??
+    (config.TURNSTILE_SITE_KEY && config.TURNSTILE_SECRET_KEY
+      ? turnstile(config.TURNSTILE_SITE_KEY, config.TURNSTILE_SECRET_KEY)
+      : undefined);
   const auth = createAuth({
     db,
     mailer,
@@ -124,6 +133,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     secureCookies: new URL(config.PUBLIC_URL).protocol === 'https:',
     social: socialSignIn(config),
     locate,
+    ...(captcha ? { captcha } : {}),
   });
 
   await app.register(healthRoutes(db));
@@ -136,6 +146,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       publicUrl: config.PUBLIC_URL,
       socialProviders: (['github', 'google'] as const).filter((p) => socialSignIn(config)[p]),
       locate,
+      ...(captcha ? { captchaSiteKey: captcha.siteKey } : {}),
     }),
   );
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });

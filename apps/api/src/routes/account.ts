@@ -28,6 +28,8 @@ export interface AccountDeps {
   socialProviders?: ('github' | 'google')[];
   /** Where an address roughly is, when a GeoIP database is configured (§20.2). */
   locate?: Locate;
+  /** The Turnstile site to show after repeated failures, when configured (§20.2). */
+  captchaSiteKey?: string;
 }
 
 function slugify(name: string): string {
@@ -47,6 +49,7 @@ export const accountRoutes =
     publicUrl,
     socialProviders = [],
     locate = NO_LOCATION,
+    captchaSiteKey,
   }: AccountDeps): FastifyPluginAsyncZod =>
   (app) => {
     const origin = new URL(publicUrl).origin;
@@ -64,7 +67,10 @@ export const accountRoutes =
       });
 
     /** How somebody may sign in here, for the sign-in page to offer exactly that. */
-    app.get('/api/v1/auth/methods', () => ({ social: socialProviders }));
+    app.get('/api/v1/auth/methods', () => ({
+      social: socialProviders,
+      captcha: captchaSiteKey ? { provider: 'turnstile', siteKey: captchaSiteKey } : null,
+    }));
 
     app.get('/api/v1/setup', async () => {
       const [settings] = await db

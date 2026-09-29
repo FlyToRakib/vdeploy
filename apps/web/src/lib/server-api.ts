@@ -37,13 +37,18 @@ export async function setupNeeded(): Promise<boolean> {
   return (body as { needed?: boolean } | null)?.needed === true;
 }
 
-/** Which of GitHub and Google this VDeploy offers for signing in (§20.2). */
-export async function socialSignIn(): Promise<('github' | 'google')[]> {
+/** How this VDeploy lets people sign in (§20.2): GitHub or Google, and a CAPTCHA site. */
+export async function signInMethods(): Promise<{
+  social: ('github' | 'google')[];
+  captchaSiteKey: string | null;
+}> {
   const { body } = await apiGet('/api/v1/auth/methods');
-  const social = (body as { social?: unknown } | null)?.social;
-  return Array.isArray(social)
-    ? social.filter((p): p is 'github' | 'google' => p === 'github' || p === 'google')
+  const answer = body as { social?: unknown; captcha?: { siteKey?: unknown } | null } | null;
+  const social = Array.isArray(answer?.social)
+    ? answer.social.filter((p): p is 'github' | 'google' => p === 'github' || p === 'google')
     : [];
+  const siteKey = answer?.captcha?.siteKey;
+  return { social, captchaSiteKey: typeof siteKey === 'string' ? siteKey : null };
 }
 
 export async function activeOrganizationName(): Promise<string | null> {

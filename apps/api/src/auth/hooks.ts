@@ -4,7 +4,7 @@ import type { BetterAuthOptions } from 'better-auth';
 import { APIError, createAuthMiddleware, isAPIError } from 'better-auth/api';
 import { eq } from 'drizzle-orm';
 import { assertMayRegister } from './registration.js';
-import { clearFailures, lockedUntil, recordFailure } from './lockout.js';
+import { clearFailures, failureCount, lockedUntil, recordFailure } from './lockout.js';
 import type { Mailer } from './mailer.js';
 import type { Locate } from './geoip.js';
 
@@ -15,7 +15,18 @@ export interface HookDeps {
   publicUrl: string;
   /** Where an address roughly is, when a GeoIP database is configured. */
   locate?: Locate;
+  /** A CAPTCHA after repeated failures, when one is configured (§20.2). */
+  captcha?: Captcha;
 }
+
+/** Proves a CAPTCHA was solved; false for anything else, including no answer at all. */
+export interface Captcha {
+  siteKey: string;
+  verify: (token: string, ip: string | null) => Promise<boolean>;
+}
+
+/** Failed sign-ins for an address before the next one needs a CAPTCHA. */
+export const CAPTCHA_AFTER = 3;
 
 /** Auth endpoints whose outcome is written to the audit log. */
 const AUDITED: Readonly<Record<string, string>> = {
@@ -76,6 +87,19 @@ export function createHooks(deps: HookDeps) {
       throw new APIError('TOO_MANY_REQUESTS', {
         message: `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}, or reset your password.`,
       });
+    }
+    // After a few failures, a person proves they are one before the next
+    // try (§20.2). Counted per address whether it has an account or not,
+    // so asking reveals nothing about which ones exist.
+    if (deps.captcha && (await failureCount(db, email)) >= CAPTCHA_AFTER) {
+      const token = ctx.headers?.get('x-captcha-response') ?? '';
+      const ip = ctx.headers?.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
+      if (!token || !(await deps.captcha.verify(token, ip))) {
+        throw new APIError('BAD_REQUEST', {
+          code: 'CAPTCHA_REQUIRED',
+          message: 'Several tries have failed. Confirm you are a person to keep trying.',
+        });
+      }
     }
   });
 

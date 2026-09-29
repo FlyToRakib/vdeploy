@@ -410,7 +410,16 @@ each is one task, one commit.
   shown — VDeploy never asks a service on the internet where an address
   is — and a path that cannot be read stops the start, in words, rather
   than quietly showing nothing
-- [ ] CAPTCHA after repeated failures, when configured (§20.2)
+- [x] **CAPTCHA after repeated failures, when configured (§20.2)**: with a
+  Cloudflare Turnstile site configured, an address that has failed to
+  sign in three times must solve one before its next try — counted per
+  address whether it has an account or not, so being asked reveals
+  nothing about which do. A token is checked server to server, and
+  anything but a clear yes (a refusal, an error, Cloudflare unreachable)
+  is a no. The widget appears only when the server asks; the page policy
+  admits Cloudflare's frame on the sign-in page and nowhere else, and its
+  script loads under the page's own nonce. The lockout that follows five
+  failures is unchanged
 - [x] **the 4 GB image warning, and a DNS propagation countdown (§30 ④ ⑤)**:
   the agent measures every image it builds, and one of 2 GB or more gets
   a plain sentence in the deploy's notes and beside its build log — each

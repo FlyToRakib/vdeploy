@@ -56,6 +56,12 @@ export const ApiConfig = z.object({
    * never asks a service on the internet where an address is.
    */
   GEOIP_DATABASE: z.string().min(1).optional(),
+  /**
+   * A CAPTCHA after repeated failed sign-ins (§20.2, optional): a
+   * Cloudflare Turnstile site. Both keys, or neither.
+   */
+  TURNSTILE_SITE_KEY: z.string().min(1).optional(),
+  TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
   /** The key for the assistant's model (§26, bring your own key). Without it the assistant is off. */
   ANTHROPIC_API_KEY: z.string().min(8).optional(),
   ANTHROPIC_BASE_URL: z.url().optional(),

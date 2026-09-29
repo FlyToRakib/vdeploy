@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { authClient } from '@/lib/auth-client';
 import { formText, messageOf } from '@/lib/forms';
+import { Turnstile } from './turnstile';
 
 const PROVIDERS = { github: 'GitHub', google: 'Google' } as const;
 
@@ -24,11 +25,15 @@ function returnedWords(code: string): string {
 
 export function SignInForm({
   social = [],
+  captchaSiteKey = null,
   returnedError = null,
 }: {
   social?: readonly ('github' | 'google')[];
+  captchaSiteKey?: string | null;
   returnedError?: string | null;
 }) {
+  const [captchaNeeded, setCaptchaNeeded] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const router = useRouter();
   const [step, setStep] = useState<'password' | 'code' | 'sso'>('password');
   const [error, setError] = useState<string | null>(
@@ -49,8 +54,14 @@ export function SignInForm({
     const { data, error: failed } = await authClient.signIn.email({
       email: formText(form, 'email'),
       password: formText(form, 'password'),
+      ...(captchaToken
+        ? { fetchOptions: { headers: { 'x-captcha-response': captchaToken } } }
+        : {}),
     });
     setBusy(false);
+    // A solved CAPTCHA is good for one try: the next one asks again.
+    setCaptchaToken(null);
+    if (failed?.code === 'CAPTCHA_REQUIRED' && captchaSiteKey) setCaptchaNeeded(true);
     if (failed) setError(messageOf(failed, 'Could not sign in. Check your email and password.'));
     else if ('twoFactorRedirect' in data && data.twoFactorRedirect) setStep('code');
     else done();
@@ -215,12 +226,15 @@ export function SignInForm({
           autoComplete="current-password"
           required
         />
+        {captchaNeeded && captchaSiteKey && !captchaToken && (
+          <Turnstile siteKey={captchaSiteKey} onToken={setCaptchaToken} />
+        )}
         {error && (
           <p role="alert" className="text-sm text-status-failed">
             {error}
           </p>
         )}
-        <Button type="submit" disabled={busy}>
+        <Button type="submit" disabled={busy || (captchaNeeded && !captchaToken)}>
           Sign in
         </Button>
       </form>

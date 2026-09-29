@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { currentSession, setupNeeded, socialSignIn } from '@/lib/server-api';
+import { currentSession, setupNeeded, signInMethods } from '@/lib/server-api';
 import { SignInForm } from './sign-in-form';
 
 export const metadata: Metadata = { title: 'Sign in' };
@@ -15,9 +15,11 @@ export default async function SignInPage({
   if (await currentSession()) redirect('/');
   // Where GitHub or Google sends somebody back when it did not work.
   const { error } = await searchParams;
+  const methods = await signInMethods();
   return (
     <SignInForm
-      social={await socialSignIn()}
+      social={methods.social}
+      captchaSiteKey={methods.captchaSiteKey}
       returnedError={typeof error === 'string' ? error : null}
     />
   );
