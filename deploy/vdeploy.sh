@@ -4,6 +4,7 @@
 #   ./deploy/vdeploy.sh install --url https://vdeploy.example.com
 #   ./deploy/vdeploy.sh install --url … --no-build   # images already loaded here
 #   ./deploy/vdeploy.sh upgrade        # a dump first, then the new version
+#   ./deploy/vdeploy.sh upgrade --no-build   # the new images already loaded here
 #   ./deploy/vdeploy.sh backup         # a dump, checked, beside this file
 #   ./deploy/vdeploy.sh rollback       # the version and the data from before the last upgrade
 #
@@ -93,7 +94,15 @@ install() {
 
 upgrade() {
   pull=1
-  [ "${1:-}" = '--no-pull' ] && pull=0
+  build=--build
+  for option in "$@"; do
+    case "$option" in
+      --no-pull) pull=0 ;;
+      # The new images were built elsewhere and loaded here (docker load).
+      --no-build) build=--no-build ;;
+      *) fail "unknown option $option" ;;
+    esac
+  done
   need_docker
   [ -f "$here/.env" ] || fail 'nothing is installed here yet: run install first'
   if [ "$pull" = 1 ] && [ -d "$here/../.git" ]; then
@@ -106,7 +115,7 @@ upgrade() {
   [ -n "$running" ] && docker tag "$running" vdeploy/control-plane:previous
   running_web=$(compose images -q web 2>/dev/null | head -n 1)
   [ -n "$running_web" ] && docker tag "$running_web" vdeploy/web:previous
-  compose up -d --build
+  compose up -d "$build"
   if ! wait_ready; then
     say "The new version is not answering. Its data is saved in $backup;" >&2
     say './deploy/vdeploy.sh rollback puts the old version and that data back.' >&2
