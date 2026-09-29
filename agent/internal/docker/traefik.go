@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
@@ -53,9 +54,16 @@ type TraefikOptions struct {
 	ACMEServer string
 	// DNS adds the resolver that proves names through DNS; nil leaves it out.
 	DNS *DNSChallenge
+	// BehindProxy is the host address, "127.0.0.1:18080", the router answers
+	// plain HTTP on behind another web server; empty publishes 80 and 443.
+	BehindProxy string
+	// TrustedIPs may say who a visitor is (X-Forwarded-For): the address the
+	// server in front arrives from, and nothing else.
+	TrustedIPs []string
 }
 
 type portBinding struct {
+	HostIP   string `json:"HostIp,omitempty"`
 	HostPort string `json:"HostPort"`
 }
 
@@ -109,6 +117,15 @@ func traefikArgs(opts TraefikOptions) []string {
 	}
 	if opts.ACMEServer != "" {
 		args = append(args, "--certificatesresolvers.letsencrypt.acme.caserver="+opts.ACMEServer)
+	}
+	if opts.BehindProxy != "" {
+		// TLS and HTTP/3 are the server in front's; what it says a visitor's
+		// address is, is believed from it alone.
+		args = slices.DeleteFunc(args, func(a string) bool { return a == http3Arg })
+		if len(opts.TrustedIPs) > 0 {
+			args = append(args, "--entrypoints.web.forwardedheaders.trustedips="+strings.Join(opts.TrustedIPs, ","))
+		}
+		return args
 	}
 	if opts.DNS != nil {
 		resolver := "--certificatesresolvers." + router.DNSResolver + ".acme."
@@ -187,7 +204,7 @@ func traefikRequest(opts TraefikOptions) traefikCreate {
 	if opts.DNS != nil {
 		env = opts.DNS.Env
 	}
-	return traefikCreate{
+	request := traefikCreate{
 		Image:  TraefikImage,
 		Cmd:    traefikArgs(opts),
 		Env:    env,
@@ -220,6 +237,13 @@ func traefikRequest(opts TraefikOptions) traefikCreate {
 			},
 		},
 	}
+	if opts.BehindProxy != "" {
+		// One port, on the address given: 80 and 443 stay the other server's.
+		host, port, _ := net.SplitHostPort(opts.BehindProxy)
+		request.ExposedPorts = map[string]struct{}{"80/tcp": {}}
+		request.HostConfig.PortBindings = map[string][]portBinding{"80/tcp": {{HostIP: host, HostPort: port}}}
+	}
+	return request
 }
 
 type inspected struct {
@@ -268,6 +292,13 @@ router is made of; certificates live in their own volume and are kept, and
 the pass that replaces it joins it to every app's network again.
 */
 func (c *Client) EnsureTraefik(ctx context.Context, opts TraefikOptions) error {
+	if opts.BehindProxy != "" && len(opts.TrustedIPs) == 0 {
+		// The server in front reaches a published port through Docker's own
+		// bridge, so its requests arrive from that bridge's gateway.
+		if gateway, err := c.NetworkGateway(ctx, "bridge"); err == nil {
+			opts.TrustedIPs = []string{gateway, "127.0.0.1"}
+		}
+	}
 	request := traefikRequest(opts)
 	want := traefikConfig(request)
 	request.Labels[configLabel] = want
@@ -290,7 +321,7 @@ func (c *Client) EnsureTraefik(ctx context.Context, opts TraefikOptions) error {
 	if err := c.EnsureImage(ctx, TraefikImage); err != nil {
 		return fmt.Errorf("traefik image: %w", err)
 	}
-	if !udpFree(443) {
+	if opts.BehindProxy == "" && !udpFree(443) {
 		request = withoutHTTP3(request)
 	}
 	var created struct {

@@ -150,7 +150,7 @@ func doctor(configPath string) error {
 	defer cancel()
 	host := preflight.LinuxHost{Docker: docker.New(cfg.DockerSocket)}
 	results := append(
-		preflight.Run(ctx, host, cfg.StateDir, cfg.Routing),
+		preflight.Run(ctx, host, cfg.StateDir, cfg.Routing, proxyPort(cfg)),
 		preflight.RunServer(ctx, host, preflight.Options{AllowUnsupportedOS: cfg.AllowUnsupportedOS})...,
 	)
 	marks := map[preflight.Status]string{preflight.Pass: "✓", preflight.Warn: "!", preflight.Fail: "✗"}
@@ -229,10 +229,14 @@ func serve(configPath string, log *slog.Logger) error {
 			return fmt.Errorf("routing dir: %w", err)
 		}
 		reconciler.Traffic = traffic
+		reconciler.BehindProxy = cfg.BehindProxy != ""
 		reconciler.Routing = reconcile.TraefikRouting{
-			Engine:  engine,
-			Options: docker.TraefikOptions{DynamicDir: cfg.RoutingDir, ACMEEmail: cfg.ACMEEmail, ACMEServer: cfg.ACMEServer},
-			Dir:     router.Dir(cfg.RoutingDir),
+			Engine: engine,
+			Options: docker.TraefikOptions{
+				DynamicDir: cfg.RoutingDir, ACMEEmail: cfg.ACMEEmail, ACMEServer: cfg.ACMEServer,
+				BehindProxy: cfg.BehindProxy,
+			},
+			Dir: router.Dir(cfg.RoutingDir),
 		}
 	}
 	// Local image IDs run only if this agent built them (ADR 0008).
@@ -398,4 +402,14 @@ func updater(controlPlane string) transport.Updater {
 		HTTP:         &http.Client{Timeout: 10 * time.Minute},
 		Exec:         syscall.Exec,
 	}
+}
+
+// proxyPort is the port the router answers on behind another web server;
+// zero when it holds 80 and 443 itself. The address was checked on load.
+func proxyPort(cfg config.Config) int {
+	if cfg.BehindProxy == "" {
+		return 0
+	}
+	port, _ := config.ProxyPort(cfg.BehindProxy)
+	return port
 }

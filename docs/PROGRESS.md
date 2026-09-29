@@ -359,6 +359,17 @@ each is one task, one commit.
   case — knows only the old key: the agent keeps it, tries it once when
   refused, and offers its current key again, so a restore never locks a
   server out
+- [x] **a server whose ports 80 and 443 already belong to a web server**
+  — found preparing the first live install: the agent's router always
+  took 80 and 443, and the preflight's only advice for a server running
+  nginx was to stop it. A real VPS often runs one, fronting apps VDeploy
+  must not touch. Now `--behind-proxy 127.0.0.1:18080` (agent setting
+  `behindProxy`) runs the router on that one local port: plain HTTP, every
+  name served as-is to the server in front, which holds the certificates,
+  no certificate asked for here, no HTTP/3, and a visitor's address
+  believed only from the bridge the front server arrives through. The
+  preflight checks that port instead of 80 and 443, and a server found
+  with nginx on 80 is told it can keep it
 - [x] **uploads no longer fill the database for ever**: every uploaded
   source and dump was kept in Postgres with no end — the "disk fills"
   outage §6 guards against, moved into the database. An hourly sweep now

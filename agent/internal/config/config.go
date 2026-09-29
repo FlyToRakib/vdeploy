@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -31,6 +32,11 @@ type Config struct {
 	Routing bool `json:"routing"`
 	// RoutingDir holds the routing files Traefik watches.
 	RoutingDir string `json:"routingDir"`
+	// BehindProxy runs the router behind a web server that already holds
+	// ports 80 and 443 — nginx, Caddy, a load balancer — as "127.0.0.1:18080":
+	// it answers plain HTTP there, and TLS is that server's. Empty takes 80
+	// and 443 itself.
+	BehindProxy string `json:"behindProxy"`
 	// ACMEEmail is optional; Let's Encrypt uses it for expiry notices.
 	ACMEEmail string `json:"acmeEmail"`
 	// ACMEServer overrides Let's Encrypt (staging, or a test CA).
@@ -86,7 +92,26 @@ func Load(path string) (Config, error) {
 	if cfg.ReconcileSeconds < 5 {
 		return cfg, fmt.Errorf("config %s: reconcileSeconds must be at least 5", path)
 	}
+	if cfg.BehindProxy != "" {
+		if _, err := ProxyPort(cfg.BehindProxy); err != nil {
+			return cfg, fmt.Errorf("config %s: behindProxy %w", path, err)
+		}
+	}
 	return cfg, nil
+}
+
+// ProxyPort checks a behindProxy address — an IP and a port above the
+// privileged ones, "127.0.0.1:18080" — and says which port it takes.
+func ProxyPort(address string) (int, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || net.ParseIP(host) == nil {
+		return 0, fmt.Errorf("must be an address and a port, like 127.0.0.1:18080")
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1024 || n > 65535 {
+		return 0, fmt.Errorf("needs a port from 1024 to 65535: 80 and 443 belong to the server in front")
+	}
+	return n, nil
 }
 
 // BuildCaps are the limits every build runs under, derived from this

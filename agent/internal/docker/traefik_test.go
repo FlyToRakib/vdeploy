@@ -140,3 +140,21 @@ func TestTheDNSProviderReachesTheRouterAsItsOwnResolver(t *testing.T) {
 		t.Fatal("the router would keep running without its DNS provider")
 	}
 }
+
+func TestBehindAnotherWebServerTheRouterTakesOnlyItsOwnLocalPort(t *testing.T) {
+	request := traefikRequest(TraefikOptions{
+		DynamicDir: "/d", BehindProxy: "127.0.0.1:18080", TrustedIPs: []string{"172.17.0.1", "127.0.0.1"},
+	})
+	body, _ := json.Marshal(request.HostConfig.PortBindings)
+	if string(body) != `{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":"18080"}]}` {
+		t.Fatalf("bindings = %s", body)
+	}
+	if _, udp := request.ExposedPorts["443/udp"]; udp || len(request.ExposedPorts) != 1 {
+		t.Fatalf("exposed = %v", request.ExposedPorts)
+	}
+	args := strings.Join(request.Cmd, " ")
+	if strings.Contains(args, "http3") ||
+		!strings.Contains(args, "--entrypoints.web.forwardedheaders.trustedips=172.17.0.1,127.0.0.1") {
+		t.Fatalf("args = %s", args)
+	}
+}

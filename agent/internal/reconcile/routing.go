@@ -149,6 +149,18 @@ func (p *pass) backends(project spec.DesiredProject, containers []compose.Contai
 // A certificate is requested only for hosts the control plane verified in
 // DNS (§13); until then a host is served on plain HTTP, so an early request
 // can never count toward Let's Encrypt's failed-validation lockout.
+// plainHTTP serves every name over HTTP to the server in front, which holds
+// the certificate: one asked for here could never be proved, since that
+// server, not this router, answers on port 80.
+func plainHTTP(hosts []spec.Domain) []spec.Domain {
+	out := make([]spec.Domain, len(hosts))
+	for i, d := range hosts {
+		d.TLS.Provider, d.TLS.Challenge, d.Wildcard = "none", "", ""
+		out[i] = d
+	}
+	return out
+}
+
 func routes(project spec.DesiredProject, dnsReady bool) ([]spec.Domain, []router.Redirect) {
 	verified := map[string]bool{}
 	for _, host := range project.Hosts.Verified {
@@ -210,7 +222,10 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 	if routing == nil {
 		return
 	}
-	dns := p.dnsChallenge(state)
+	var dns *docker.DNSChallenge
+	if !p.r.BehindProxy {
+		dns = p.dnsChallenge(state)
+	}
 	if err := routing.EnsureRouter(ctx, dns); err != nil {
 		p.event("failed", "", docker.TraefikName, err.Error())
 		return
@@ -228,6 +243,9 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 		key := compose.ProjectKey(project.ProjectID)
 		traffic := p.backends(project, containers)
 		hosts, redirects := routes(project, dns != nil)
+		if p.r.BehindProxy {
+			hosts = plainHTTP(hosts)
+		}
 		users, opened := p.basicAuthUsers(project)
 		if !opened {
 			// Its password could not be opened: no routing at all rather

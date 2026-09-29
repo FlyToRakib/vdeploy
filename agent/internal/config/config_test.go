@@ -56,3 +56,14 @@ func TestPolicyReservesMemory(t *testing.T) {
 		t.Fatalf("policy = %+v", policy)
 	}
 }
+
+func TestABehindProxyAddressIsALocalAddressAndAPortOfItsOwn(t *testing.T) {
+	for address, ok := range map[string]bool{
+		"127.0.0.1:18080": true, "[::1]:18080": true,
+		"127.0.0.1:80": false, "localhost:18080": false, "18080": false, "127.0.0.1:70000": false,
+	} {
+		if _, err := ProxyPort(address); (err == nil) != ok {
+			t.Errorf("%s: %v", address, err)
+		}
+	}
+}

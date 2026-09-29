@@ -50,7 +50,10 @@ const (
 // A build-only server is checked for everything except the web ports: it
 // serves nothing, so whether something else on the machine holds 80 and
 // 443 is none of VDeploy's business (§15).
-func Run(ctx context.Context, h Host, stateDir string, serving bool) []Result {
+//
+// Behind another web server (proxyPort above zero) the router takes that
+// one port instead, and 80 and 443 are the other server's to hold.
+func Run(ctx context.Context, h Host, stateDir string, serving bool, proxyPort int) []Result {
 	results := []Result{
 		checkOS(h),
 		checkArch(h),
@@ -59,7 +62,10 @@ func Run(ctx context.Context, h Host, stateDir string, serving bool) []Result {
 		checkMemory(h),
 		checkDisk(h, stateDir),
 	}
-	if serving {
+	switch {
+	case serving && proxyPort > 0:
+		results = append(results, checkProxyPort(h, proxyPort))
+	case serving:
 		results = append(results, checkPorts(h))
 	}
 	return append(results, checkClock(h), checkCgroup(h))
@@ -154,6 +160,15 @@ func checkDisk(h Host, path string) Result {
 	return pass("disk", fmt.Sprintf("%.0f GB of disk free", float64(free)/float64(gib)))
 }
 
+func checkProxyPort(h Host, port int) Result {
+	if h.PortInUse(port) {
+		return Result{ID: "ports", Status: Fail,
+			Message: fmt.Sprintf("Port %d, which the router was to answer on, is already used.", port),
+			Fix:     "Choose another port for --behind-proxy."}
+	}
+	return pass("ports", fmt.Sprintf("Port %d is free for the router, behind the web server in front", port))
+}
+
 func checkPorts(h Host) Result {
 	var busy []string
 	for _, port := range []int{80, 443} {
@@ -173,8 +188,9 @@ func checkPorts(h Host) Result {
 			}
 		}
 		fix := "VDeploy needs ports 80 and 443 to serve your sites. Use a clean server, or stop the other web server first."
-		if owner == "nginx" || owner == "apache2" || owner == "httpd" {
-			fix = "VDeploy needs ports 80 and 443. If " + owner + " serves nothing you need, stop and disable it: systemctl disable --now " + owner
+		if owner == "nginx" || owner == "apache2" || owner == "httpd" || owner == "caddy" {
+			fix = "Keep " + owner + " and run VDeploy behind it: install with --behind-proxy 127.0.0.1:18080 and point " +
+				owner + " at that address. Or, if " + owner + " serves nothing you need, stop and disable it: systemctl disable --now " + owner
 		}
 		return Result{ID: "ports", Status: Fail,
 			Message: "Port " + strings.Join(busy, " and ") + " is already used by " + owner + ".",

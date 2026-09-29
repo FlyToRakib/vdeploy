@@ -48,7 +48,7 @@ func result(results []Result, id string) Result {
 }
 
 func TestHealthyServerPasses(t *testing.T) {
-	results := Run(context.Background(), healthy(), "/var/lib/vdeploy", true)
+	results := Run(context.Background(), healthy(), "/var/lib/vdeploy", true, 0)
 	for _, r := range results {
 		if r.Status != Pass {
 			t.Errorf("%s: %s %s", r.ID, r.Status, r.Message)
@@ -83,7 +83,7 @@ func TestProblemsFailWithAFix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := healthy()
 			tc.spoil(h)
-			r := result(Run(context.Background(), h, "/", true), tc.id)
+			r := result(Run(context.Background(), h, "/", true, 0), tc.id)
 			if r.Status != tc.status {
 				t.Fatalf("%s = %s (%s)", tc.id, r.Status, r.Message)
 			}
@@ -211,12 +211,31 @@ func TestATestMachineCanAllowAnUnsupportedSystem(t *testing.T) {
 func TestBuilderIgnoresTheWebPorts(t *testing.T) {
 	h := healthy()
 	h.busy[80] = true
-	for _, r := range Run(context.Background(), h, "/", false) {
+	for _, r := range Run(context.Background(), h, "/", false, 0) {
 		if r.ID == "ports" {
 			t.Fatalf("a build-only server was checked for the web ports: %s", r.Message)
 		}
 	}
-	if result(Run(context.Background(), h, "/", true), "ports").Status != Fail {
+	if result(Run(context.Background(), h, "/", true, 0), "ports").Status != Fail {
 		t.Fatal("a serving server with a busy port 80 should be refused")
+	}
+}
+
+// Behind another web server the router takes one port of its own, and 80
+// and 443 are that server's: the check is for the port it will use.
+func TestBehindAnotherWebServerOnlyTheRoutersOwnPortMatters(t *testing.T) {
+	h := healthy()
+	h.busy[80], h.busy[443] = true, true
+	if r := result(Run(context.Background(), h, "/", true, 18080), "ports"); r.Status != Pass {
+		t.Fatalf("nginx on 80 and 443 refused a router behind it: %+v", r)
+	}
+	h.busy[18080] = true
+	if r := result(Run(context.Background(), h, "/", true, 18080), "ports"); r.Status != Fail {
+		t.Fatalf("a taken port was accepted: %+v", r)
+	}
+	// And a server that finds nginx on 80 is told it can keep it.
+	delete(h.busy, 18080)
+	if r := checkPorts(namingHost{h}); !strings.Contains(r.Fix, "--behind-proxy") {
+		t.Fatalf("%+v", r)
 	}
 }

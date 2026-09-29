@@ -78,6 +78,10 @@ export function installScript(publicUrl: string, sums: Record<AgentArch, string>
 #   --dry-run         check this server and stop; nothing is installed or changed
 #   --no-service      do not set up systemd (containers and test machines)
 #   --builder         this machine only compiles: no Traefik, ports 80/443 left alone
+#   --behind-proxy ADDR
+#                     a web server here already holds 80/443 (nginx, Caddy):
+#                     the router answers plain HTTP on ADDR, like 127.0.0.1:18080,
+#                     and that server sends your sites' visitors there
 #   --uninstall       remove the agent; apps, their folders and backups are left alone
 # Running it again updates the agent; it never touches anything else.
 set -eu
@@ -91,6 +95,7 @@ TOKEN=''
 DRY_RUN=0
 SERVICE=1
 BUILDER=0
+BEHIND_PROXY=''
 UNINSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -98,6 +103,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --no-service) SERVICE=0; shift ;;
     --builder) BUILDER=1; shift ;;
+    --behind-proxy) BEHIND_PROXY="\${2:-}"; shift 2 ;;
     --uninstall) UNINSTALL=1; shift ;;
     *) echo "VDeploy: unknown option $1" >&2; exit 2 ;;
   esac
@@ -152,6 +158,15 @@ chmod 755 "$TMP/vd-agent"
 if [ "$BUILDER" = 1 ] && [ ! -f /etc/vdeploy/agent.json ]; then
   mkdir -p /etc/vdeploy
   printf '{\n  "routing": false\n}\n' > /etc/vdeploy/agent.json
+fi
+# Behind a web server that keeps 80 and 443: the router takes one local
+# port instead. The agent checks the address when it reads the file.
+if [ -n "$BEHIND_PROXY" ] && [ ! -f /etc/vdeploy/agent.json ]; then
+  case "$BEHIND_PROXY" in
+    *[!]0-9A-Fa-f.:[]*) fail "--behind-proxy takes an address and a port, like 127.0.0.1:18080." ;;
+  esac
+  mkdir -p /etc/vdeploy
+  printf '{\n  "behindProxy": "%s"\n}\n' "$BEHIND_PROXY" > /etc/vdeploy/agent.json
 fi
 
 if [ -f "$STATE_DIR/identity.json" ]; then

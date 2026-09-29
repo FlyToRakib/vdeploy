@@ -122,3 +122,22 @@ func eventMessages(report Report) []string {
 	}
 	return out
 }
+
+func TestBehindAnotherWebServerEveryNameIsPlainHTTPAndNoCertificateIsAsked(t *testing.T) {
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	r := newReconciler(newFake())
+	r.Routing, r.Secrets, r.BehindProxy = routing, &fakeSecrets{}, true
+	state := desired(1, dnsProject())
+	state.AcmeDNS = cloudflare("sealed:cf-token")
+
+	reconcile(t, r, state)
+	file := routing.files[compose.ProjectKey("prj_"+idA)]
+	if strings.Contains(file, "certResolver") || strings.Contains(file, "websecure") ||
+		!strings.Contains(file, "Host(`blog.example.com`)") {
+		t.Fatalf("routing:\n%s", file)
+	}
+	// Nor is the DNS provider handed to a router that proves nothing.
+	if routing.dns != nil {
+		t.Fatalf("dns = %+v", routing.dns)
+	}
+}

@@ -68,6 +68,22 @@ describe('the one-command installer', () => {
     expect(check.status).toBe(0);
   });
 
+  it('takes an address for a router behind another web server, and nothing else', () => {
+    const shell = spawnSync('sh', ['-c', 'true']);
+    if (shell.status !== 0) return; // no sh on this machine; CI has one
+    const script = installScript('https://cp.example.com', { amd64: 'a', arm64: 'b' });
+    expect(script).toContain('--behind-proxy) BEHIND_PROXY=');
+    // The script's own check, run on its own.
+    const check = /case "\$BEHIND_PROXY" in[\s\S]*?esac/.exec(script)?.[0] ?? '';
+    const accepts = (address: string) =>
+      spawnSync('sh', ['-c', `fail() { exit 1; }; BEHIND_PROXY='${address}'; ${check}`]).status ===
+      0;
+    expect(accepts('127.0.0.1:18080')).toBe(true);
+    expect(accepts('[::1]:18080')).toBe(true);
+    expect(accepts('127.0.0.1:18080"; rm -rf /')).toBe(false);
+    expect(accepts('localhost:18080')).toBe(false);
+  });
+
   it('quotes the address so it can never break out of the script', () => {
     const script = installScript("https://cp.example.com/'; rm -rf /; '", {
       amd64: 'a',

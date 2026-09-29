@@ -97,6 +97,10 @@ type Reconciler struct {
 	Policy  guard.Policy
 	Log     *slog.Logger
 	Routing Routing
+	// BehindProxy says the router sits behind a web server that ends TLS
+	// for it: every name is served as plain HTTP to that server, and no
+	// certificate is ever asked for here.
+	BehindProxy bool
 	// Prober checks new replicas before they take traffic; nil trusts "running".
 	Prober Prober
 	// Secrets opens sealed secret values; nil (not enrolled) cannot start projects using them.
