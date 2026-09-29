@@ -8,6 +8,7 @@ import { hashOf } from '@vdeploy/core';
 import {
   auditLog,
   backups,
+  bumpDesiredGeneration,
   createDatabase,
   notifyDesiredState,
   observedState,
@@ -784,6 +785,56 @@ describe('agent channel', () => {
     again.close();
     newBox.close();
   });
+
+  it('hands an agent the sign-in for a private image, sealed, and nothing in the clear', async () => {
+    // A server of its own: nothing else on it that a push would have to carry.
+    const agent = await enroll('private-images');
+    const fake = new FakeAgent(agent);
+    await fake.connect();
+    await fake.next(); // the first desired state
+    const [row] = await t.database.db.select().from(servers).where(eq(servers.id, agent.serverId));
+    const orgId = row!.orgId;
+    await owner.request('POST', '/api/v1/auth/step-up', { password: PASSWORD });
+    const added = await owner.request('POST', '/api/v1/operations/registry.add', {
+      input: { host: 'ghcr.io', username: 'acme-bot', password: 'ghp_never_in_a_frame' },
+    });
+    expect(added.statusCode).toBe(200);
+    const listed = await owner.request('POST', '/api/v1/operations/registry.list', { input: {} });
+    expect(JSON.stringify(listed.json())).not.toContain('ghp_never_in_a_frame');
+
+    const projectId = await seedProjectWithFolder(orgId, agent.serverId);
+    const [project] = await t.database.db.select().from(projects).where(eq(projects.id, projectId));
+    const releaseId = newId('release');
+    await t.database.db.insert(releases).values({
+      id: releaseId,
+      projectId,
+      version: 1,
+      spec: project!.spec,
+      specHash: project!.specHash,
+      image: `ghcr.io/acme/private@sha256:${'d'.repeat(64)}`,
+      secretVersions: {},
+    });
+    await t.database.db
+      .update(projects)
+      .set({ currentReleaseId: releaseId })
+      .where(eq(projects.id, projectId));
+    fake.inbox.length = 0;
+    await t.database.db.transaction((tx) => bumpDesiredGeneration(tx, agent.serverId));
+
+    let state: Record<string, unknown> | undefined;
+    for (let i = 0; i < 5 && !state; i++) {
+      const frame = await fake.next();
+      if (frame.type === 'desired_state') state = frame;
+    }
+    const raw = JSON.stringify(state);
+    expect(raw).not.toContain('ghp_never_in_a_frame');
+    const desired = (state!.state as { projects: { projectId: string; pullAuth?: unknown }[] })
+      .projects;
+    const pull = desired.find((p) => p.projectId === projectId)?.pullAuth as
+      { username: string; sealed: string } | undefined;
+    expect(pull?.username).toBe('acme-bot');
+    expect(pull?.sealed.length).toBeGreaterThan(20);
+  }, 20_000);
 
   it('refuses a folder this app does not have, without asking the server', async () => {
     const { agent, fake, orgId } = await downloadServer();

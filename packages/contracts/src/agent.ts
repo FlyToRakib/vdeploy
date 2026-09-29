@@ -56,6 +56,13 @@ export const DesiredProject = z.strictObject({
    * says (§7): promoted early by a person, or a release gone back to.
    */
   promoted: z.boolean().optional(),
+  /**
+   * The sign-in to pull a private image with (§15): the password sealed to
+   * this agent like a secret, for this project's image and nothing else.
+   */
+  pullAuth: z
+    .strictObject({ username: z.string().max(256), sealed: z.string().max(10_000) })
+    .optional(),
   /** False keeps the project defined but stopped (`project.stop`). */
   running: z.boolean(),
   /**

@@ -58,6 +58,11 @@ type APIError struct {
 func (e *APIError) Error() string { return fmt.Sprintf("docker: %d %s", e.Status, e.Message) }
 
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
+	return c.doWith(ctx, method, path, query, body, out, nil)
+}
+
+// doWith is do with extra request headers.
+func (c *Client) doWith(ctx context.Context, method, path string, query url.Values, body, out any, header http.Header) error {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -76,6 +81,11 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for name, values := range header {
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
 	}
 	res, err := c.http.Do(req)
 	if err != nil {

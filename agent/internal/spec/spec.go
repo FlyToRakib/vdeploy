@@ -155,13 +155,22 @@ type DesiredProject struct {
 	// Promoted takes every request at once, whatever the canary says: a
 	// person ended it early, or this is a release gone back to (§7).
 	Promoted bool `json:"promoted,omitempty"`
-	Running  bool `json:"running"`
+	// PullAuth signs in to a private registry for this project's image (§15),
+	// its password sealed to this agent under the project.
+	PullAuth *PullAuth `json:"pullAuth,omitempty"`
+	Running  bool      `json:"running"`
 	// Revision is bumped to replace every container without a new release.
 	Revision int `json:"revision"`
 	// Hosts the control plane assigned beyond the spec's own domains.
 	Hosts Hosts `json:"hosts"`
 	// Secrets are the values this release uses, each sealed to this agent's key.
 	Secrets []Secret `json:"secrets"`
+}
+
+// PullAuth is a registry sign-in for one project's image.
+type PullAuth struct {
+	Username string `json:"username"`
+	Sealed   string `json:"sealed"`
 }
 
 // Secret is one secret value sealed to this agent (package sealed opens it).

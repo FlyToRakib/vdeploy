@@ -1,6 +1,6 @@
 import { AGENT_PROTOCOL, DesiredState, readSpec } from '@vdeploy/contracts';
 import { memoryBytes } from '@vdeploy/contracts';
-import { deliveryContext, engineProfile, sealTo } from '@vdeploy/core';
+import { deliveryContext, engineProfile, registryOf, sealTo } from '@vdeploy/core';
 import { databasePassword, databasesOn, linksOf } from './databases.js';
 import type { Database } from './client.js';
 import type { Executor } from './audit.js';
@@ -9,6 +9,7 @@ import { meshFor } from './mesh.js';
 import { notifyDesiredState } from './notify.js';
 import { secretsOwner } from './previews.js';
 import { readSecret } from './secrets.js';
+import { registryCredential } from './registries.js';
 import { builds, projects, releases, servers } from './schema/index.js';
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
@@ -68,6 +69,34 @@ export async function desiredStateFor(
   const secrets = new Map<string, Awaited<ReturnType<typeof sealed>>>();
   for (const { project, release } of rows) {
     secrets.set(project.id, await sealed(project, release.secretVersions));
+  }
+
+  /**
+   * The sign-in to pull each project's image with, when its registry is
+   * one the organization signed in to (§15). Sealed to this agent under
+   * the project, like a secret: it opens only for that project's pull.
+   */
+  const pulls = new Map<string, { username: string; sealed: string }>();
+  const boxKey = server?.agentBoxKey;
+  if (boxKey && options.secretsKey) {
+    for (const { project, release } of rows) {
+      if (release.image.startsWith('sha256:')) continue; // built here: nothing to pull
+      const login = await registryCredential(
+        db,
+        options.secretsKey,
+        project.orgId,
+        registryOf(release.image),
+      );
+      if (!login) continue;
+      pulls.set(project.id, {
+        username: login.username,
+        sealed: sealTo(
+          boxKey,
+          login.password,
+          deliveryContext(serverId, project.id, 'registry', 1),
+        ),
+      });
+    }
   }
 
   /**
@@ -160,6 +189,7 @@ export async function desiredStateFor(
             .map((t) => ({ from: t.from, to: t.to })),
         },
         secrets: secrets.get(project.id) ?? [],
+        ...(pulls.has(project.id) ? { pullAuth: pulls.get(project.id) } : {}),
       };
     }),
     databases,

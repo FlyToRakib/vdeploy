@@ -256,6 +256,22 @@ export const plans = pgTable(
   ],
 );
 
+/** Sign-ins for private image registries (§15), the password sealed. */
+export const registryCredentials = pgTable(
+  'registry_credentials',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    host: text('host').notNull(),
+    username: text('username').notNull(),
+    passwordSealed: text('password_sealed').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('registry_credentials_org_host').on(t.orgId, t.host)],
+);
+
 /**
  * Times an organization's deploys are held (§20): either once, between two
  * moments, or every week in a window.

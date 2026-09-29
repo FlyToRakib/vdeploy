@@ -23,6 +23,7 @@ import {
   headUrl,
   installationToken,
   readHead,
+  registryOf,
   sameBuild,
   SECTION_EDITS,
   specAfter,
@@ -46,6 +47,7 @@ import {
   queueBuild,
   readSecret,
   refreshInstantHosts,
+  registryCredential,
   releases,
   rotateSecret,
   secrets,
@@ -721,7 +723,13 @@ async function newRelease(deps: StepDeps, state: ApplyState, rebuild: boolean) {
     buildId = current.buildId;
     state.notes.push('Nothing about how it is built changed, so it runs the image it already had.');
   } else if (source.type === 'image') {
-    image = await pinImage(source.image, deps.registry);
+    const login = await registryCredential(
+      deps.db,
+      deps.secretsKey,
+      state.orgId,
+      registryOf(source.image),
+    );
+    image = await pinImage(source.image, deps.registry, login);
   } else if (source.type === 'archive') {
     ({ image, buildId } = await buildImage(deps, state, row, source.uploadId));
   } else if (source.type === 'git') {

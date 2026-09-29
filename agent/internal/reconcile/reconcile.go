@@ -340,6 +340,25 @@ func (p *pass) old(projectID string) []docker.Container {
 	return out
 }
 
+// pull brings a project's image here, signed in to its registry when the
+// control plane sent a sign-in for it (§15).
+func (p *pass) pull(ctx context.Context, engine Engine, project spec.DesiredProject, image string) error {
+	puller, ok := engine.(interface {
+		EnsureImageAuth(ctx context.Context, ref, server, username, password string) error
+	})
+	if project.PullAuth == nil || !ok {
+		return engine.EnsureImage(ctx, image) //nolint:wrapcheck // wrapped by the caller
+	}
+	if p.r.Secrets == nil {
+		return errors.New("this agent is not enrolled")
+	}
+	password, err := p.r.Secrets.Open(project.ProjectID, "registry", 1, project.PullAuth.Sealed)
+	if err != nil {
+		return fmt.Errorf("the registry sign-in could not be opened: %w", err)
+	}
+	return puller.EnsureImageAuth(ctx, image, guard.Registry(image), project.PullAuth.Username, password) //nolint:wrapcheck // wrapped by the caller
+}
+
 func (p *pass) converge(ctx context.Context, project spec.DesiredProject, containers []compose.Container) error {
 	for _, c := range containers {
 		p.wanted[c.Name] = true
@@ -417,7 +436,7 @@ func (p *pass) ensureRunning(ctx context.Context, project spec.DesiredProject, c
 		if !built {
 			return fmt.Errorf("image %s was not built by this agent for this project", c.Image)
 		}
-	} else if err := engine.EnsureImage(ctx, c.Image); err != nil {
+	} else if err := p.pull(ctx, engine, project, c.Image); err != nil {
 		return fmt.Errorf("image: %w", err)
 	}
 	secretEnv, err := compose.SecretEnv(project, func(id string, version int, sealed string) (string, error) {

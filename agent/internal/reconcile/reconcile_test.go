@@ -86,6 +86,14 @@ func (f *fakeEngine) CopyPath(_ context.Context, fromID, folder, toID string) (i
 	return 4096, nil
 }
 
+func (f *fakeEngine) EnsureImageAuth(_ context.Context, ref, server, username, password string) error {
+	if !f.images[ref] {
+		f.calls = append(f.calls, "pull from "+server+" as "+username+" with "+password)
+	}
+	f.images[ref] = true
+	return nil
+}
+
 func (f *fakeEngine) EnsureImage(_ context.Context, ref string) error {
 	if !f.images[ref] {
 		f.calls = append(f.calls, "pull")
@@ -1003,5 +1011,26 @@ func TestBasicAuthIsOpenedForTheRouterAndItsAbsenceWithholdsRouting(t *testing.T
 	}
 	if !slices.ContainsFunc(report.Events, func(e Event) bool { return strings.Contains(e.Message, "not routed: its password") }) {
 		t.Fatalf("no event says why: %v", report.Events)
+	}
+}
+
+func TestAPrivateImageIsPulledWithTheSignInSentForIt(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	// This server's own settings allow the registry: the control plane cannot.
+	r.Policy.AllowedRegistries = []string{"docker.io", "ghcr.io"}
+	secrets := &fakeSecrets{}
+	r.Secrets = secrets
+	project := testProject("pvt1", 1, 1)
+	project.Image = "ghcr.io/acme/shop@sha256:" + strings.Repeat("b", 64)
+	project.PullAuth = &spec.PullAuth{Username: "acme-bot", Sealed: "sealed:ghp_token"}
+	reconcile(t, r, &spec.DesiredState{Protocol: spec.Protocol, Generation: 1, Projects: []spec.DesiredProject{project}})
+
+	if !slices.Contains(engine.calls, "pull from ghcr.io as acme-bot with ghp_token") {
+		t.Fatalf("calls = %v", engine.calls)
+	}
+	// Opened as the project's own, so it cannot be opened for another.
+	if !slices.Contains(secrets.opened, project.ProjectID+"/registry/1") {
+		t.Fatalf("opened = %v", secrets.opened)
 	}
 }

@@ -3,9 +3,12 @@ import {
   addFreeze,
   bumpDesiredGeneration,
   listFreezes,
+  listRegistries,
   plans,
   projects,
+  putRegistry,
   removeFreeze,
+  removeRegistry,
   user,
 } from '@vdeploy/db';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -98,6 +101,23 @@ export const FREEZE_ADMIN: Partial<Record<OperationName, Handler>> = {
     });
     return { promoted: row.currentReleaseId };
   },
+  /** A private registry's sign-in (§15), sealed on the way in and never shown again. */
+  'registry.add': async ({ deps, actor, args }) =>
+    putRegistry(
+      deps.db,
+      deps.secretsKey,
+      {
+        orgId: actor.orgId,
+        host: String(args.host),
+        username: String(args.username),
+        password: String(args.password),
+      },
+      deps.now(),
+    ),
+  'registry.remove': async ({ deps, actor, args }) => {
+    await removeRegistry(deps.db, actor.orgId, String(args.registryId));
+    return { removed: true };
+  },
   'freeze.add': async ({ deps, actor, args }) =>
     addFreeze(deps.db, actor.orgId, NewDeployFreeze.parse(args), deps.now()),
   'freeze.remove': async ({ deps, actor, args }) => {
@@ -108,4 +128,5 @@ export const FREEZE_ADMIN: Partial<Record<OperationName, Handler>> = {
 
 export const FREEZE_QUERIES: Partial<Record<OperationName, Handler>> = {
   'freeze.list': async ({ deps, actor }) => listFreezes(deps.db, actor.orgId, deps.now()),
+  'registry.list': async ({ deps, actor }) => listRegistries(deps.db, actor.orgId),
 };

@@ -10,6 +10,7 @@ import {
   GitBranch,
   HardDriveDownload,
   LayoutDashboard,
+  Package,
   Server,
   ShieldCheck,
   Snowflake,
@@ -76,6 +77,12 @@ export const NAV: readonly NavItem[] = [
     label: 'Git',
     icon: GitBranch,
     keywords: ['github', 'gitlab', 'bitbucket', 'repository', 'connect', 'push'],
+  },
+  {
+    href: '/settings/registries',
+    label: 'Registries',
+    icon: Package,
+    keywords: ['docker', 'private image', 'ghcr', 'gitlab', 'container registry', 'pull'],
   },
   {
     href: '/settings/clouds',

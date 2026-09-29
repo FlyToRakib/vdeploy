@@ -2,6 +2,8 @@ package docker
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -135,6 +137,27 @@ func (c *Client) EnsureImage(ctx context.Context, ref string) error {
 		return err
 	}
 	return c.do(ctx, http.MethodPost, "/images/create", url.Values{"fromImage": {ref}}, nil, nil)
+}
+
+// EnsureImageAuth pulls a digest-pinned image with a registry sign-in
+// (§15), unless it is already present. The sign-in goes to the Engine in
+// the header it reads it from, and nowhere else: not a file, not a log.
+func (c *Client) EnsureImageAuth(ctx context.Context, ref, server, username, password string) error {
+	err := c.do(ctx, http.MethodGet, "/images/"+ref+"/json", nil, nil, &struct{}{})
+	if !IsNotFound(err) {
+		return err
+	}
+	if server == "docker.io" {
+		server = "https://index.docker.io/v1/"
+	}
+	auth, err := json.Marshal(map[string]string{
+		"username": username, "password": password, "serveraddress": server,
+	})
+	if err != nil {
+		return fmt.Errorf("encode registry sign-in: %w", err)
+	}
+	header := http.Header{"X-Registry-Auth": {base64.URLEncoding.EncodeToString(auth)}}
+	return c.doWith(ctx, http.MethodPost, "/images/create", url.Values{"fromImage": {ref}}, nil, nil, header)
 }
 
 type logConfig struct {

@@ -21,6 +21,7 @@ import { FolderPath } from '../files.js';
 import { NewChannelConfig, NotificationTrigger } from '../notifications.js';
 import { ENV_KEY } from '../dotenv.js';
 import { NewDeployFreeze } from '../freezes.js';
+import { RegistryHost } from '../builds.js';
 import { PluginManifest } from '../plugins.js';
 import { PreviewRef } from '../previews.js';
 import { EmailDomain, SsoSettings } from '../sso.js';
@@ -788,6 +789,35 @@ export const OPERATIONS = [
     'project',
     'Unlock this app so new versions can go live again',
     obj(P),
+  ),
+  query(
+    'registry.list',
+    'org',
+    'config',
+    'List the private image registries this organization signs in to (never their passwords)',
+    obj({}),
+  ),
+  // Tier 4 for the same reason 'secret.set' is: it takes a password a
+  // person pasted. The AI may deploy images from a registry once added.
+  operation(
+    'registry.add',
+    'human_only',
+    'org',
+    'Sign in to a private image registry, so images from it can be deployed; replaces the sign-in kept for that host',
+    obj({
+      host: RegistryHost,
+      username: z.string().min(1).max(256),
+      password: z.string().min(1).max(4096),
+    }),
+    { minRole: 'admin', stepUp: true },
+  ),
+  operation(
+    'registry.remove',
+    'human_only',
+    'org',
+    'Forget the sign-in for a private image registry',
+    obj({ registryId: idSchema('registry') }),
+    { minRole: 'admin' },
   ),
   query(
     'freeze.list',

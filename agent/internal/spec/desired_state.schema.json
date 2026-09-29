@@ -1614,6 +1614,24 @@
           "promoted": {
             "type": "boolean"
           },
+          "pullAuth": {
+            "type": "object",
+            "properties": {
+              "username": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "sealed": {
+                "type": "string",
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "username",
+              "sealed"
+            ],
+            "additionalProperties": false
+          },
           "running": {
             "type": "boolean"
           },

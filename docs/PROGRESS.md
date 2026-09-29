@@ -360,7 +360,19 @@ each is one task, one commit.
   its going offline or unreachable tells nobody. The apps already there
   keep running and can still be deployed. It is a person's switch, never
   an assistant's, because it holds the alarm that would otherwise sound
-- [ ] `registry.add`: pulling from a private registry (§15, §24)
+- [x] **`registry.add`: pulling from a private registry (§15, §24)**: an
+  organization signs in to a registry once (a person's act, stepped up,
+  like `secret.set`: it takes a password somebody pasted), and private
+  images from it deploy like public ones. The password is sealed on the
+  way in and never shown again. The worker uses it to pin the tag to a
+  digest — as Basic to the registry's token service, or to the registry
+  itself when that is all it asks for — and each agent gets it sealed to
+  its own key under the one project whose image it pulls, sent to Docker
+  in the header Docker reads it from and nowhere else; checked end to end
+  that no desired-state frame carries it in the clear. What a server runs
+  still needs the registry in that server's own `allowedRegistries`
+  (L6): the control plane cannot widen it, and the page says where to add
+  a host that is not allowed by default
 - [ ] teams and custom roles (§20, M1)
 - [x] **a server's SSH keys, read like its firewall is (§20, ADR 0016)**:
   the agent reads sshd's configuration as sshd does (Includes where they

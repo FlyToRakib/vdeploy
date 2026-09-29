@@ -83,3 +83,61 @@ describe('pinImage', () => {
     );
   });
 });
+
+describe('a private registry', () => {
+  const login = { username: 'acme-bot', password: 'ghp_token' };
+  const basic = `Basic ${Buffer.from('acme-bot:ghp_token').toString('base64')}`;
+
+  it('asks the token service as the organization, not anonymously', async () => {
+    const tokenAuth: (string | undefined)[] = [];
+    const access: RegistryAccess = {
+      baseUrl: (registry) => `https://${registry}`,
+      fetch: (url, init) => {
+        const auth = (init?.headers as Record<string, string> | undefined)?.authorization;
+        if (url.startsWith('https://auth.example/token')) {
+          tokenAuth.push(auth);
+          return Promise.resolve(Response.json(auth === basic ? { token: 'mine' } : {}));
+        }
+        if (auth !== 'Bearer mine') {
+          return Promise.resolve(
+            new Response(null, {
+              status: 401,
+              headers: { 'www-authenticate': 'Bearer realm="https://auth.example/token"' },
+            }),
+          );
+        }
+        return Promise.resolve(
+          new Response(null, { status: 200, headers: { 'docker-content-digest': DIGEST } }),
+        );
+      },
+    };
+    expect(await pinImage('ghcr.io/acme/private:v1', access, login)).toBe(
+      `ghcr.io/acme/private@${DIGEST}`,
+    );
+    expect(tokenAuth).toEqual([basic]);
+    // Without the sign-in it says where to add one, not just "no access".
+    await expect(pinImage('ghcr.io/acme/private:v1', access)).rejects.toThrow(
+      /sign in to ghcr.io under Registries/,
+    );
+  });
+
+  it('signs in to a registry that only asks for a password', async () => {
+    const access: RegistryAccess = {
+      baseUrl: (registry) => `https://${registry}`,
+      fetch: (_url, init) => {
+        const auth = (init?.headers as Record<string, string> | undefined)?.authorization;
+        return Promise.resolve(
+          auth === basic
+            ? new Response(null, { status: 200, headers: { 'docker-content-digest': DIGEST } })
+            : new Response(null, {
+                status: 401,
+                headers: { 'www-authenticate': 'Basic realm="registry"' },
+              }),
+        );
+      },
+    };
+    expect(await pinImage('registry.acme.dev/shop:v2', access, login)).toBe(
+      `registry.acme.dev/shop@${DIGEST}`,
+    );
+  });
+});

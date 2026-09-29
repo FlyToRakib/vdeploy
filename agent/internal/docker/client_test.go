@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -119,5 +120,32 @@ func TestOnlyAnOpenedDatabaseIsPublishedOnTheServer(t *testing.T) {
 	db, _ := json.Marshal(CreateRequest(compose.Container{Name: "vd-db-x", Image: "postgres", Port: 5432, HostPort: 15432}))
 	if !strings.Contains(string(db), `"PortBindings":{"5432/tcp":[{"HostPort":"15432"}]}`) {
 		t.Fatalf("an opened database is not published as asked: %s", db)
+	}
+}
+
+func TestAPrivatePullCarriesItsSignInToTheEngineOnly(t *testing.T) {
+	var auth string
+	client := fakeDocker(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasSuffix(r.URL.Path, "/images/create"):
+			auth = r.Header.Get("X-Registry-Auth")
+			_, _ = w.Write([]byte(`{}`))
+		}
+	})
+	if err := client.EnsureImageAuth(context.Background(), "ghcr.io/acme/shop@sha256:abc", "ghcr.io", "acme-bot", "ghp_token"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := base64.URLEncoding.DecodeString(auth)
+	if err != nil {
+		t.Fatalf("header = %q: %v", auth, err)
+	}
+	var sent map[string]string
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent["username"] != "acme-bot" || sent["password"] != "ghp_token" || sent["serveraddress"] != "ghcr.io" {
+		t.Fatalf("sign-in = %v", sent)
 	}
 }

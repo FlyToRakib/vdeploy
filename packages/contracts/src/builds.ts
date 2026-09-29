@@ -81,6 +81,21 @@ export const BuildResult = z.strictObject({
 });
 export type BuildResult = z.infer<typeof BuildResult>;
 
+/** A private registry's sign-in as people see it: never the password (§15). */
+export const RegistryView = z.object({
+  id: z.string(),
+  host: z.string(),
+  username: z.string(),
+  createdAt: z.string(),
+});
+export type RegistryView = z.infer<typeof RegistryView>;
+
+/** A registry host as images name it: registry.example.com, or with a port. */
+export const RegistryHost = z
+  .string()
+  .max(253)
+  .regex(/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/, 'must be a host like ghcr.io');
+
 /** An image this size is worth a word before it fills a small server (§30 ④). */
 export const LARGE_IMAGE_BYTES = 2 * 1024 ** 3;
 
