@@ -1227,6 +1227,9 @@ GitHub.
 
 ## Decisions made
 
+- 2026-09-29 Static sites are built by a Dockerfile the agent writes — docs/adr/0027-static-sites-are-built-by-a-dockerfile-the-agent-writes.md
+- 2026-09-29 Object storage is a managed engine, served by RustFS — docs/adr/0026-object-storage-is-a-managed-engine.md
+- 2026-09-29 The Traefik escape hatch is typed — docs/adr/0025-the-traefik-escape-hatch-is-typed.md
 - 2026-09-30 Provisioning reaches the first step, it is not a second one — docs/adr/0024-provisioning-reaches-the-first-step.md
 - 2026-09-30 A plugin is a capability, not code — docs/adr/0023-a-plugin-is-a-capability.md
 - 2026-09-30 SSO: the protocol is borrowed, the authorization is ours — docs/adr/0022-sso-protocol-borrowed-authorization-owned.md
