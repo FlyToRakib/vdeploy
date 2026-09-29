@@ -208,6 +208,9 @@ func (r *Runner) Take(ctx context.Context, req Request) Result {
 	if !safeName.MatchString(req.FileName) {
 		return fail("the backup file name is not allowed", "")
 	}
+	if req.Engine == "s3" {
+		return r.takeObjects(ctx, req)
+	}
 	steps, err := planFor(req)
 	if err != nil {
 		return fail(err.Error(), "")
@@ -452,6 +455,9 @@ func (r *Runner) Restore(ctx context.Context, req RestoreRequest) RestoreResult 
 	}
 	if !safeName.MatchString(req.FileName) {
 		return fail("the backup file name is not allowed", "")
+	}
+	if req.Engine == "s3" {
+		return r.restoreObjects(ctx, req)
 	}
 	steps, err := restorePlan(req)
 	if err != nil {

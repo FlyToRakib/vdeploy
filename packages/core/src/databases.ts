@@ -1,4 +1,4 @@
-import { VDeployError, type DatabaseEngine } from '@vdeploy/contracts';
+import { OBJECT_STORAGE_ENV, VDeployError, type DatabaseEngine } from '@vdeploy/contracts';
 
 /**
  * What each engine needs to run and to be reached (§17.3). Everything here
@@ -9,6 +9,8 @@ import { VDeployError, type DatabaseEngine } from '@vdeploy/contracts';
 export interface EngineProfile {
   /** The image repository; the version is the tag. */
   repository: string;
+  /** Other images a compose file may name for the same thing. */
+  alsoFrom?: readonly string[];
   /** Versions offered in the dashboard, newest first. The first is the default. */
   versions: readonly string[];
   port: number;
@@ -99,6 +101,29 @@ export const ENGINES: Readonly<Record<DatabaseEngine, EngineProfile>> = {
     env: ({ user }) => [{ key: 'MONGO_INITDB_ROOT_USERNAME', value: user }],
     passwordKey: 'MONGO_INITDB_ROOT_PASSWORD',
   },
+  /*
+   * Object storage (§17.1, ADR 0026). MinIO's own images are no longer
+   * published; RustFS is an S3 server of the same shape, Apache-2.0,
+   * running as its own user. The bucket is the "database": the agent makes
+   * it before the server starts, and the web console stays off.
+   */
+  s3: {
+    repository: 'rustfs/rustfs',
+    alsoFrom: ['minio/minio', 'quay.io/minio/minio', 'bitnami/minio'],
+    versions: ['1.0.0'],
+    port: 9000,
+    dataPath: '/data',
+    user: 'vdeploy',
+    scheme: 'http',
+    hasDbName: true,
+    memoryLimit: '512Mi',
+    env: ({ dbName, user }) => [
+      { key: 'RUSTFS_ACCESS_KEY', value: user },
+      { key: 'RUSTFS_CONSOLE_ENABLE', value: 'false' },
+      { key: 'VDEPLOY_BUCKET', value: dbName ?? user },
+    ],
+    passwordKey: 'RUSTFS_SECRET_KEY',
+  },
 };
 
 export function engineProfile(engine: DatabaseEngine): EngineProfile {
@@ -136,8 +161,20 @@ export function databaseNames(
   name: string,
 ): { user: string; dbName: string | null } {
   const profile = ENGINES[engine];
+  if (engine === 's3') return { user: profile.user, dbName: bucketName(name) };
   const safe = name.replace(/[^a-z0-9_]/gi, '_').toLowerCase();
   return { user: profile.user, dbName: profile.hasDbName ? safe : null };
+}
+
+/** A bucket name S3 accepts: 3 to 63 lowercase letters, digits and hyphens. */
+function bucketName(name: string): string {
+  const safe = name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+    .replace(/-+$/, '');
+  return safe.length >= 3 ? safe : `${safe || 'files'}-bucket`;
 }
 
 export interface Connection {
@@ -156,6 +193,10 @@ export interface Connection {
  */
 export function connectionUrl(connection: Connection): string {
   const { scheme } = ENGINES[connection.engine];
+  // An S3 endpoint carries no credentials: SDKs read the keys on their own.
+  if (connection.engine === 's3') {
+    return `${scheme}://${connection.host}:${String(connection.port)}`;
+  }
   const credentials =
     connection.engine === 'redis'
       ? `:${encodeURIComponent(connection.password)}@`
@@ -169,7 +210,33 @@ export function connectionUrl(connection: Connection): string {
  * different name per engine, so the default follows the engine.
  */
 export function defaultEnvKey(engine: DatabaseEngine): string {
+  if (engine === 's3') return OBJECT_STORAGE_ENV.endpoint;
   return engine === 'redis' ? 'REDIS_URL' : 'DATABASE_URL';
+}
+
+export type LinkPart = 'host' | 'port' | 'user' | 'password' | 'name';
+
+/**
+ * The pieces a link hands an app unless it asks for others. Object storage
+ * is never one URL: SDKs read the keys, the bucket and the region as
+ * settings of their own.
+ */
+export function defaultLinkParts(engine: DatabaseEngine): Partial<Record<LinkPart, string>> {
+  return engine === 's3'
+    ? {
+        user: OBJECT_STORAGE_ENV.accessKeyId,
+        password: OBJECT_STORAGE_ENV.secretAccessKey,
+        name: OBJECT_STORAGE_ENV.bucket,
+      }
+    : {};
+}
+
+/**
+ * Fixed settings a link also hands over. A self-hosted S3 server has one
+ * region, and the SDKs refuse to start without being told one.
+ */
+export function linkSettings(engine: DatabaseEngine): { key: string; value: string }[] {
+  return engine === 's3' ? [{ key: OBJECT_STORAGE_ENV.region, value: 'us-east-1' }] : [];
 }
 
 /**
@@ -181,6 +248,8 @@ export function connectionWarning(input: {
   replicas: number;
   poolSize: number;
 }): string | null {
+  // Object storage has no connection pool to run out of.
+  if (input.engine === 's3') return null;
   const limit = input.engine === 'postgres' ? 100 : input.engine === 'redis' ? 10_000 : 151;
   const wanted = input.replicas * input.poolSize;
   if (wanted <= limit * 0.8) return null;

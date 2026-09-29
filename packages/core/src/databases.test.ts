@@ -7,9 +7,11 @@ import {
   databaseImage,
   databaseNames,
   defaultEnvKey,
+  defaultLinkParts,
   defaultVersion,
   ENGINES,
   isMajorUpgrade,
+  linkSettings,
 } from './databases.js';
 
 describe('managed databases', () => {
@@ -71,5 +73,35 @@ describe('managed databases', () => {
     expect(warning).toContain('160');
     expect(warning).toContain('about 100');
     expect(connectionWarning({ engine: 'redis', replicas: 8, poolSize: 20 })).toBeNull();
+  });
+
+  it('hands an app object storage the way the S3 SDKs read it', () => {
+    const endpoint = connectionUrl({
+      engine: 's3',
+      host: 'vd-db-abc',
+      port: 9000,
+      user: 'vdeploy',
+      password: 'never-in-the-url',
+      dbName: 'uploads',
+    });
+    expect(endpoint).toBe('http://vd-db-abc:9000');
+    expect(defaultEnvKey('s3')).toBe('AWS_ENDPOINT_URL');
+    expect(defaultLinkParts('s3')).toEqual({
+      user: 'AWS_ACCESS_KEY_ID',
+      password: 'AWS_SECRET_ACCESS_KEY',
+      name: 'S3_BUCKET',
+    });
+    expect(linkSettings('s3')).toEqual([{ key: 'AWS_REGION', value: 'us-east-1' }]);
+    expect(defaultLinkParts('postgres')).toEqual({});
+    expect(linkSettings('postgres')).toEqual([]);
+    expect(connectionWarning({ engine: 's3', replicas: 50, poolSize: 50 })).toBeNull();
+  });
+
+  it('names a bucket the way S3 allows', () => {
+    expect(databaseNames('s3', 'Shop_Uploads!').dbName).toBe('shop-uploads');
+    expect(databaseNames('s3', 'x').dbName).toBe('x-bucket');
+    expect(databaseNames('s3', '__').dbName).toBe('files-bucket');
+    const long = databaseNames('s3', 'a'.repeat(62) + '-b').dbName ?? '';
+    expect(long).toMatch(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/);
   });
 });

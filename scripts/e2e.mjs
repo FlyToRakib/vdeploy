@@ -615,6 +615,7 @@ async function run() {
   await explainsFailure(server.serverId);
   await logsAndHistory(hello.id);
   await managedDatabase(server.serverId, hello.id);
+  await objectStorage(server.serverId, hello.id);
   await filesAndFolders(uploadsProject);
   await healthAndReclaim(server.serverId);
   await fromTemplate(server.serverId);
@@ -1131,6 +1132,106 @@ async function managedDatabase(serverId, projectId) {
     throw new Error(`deleting data must wait for a person, got ${del.status}`);
   }
   pass('deleting a database waits for a person', del.plan.tier);
+}
+
+/**
+ * Object storage (§17.1, ADR 0026): the store runs with its bucket made and
+ * nothing answered without a key; a linked app gets the settings every S3
+ * SDK reads; a backup is its folder, and it goes back into a copy whole.
+ */
+async function objectStorage(serverId, projectId) {
+  const create = await op('database.create', {
+    serverId,
+    name: 'files',
+    engine: 's3',
+    memoryLimit: '256Mi',
+    size: '1Gi',
+  });
+  const created = await settled(create.plan.id, 600_000);
+  if (created.status !== 'applied') throw new Error(`the store was not created: ${created.status}`);
+  const store = async (name) => (await op('database.list', {})).result.find((d) => d.name === name);
+  const files = await store('files');
+  const container = (id) => `vd-db-${id.replace(/^db_/, '').toLowerCase()}`;
+  const answer = (id) => {
+    const ip = inTestbed(
+      `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${container(id)} 2>/dev/null || true`,
+    ).trim();
+    return ip
+      ? inTestbed(`wget -S -q -O /dev/null -T 3 http://${ip}:9000/files/ 2>&1 | head -1 || true`)
+      : '';
+  };
+  await until('the store answers', () => answer(files.id).includes('HTTP/'), 300_000);
+  // Asked without a key, it refuses: a bucket is never open to its network.
+  const anonymous = answer(files.id);
+  if (!anonymous.includes('403')) throw new Error(`an anonymous request got: ${anonymous}`);
+  const buckets = inTestbed(`docker exec ${container(files.id)} ls /data`);
+  if (!buckets.split('\n').includes('files')) throw new Error(`no bucket was made: ${buckets}`);
+  pass('object storage runs with its bucket, and refuses a request without a key', files.image);
+
+  const link = await op('database.link', { projectId, databaseId: files.id });
+  const linked = await settled(link.plan.id, 600_000);
+  if (linked.status !== 'applied') throw new Error(`the link did not apply: ${linked.status}`);
+  const key = projectId.replace(/^prj_/, '').toLowerCase();
+  let seen = '';
+  await until(
+    'the app has the settings',
+    () => {
+      const [app] = managedContainers()
+        .map(([name]) => name)
+        .filter((name) => name.startsWith(`vd-${key}`) && !name.includes('-release'));
+      if (!app) return false;
+      seen = inTestbed(
+        `docker exec ${app} sh -c 'echo "${'$'}AWS_ENDPOINT_URL ${'$'}AWS_REGION ${'$'}S3_BUCKET ${'$'}AWS_ACCESS_KEY_ID ${'$'}{#AWS_SECRET_ACCESS_KEY}"' 2>/dev/null || true`,
+      ).trim();
+      return seen.startsWith(`http://${files.host}:9000 us-east-1 files vdeploy `);
+    },
+    300_000,
+  );
+  if (Number(seen.split(' ').pop()) < 16) throw new Error(`the secret key looks empty: ${seen}`);
+  pass('a linked app gets what the S3 SDKs read', seen.replace(/ \d+$/, ' + a secret key'));
+  await until(
+    'only the release with the settings is left',
+    () => {
+      const releases = inTestbed(
+        `docker ps -a --filter label=io.vdeploy.project=${projectId} --format '{{.Label "io.vdeploy.release"}}'`,
+      )
+        .split('\n')
+        .filter(Boolean);
+      return releases.length > 0 && new Set(releases).size === 1;
+    },
+    180_000,
+  );
+
+  const backup = await op('database.backup', { databaseId: files.id });
+  if ((await settled(backup.plan.id, 600_000)).status !== 'applied') {
+    throw new Error('the backup was not taken');
+  }
+  let kept;
+  await until('the backup is in the store', async () => {
+    const { result: backups } = await op('backup.list', {});
+    kept = backups.find((b) => b.databaseId === files.id);
+    if (kept?.status === 'failed') throw new Error(`the backup failed: ${kept.error}`);
+    return kept?.status === 'done' && kept.verified && kept.sizeBytes > 0;
+  });
+  pass('backed up the store as its folder, checked', `${String(kept.sizeBytes)} bytes`);
+
+  const restore = await op('database.restore', {
+    databaseId: files.id,
+    backupId: kept.id,
+    mode: 'new',
+    newName: 'files-copy',
+  });
+  const restored = await settled(restore.plan.id, 600_000);
+  if (restored.status !== 'applied') {
+    throw new Error(`the restore did not apply: ${JSON.stringify(restored.error ?? restored)}`);
+  }
+  const copy = await store('files-copy');
+  // The copy has its own bucket, and the one that came back from the backup.
+  const inCopy = inTestbed(`docker exec ${container(copy.id)} ls /data`).split('\n');
+  if (!inCopy.includes('files') || !inCopy.includes('files-copy')) {
+    throw new Error(`the copy does not hold what was backed up: ${inCopy.join(' ')}`);
+  }
+  pass('put a backup of the store back into a copy', inCopy.filter(Boolean).join(', '));
 }
 
 const HELLO_HOST = 'hello.vdeploy.test';

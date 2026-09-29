@@ -30,8 +30,10 @@ const (
 // for privileges, capabilities, devices, sysctls, host namespaces or host
 // paths: the agent cannot express them, so it can never be asked to.
 type Container struct {
-	Name          string
-	Image         string
+	Name  string
+	Image string
+	// Entrypoint replaces the image's own; only a database's start sets it.
+	Entrypoint    []string
 	Cmd           []string
 	User          string
 	Env           []string
@@ -235,21 +237,33 @@ still drops to that user before Redis starts.
 */
 const redisLaunch = `umask 077 && printf 'requirepass "%s"\n' "$REDIS_PASSWORD" > /tmp/vdeploy-redis.conf && chown redis /tmp/vdeploy-redis.conf && exec docker-entrypoint.sh redis-server /tmp/vdeploy-redis.conf`
 
+/*
+s3Launch makes the bucket before the object store starts (§17.1): RustFS
+takes a folder at the top of its data as a bucket, and there is no setting
+that names one. The image's entrypoint then starts the server as it always
+would, as its own user; the web console is off by its environment.
+*/
+const s3Launch = `mkdir -p "/data/$VDEPLOY_BUCKET" && exec /entrypoint.sh /usr/bin/rustfs /data`
+
 // databaseCommand is how an engine is started where its image's own
 // default would not do; nil keeps the image's.
-func databaseCommand(engine string) []string {
-	if engine == "redis" {
-		return []string{"sh", "-c", redisLaunch}
+func databaseCommand(engine string) (entrypoint, cmd []string) {
+	switch engine {
+	case "redis":
+		return nil, []string{"sh", "-c", redisLaunch}
+	case "s3":
+		// RustFS's own entrypoint would take a shell for its arguments.
+		return []string{"/bin/sh", "-c"}, []string{s3Launch}
 	}
-	return nil
+	return nil, nil
 }
 
-// launchOf names a start command, for LaunchLabel; the image's own is "".
-func launchOf(cmd []string) string {
-	if len(cmd) == 0 {
+// launchOf names a start, for LaunchLabel; the image's own is "".
+func launchOf(entrypoint, cmd []string) string {
+	if len(entrypoint) == 0 && len(cmd) == 0 {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(strings.Join(cmd, "\x00")))
+	sum := sha256.Sum256([]byte(strings.Join(entrypoint, "\x00") + "\x01" + strings.Join(cmd, "\x00")))
 	return hex.EncodeToString(sum[:6])
 }
 
@@ -285,13 +299,15 @@ func PlanDatabase(d spec.DesiredDatabase) Container {
 	for _, e := range d.Env {
 		env = append(env, e.Key+"="+e.Value)
 	}
+	entrypoint, cmd := databaseCommand(d.Engine)
 	container := Container{
-		Name:    DatabaseName(d.DatabaseID),
-		Image:   d.Image,
-		Cmd:     databaseCommand(d.Engine),
-		Env:     env,
-		Network: DatabaseNetwork(d.DatabaseID),
-		Volumes: []Mount{{Volume: DatabaseVolume(d.DatabaseID), Target: d.DataPath}},
+		Name:       DatabaseName(d.DatabaseID),
+		Image:      d.Image,
+		Entrypoint: entrypoint,
+		Cmd:        cmd,
+		Env:        env,
+		Network:    DatabaseNetwork(d.DatabaseID),
+		Volumes:    []Mount{{Volume: DatabaseVolume(d.DatabaseID), Target: d.DataPath}},
 		Labels: map[string]string{
 			ManagedLabel:  "true",
 			DatabaseLabel: d.DatabaseID,
@@ -309,7 +325,7 @@ func PlanDatabase(d spec.DesiredDatabase) Container {
 	if d.PublicPort > 0 {
 		container.Labels[PublicPortLabel] = strconv.Itoa(d.PublicPort)
 	}
-	if launch := launchOf(container.Cmd); launch != "" {
+	if launch := launchOf(container.Entrypoint, container.Cmd); launch != "" {
 		container.Labels[LaunchLabel] = launch
 	}
 	return container

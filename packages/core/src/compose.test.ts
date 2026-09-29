@@ -56,6 +56,17 @@ describe('bringing a compose file across (§15)', () => {
     );
   });
 
+  it('runs a MinIO service as managed object storage', () => {
+    const read = readCompose(`
+services:
+  files:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data
+`);
+    expect(read.apps).toEqual([]);
+    expect(read.databases).toEqual([{ name: 'files', engine: 's3', version: '1.0.0' }]);
+  });
+
   it('says a published port is not published, rather than quietly dropping it', () => {
     const read = readCompose(REAL);
     expect(read.changed.some((n) => n.service === 'web' && n.what.includes('not published'))).toBe(

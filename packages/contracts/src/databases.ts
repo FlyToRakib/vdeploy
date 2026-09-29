@@ -3,9 +3,25 @@ import { idSchema } from './ids.js';
 import { Memory } from './spec/quantities.js';
 import { ResourceName } from './spec/sections.js';
 
-/** The engines VDeploy manages (§17.3). */
-export const DatabaseEngine = z.enum(['postgres', 'mysql', 'mariadb', 'redis', 'mongodb']);
+/**
+ * The engines VDeploy manages (§17.3). `s3` is object storage (§17.1): it
+ * lives and is linked like a database, and speaks the S3 protocol (ADR 0026).
+ */
+export const DatabaseEngine = z.enum(['postgres', 'mysql', 'mariadb', 'redis', 'mongodb', 's3']);
 export type DatabaseEngine = z.infer<typeof DatabaseEngine>;
+
+/**
+ * What an app reads to reach object storage (§17.1), managed or brought:
+ * the names the AWS SDKs read by themselves, so the same code works with
+ * either, and moving from one to the other changes no code.
+ */
+export const OBJECT_STORAGE_ENV = {
+  endpoint: 'AWS_ENDPOINT_URL',
+  region: 'AWS_REGION',
+  bucket: 'S3_BUCKET',
+  accessKeyId: 'AWS_ACCESS_KEY_ID',
+  secretAccessKey: 'AWS_SECRET_ACCESS_KEY',
+} as const;
 
 export const DatabaseVersion = z
   .string()

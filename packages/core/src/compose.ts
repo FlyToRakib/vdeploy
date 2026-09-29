@@ -73,9 +73,13 @@ const REFUSED: Record<string, string> = {
 function engineOf(image: string): { engine: DatabaseEngine; version: string } | null {
   const [repository, tag] = splitImage(image);
   for (const [engine, profile] of Object.entries(ENGINES)) {
-    if (repository !== profile.repository) continue;
+    if (repository !== profile.repository && !profile.alsoFrom?.includes(repository)) continue;
     const major = (tag ?? '').split('.')[0] ?? '';
-    const version = profile.versions.find((v) => v === tag || v.split('.')[0] === major);
+    // Another project's tags mean nothing here: it gets this engine's own.
+    const version =
+      repository === profile.repository
+        ? profile.versions.find((v) => v === tag || v.split('.')[0] === major)
+        : undefined;
     return { engine: engine as DatabaseEngine, version: version ?? profile.versions[0] ?? '' };
   }
   return null;

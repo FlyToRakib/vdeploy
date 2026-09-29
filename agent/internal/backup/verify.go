@@ -126,6 +126,10 @@ func (r *Runner) Verify(ctx context.Context, req VerifyRequest) VerifyResult {
 	if !safeName.MatchString(req.FileName) {
 		return fail("the backup file name is not allowed", "")
 	}
+	// A store's backup is proved by reading it back; there are no tables.
+	if req.Engine == "s3" {
+		return r.verifyObjects(ctx, req)
+	}
 	count, err := countScript(req.Engine)
 	if err != nil {
 		return fail(err.Error(), "")

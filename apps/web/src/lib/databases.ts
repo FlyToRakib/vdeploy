@@ -1,3 +1,5 @@
+import { OBJECT_STORAGE_ENV } from '@vdeploy/contracts';
+
 /** A managed database, as `database.list` returns it. */
 export interface DatabaseSummary {
   id: string;
@@ -21,7 +23,7 @@ export interface DatabaseSummary {
   createdAt: string;
 }
 
-export type DatabaseEngine = 'postgres' | 'mysql' | 'mariadb' | 'redis' | 'mongodb';
+export type DatabaseEngine = 'postgres' | 'mysql' | 'mariadb' | 'redis' | 'mongodb' | 's3';
 
 /** What each engine is called, and what a person uses it for. */
 export const ENGINE_WORDS: Readonly<Record<DatabaseEngine, { label: string; blurb: string }>> = {
@@ -30,6 +32,10 @@ export const ENGINE_WORDS: Readonly<Record<DatabaseEngine, { label: string; blur
   mariadb: { label: 'MariaDB', blurb: 'MySQL’s twin; lighter on a small server.' },
   redis: { label: 'Redis', blurb: 'Fast temporary storage: sessions, queues, caching.' },
   mongodb: { label: 'MongoDB', blurb: 'Documents rather than tables.' },
+  s3: {
+    label: 'Object storage',
+    blurb: 'Files your app keeps through S3 — uploads and media — shared by every copy of it.',
+  },
 };
 
 /** Versions offered per engine, newest first; the first is the default. */
@@ -39,6 +45,7 @@ export const ENGINE_VERSIONS: Readonly<Record<DatabaseEngine, readonly string[]>
   mariadb: ['12', '11.8', '10.11'],
   redis: ['8', '7.4'],
   mongodb: ['8', '7'],
+  s3: ['1.0.0'],
 };
 
 export const ENGINES = Object.keys(ENGINE_WORDS) as DatabaseEngine[];
@@ -73,8 +80,12 @@ export function reachWords(database: DatabaseSummary): string {
 
 /** The variable an app will read, per engine. */
 export function defaultEnvKey(engine: DatabaseEngine): string {
+  if (engine === 's3') return OBJECT_STORAGE_ENV.endpoint;
   return engine === 'redis' ? 'REDIS_URL' : 'DATABASE_URL';
 }
+
+/** Everything an app linked to object storage reads, as the S3 SDKs name it. */
+export const OBJECT_STORAGE_SETTINGS = Object.values(OBJECT_STORAGE_ENV);
 
 /** A backup, as `backup.list` returns it. */
 export interface BackupSummary {
@@ -249,7 +260,7 @@ export const MAX_DUMP_MB = 200;
 export interface UploadedDump {
   uploadId: string;
   size: number;
-  format: 'postgres-custom' | 'sql' | 'redis-rdb' | null;
+  format: 'postgres-custom' | 'sql' | 'redis-rdb' | 'gzip' | null;
   engine: 'postgres' | 'mysql' | 'mariadb' | null;
   version: string | null;
 }

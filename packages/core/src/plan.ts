@@ -17,7 +17,7 @@ import {
 import { hashOf } from './canonical.js';
 import { diffSpecs, removedVolumes } from './diff.js';
 import { describeCron } from './cron.js';
-import { defaultEnvKey, engineProfile } from './databases.js';
+import { defaultEnvKey, defaultLinkParts, engineProfile, linkSettings } from './databases.js';
 import type { SectionEdit } from './spec-edit.js';
 import { place, type Candidate } from './placement.js';
 import { scaleCautions } from './scale-cautions.js';
@@ -964,6 +964,21 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       );
     }
     const envKey = args.envKey ?? defaultEnvKey(database.engine);
+    // Every setting the app will get, so the approval shows them all.
+    const parts = args.parts ?? defaultLinkParts(database.engine);
+    const pieces = Object.entries(parts).map(([part, key]) => ({
+      path: `runtime.env.${key}`,
+      before: null,
+      after:
+        part === 'password'
+          ? `the password of ${database.name}, kept as a secret`
+          : `the ${part === 'name' ? (database.engine === 's3' ? 'bucket' : 'database name') : part} of ${database.name}`,
+    }));
+    const settings = linkSettings(database.engine).map(({ key, value }) => ({
+      path: `runtime.env.${key}`,
+      before: null,
+      after: value,
+    }));
     return {
       specHash: null,
       changes: [
@@ -972,6 +987,8 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
           before: null,
           after: `the address of ${database.name}, kept as a secret`,
         },
+        ...pieces,
+        ...settings,
       ],
       // The app gets the address as one of its own settings, then deploys with it.
       steps: [

@@ -1817,7 +1817,8 @@
               "mysql",
               "mariadb",
               "redis",
-              "mongodb"
+              "mongodb",
+              "s3"
             ]
           },
           "image": {

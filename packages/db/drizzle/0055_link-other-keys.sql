@@ -1,0 +1,1 @@
+ALTER TABLE "database_links" ADD COLUMN "other_keys" text[] DEFAULT '{}'::text[] NOT NULL;

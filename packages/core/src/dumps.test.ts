@@ -35,7 +35,8 @@ describe('what a dump from somewhere else actually is', () => {
   });
 
   it('is not fooled by a file that is not a dump at all', () => {
-    expect(sniffDump(Buffer.from([0x1f, 0x8b, 0x08, 0x00])).format).toBeNull();
+    // Compressed is recognised, and refused for a database in its own words.
+    expect(sniffDump(Buffer.from([0x1f, 0x8b, 0x08, 0x00])).format).toBe('gzip');
     expect(sniffDump(Buffer.from('PK\u0003\u0004', 'latin1')).format).toBeNull();
   });
 });
@@ -61,8 +62,15 @@ describe('whether a dump can be loaded here', () => {
     const rdb = sniffDump(Buffer.from('REDIS0011', 'latin1'));
     expect(dumpRefusal(rdb, { engine: 'redis', version: '8' })).toContain('when it starts');
     expect(dumpRefusal(sniffDump(Buffer.from([0x1f, 0x8b])), postgres18)).toContain(
-      'not a database dump',
+      'Unpack it',
     );
+  });
+
+  it('takes an archive into object storage, and nothing else', () => {
+    const archive = sniffDump(Buffer.from([0x1f, 0x8b, 0x08]));
+    expect(dumpRefusal(archive, { engine: 's3', version: '1.0.0' })).toBeNull();
+    const sql = sniffDump(Buffer.from('-- PostgreSQL database dump'));
+    expect(dumpRefusal(sql, { engine: 's3', version: '1.0.0' })).toContain('not a database dump');
   });
 
   it('cannot read the version of a custom-format dump, and does not pretend to', () => {

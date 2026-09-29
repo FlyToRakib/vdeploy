@@ -25,6 +25,7 @@ import {
   SizeSection,
   StorageSection,
 } from './sections';
+import { ObjectStorageSection } from './object-storage';
 
 const MODE_KEY = 'vdeploy.config-mode';
 const listeners = new Set<() => void>();
@@ -147,6 +148,7 @@ export function ProjectConfig() {
       <HealthSection />
       <LoadBalancingSection />
       <StorageSection />
+      <ObjectStorageSection />
       <ScheduleSection />
       <StagingSection />
       <PreviewsSection />

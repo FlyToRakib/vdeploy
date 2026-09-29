@@ -12,11 +12,13 @@ import {
   databaseNames,
   describeCron,
   defaultEnvKey,
+  defaultLinkParts,
   defaultVersion,
   engineProfile,
   hashOf,
   DUMP_HEAD_BYTES,
   dumpRefusal,
+  linkSettings,
   sniffDump,
   specAfter,
 } from '@vdeploy/core';
@@ -169,12 +171,18 @@ export async function linkDatabaseStep(
   // Some apps want the address in pieces. The password is still a secret
   // among them; the rest are ordinary settings, because a hostname nobody
   // can reach from outside is not worth hiding.
+  // Object storage is always in pieces: SDKs read keys and bucket apart.
   const parts =
     state.args.parts && typeof state.args.parts === 'object'
       ? (state.args.parts as Partial<
           Record<'host' | 'port' | 'user' | 'password' | 'name', string>
         >)
-      : null;
+      : defaultLinkParts(row.engine);
+  const settings = linkSettings(row.engine);
+  const otherKeys = [
+    ...Object.values(parts).filter((key): key is string => typeof key === 'string'),
+    ...settings.map((s) => s.key),
+  ];
   await deps.db.transaction(async (tx) => {
     const url = connectionUrl({
       engine: row.engine,
@@ -195,14 +203,15 @@ export async function linkDatabaseStep(
     });
     await tx
       .insert(databaseLinks)
-      .values({ databaseId, projectId, envKey, secretId, meshPort })
+      .values({ databaseId, projectId, envKey, secretId, meshPort, otherKeys })
       .onConflictDoUpdate({
         target: [databaseLinks.databaseId, databaseLinks.projectId, databaseLinks.envKey],
-        set: { secretId, meshPort },
+        set: { secretId, meshPort, otherKeys },
       });
     // The app reads it like any other setting; the value itself stays a secret.
     let spec = specAfter('env.set', { key: envKey, secretRef: secretId }, app.spec);
-    if (parts) {
+    for (const { key, value } of settings) spec = specAfter('env.set', { key, value }, spec);
+    if (Object.keys(parts).length > 0) {
       const password = await databasePassword(tx, deps.secretsKey, row);
       const pieces: [string | undefined, string][] = [
         [parts.host, databaseHost(row.id)],
@@ -259,7 +268,13 @@ export async function unlinkDatabaseStep(
       .delete(databaseLinks)
       .where(and(eq(databaseLinks.databaseId, databaseId), eq(databaseLinks.projectId, projectId)));
     if (app) {
-      const spec = specAfter('env.unset', { key: link.envKey }, app.spec);
+      let spec = app.spec;
+      for (const key of [link.envKey, ...link.otherKeys]) {
+        // A setting somebody already removed by hand is simply not there.
+        if (readSpec(spec).runtime.env.some((e) => e.key === key)) {
+          spec = specAfter('env.unset', { key }, spec);
+        }
+      }
       await tx
         .update(projects)
         .set({ spec, specHash: hashOf(spec), updatedAt: deps.now() })
@@ -267,7 +282,9 @@ export async function unlinkDatabaseStep(
     }
     if (row) await bumpGeneration(tx, row.serverId);
   });
-  state.notes.push(`${link.envKey} is gone from the app. The data is untouched.`);
+  state.notes.push(
+    `${[link.envKey, ...link.otherKeys].join(', ')} ${link.otherKeys.length > 0 ? 'are' : 'is'} gone from the app. The data is untouched.`,
+  );
 }
 
 /**
@@ -299,7 +316,14 @@ export async function deleteDatabaseStep(
 /** The file a backup writes: the database, the day, and the time, in UTC. */
 export function backupFileName(name: string, engine: DatabaseEngine, at: Date): string {
   const stamp = at.toISOString().replace(/[:.]/g, '-').replace('Z', 'Z');
-  const suffix = engine === 'redis' ? 'rdb' : engine === 'postgres' ? 'dump' : 'sql';
+  const suffix =
+    engine === 'redis'
+      ? 'rdb'
+      : engine === 'postgres'
+        ? 'dump'
+        : engine === 's3'
+          ? 'tar.gz'
+          : 'sql';
   return `${name.replace(/[^A-Za-z0-9._-]/g, '-')}-${stamp}.${suffix}`;
 }
 

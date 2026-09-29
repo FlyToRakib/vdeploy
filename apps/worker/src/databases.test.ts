@@ -31,6 +31,7 @@ import { hashOf } from '@vdeploy/core';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyPlan, type WorkerDeps } from './apply.js';
+import { backupFileName } from './database-steps.js';
 import type { RegistryAccess } from './registry.js';
 
 let t: TestDatabase;
@@ -309,6 +310,53 @@ describe('managed databases', () => {
     const [after] = await t.db.select().from(projects).where(eq(projects.id, projectId));
     expect(after?.spec.runtime.env.some((e) => e.key === 'DATABASE_URL')).toBe(false);
     expect(await t.db.select().from(databaseLinks)).toHaveLength(0);
+  });
+
+  it('gives an app object storage as the S3 SDKs read it, and takes all of it away again', async () => {
+    const { outcome } = await run('database.create', {
+      serverId,
+      name: 'shop-files',
+      engine: 's3',
+    });
+    expect(outcome).toBe('applied');
+    const row = await theDatabase('shop-files');
+    expect(row).toMatchObject({ engine: 's3', port: 9000, dbName: 'shop-files' });
+    expect(row?.image).toBe('rustfs/rustfs:1.0.0');
+    const databaseId = row?.id ?? '';
+    const sent = (await desiredStateFor(t.db, serverId, { secretsKey: SECRETS })).databases.find(
+      (d) => d.databaseId === databaseId,
+    );
+    expect(sent?.env).toContainEqual({ key: 'VDEPLOY_BUCKET', value: 'shop-files' });
+    expect(sent?.env).toContainEqual({ key: 'RUSTFS_CONSOLE_ENABLE', value: 'false' });
+    expect(sent?.credentials[0]?.key).toBe('RUSTFS_SECRET_KEY');
+
+    expect((await run('database.link', { projectId, databaseId })).outcome).toBe('applied');
+    const [app] = await t.db.select().from(projects).where(eq(projects.id, projectId));
+    const env = new Map(app?.spec.runtime.env.map((e) => [e.key, e]));
+    expect(env.get('AWS_REGION')).toEqual({ key: 'AWS_REGION', value: 'us-east-1' });
+    expect(env.get('S3_BUCKET')).toEqual({ key: 'S3_BUCKET', value: 'shop-files' });
+    expect(env.get('AWS_ACCESS_KEY_ID')).toEqual({ key: 'AWS_ACCESS_KEY_ID', value: 'vdeploy' });
+    const secretKey = env.get('AWS_SECRET_ACCESS_KEY');
+    expect(secretKey && 'secretRef' in secretKey).toBe(true);
+    const endpoint = env.get('AWS_ENDPOINT_URL');
+    const [secret] = await t.db
+      .select()
+      .from(secrets)
+      .where(eq(secrets.id, endpoint && 'secretRef' in endpoint ? endpoint.secretRef : ''));
+    const stored = await readSecret(t.db, SECRETS, projectId, secret?.id ?? '');
+    expect(stored.value).toBe(`http://${databaseHost(databaseId)}:9000`);
+
+    // Unlinking takes every one of them away, the secret key among them.
+    expect((await run('database.unlink', { projectId, databaseId })).outcome).toBe('applied');
+    const [after] = await t.db.select().from(projects).where(eq(projects.id, projectId));
+    const left = after?.spec.runtime.env.map((e) => e.key) ?? [];
+    for (const key of ['AWS_ENDPOINT_URL', 'AWS_REGION', 'S3_BUCKET', 'AWS_ACCESS_KEY_ID']) {
+      expect(left).not.toContain(key);
+    }
+    expect(left).not.toContain('AWS_SECRET_ACCESS_KEY');
+    expect(backupFileName('shop-files', 's3', new Date(0))).toMatch(/\.tar\.gz$/);
+    // Out of the way of the tests that follow, which count this server's databases.
+    await t.db.update(databases).set({ deletedAt: new Date() }).where(eq(databases.id, databaseId));
   });
 
   it('takes a backup beside the database, and only counts it once it is checked', async () => {

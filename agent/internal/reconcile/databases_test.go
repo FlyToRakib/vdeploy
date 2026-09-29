@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
+	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 	"github.com/FlyToRakib/vdeploy/agent/internal/spec"
 )
 
@@ -267,5 +268,22 @@ func TestRedisStartsWithItsPasswordAndAnOpenOneIsReplaced(t *testing.T) {
 	reconcile(t, r, state)
 	if !slices.Contains(engine.calls, "create "+compose.DatabaseName(d.DatabaseID)) {
 		t.Fatalf("an open Redis was left running: %v", engine.calls)
+	}
+}
+
+func TestAnObjectStoreMakesItsBucketBeforeItStarts(t *testing.T) {
+	d := testDatabase("six")
+	d.Engine, d.Image, d.Port, d.DataPath = "s3", "rustfs/rustfs:1.0.0", 9000, "/data"
+	c := compose.PlanDatabase(d)
+	if !slices.Equal(c.Entrypoint, []string{"/bin/sh", "-c"}) || len(c.Cmd) != 1 ||
+		!strings.HasPrefix(c.Cmd[0], `mkdir -p "/data/$VDEPLOY_BUCKET" && exec /entrypoint.sh`) {
+		t.Fatalf("entrypoint = %q, cmd = %q", c.Entrypoint, c.Cmd)
+	}
+	if c.Labels[compose.LaunchLabel] == "" {
+		t.Fatal("how it was started is not recorded")
+	}
+	body := docker.CreateRequest(c)
+	if !slices.Equal(body.Entrypoint, c.Entrypoint) {
+		t.Fatalf("the engine was not asked for it: %+v", body.Entrypoint)
 	}
 }

@@ -16,6 +16,7 @@ import {
   ago,
   dataLine,
   defaultEnvKey,
+  OBJECT_STORAGE_SETTINGS,
   ENGINE_VERSIONS,
   ENGINE_WORDS,
   ENGINES,
@@ -553,7 +554,9 @@ function DatabaseCard({
             setLinking(false);
             void run(
               'database.link',
-              { projectId: formText(form, 'projectId'), envKey: formText(form, 'envKey') },
+              database.engine === 's3'
+                ? { projectId: formText(form, 'projectId') }
+                : { projectId: formText(form, 'projectId'), envKey: formText(form, 'envKey') },
               { doing: 'Connecting them…', done: 'Done. The app will find it on its next start.' },
             );
           }}
@@ -573,12 +576,24 @@ function DatabaseCard({
               ))}
             </select>
           </label>
-          <Field
-            label="The setting the app reads"
-            name="envKey"
-            defaultValue={defaultEnvKey(database.engine)}
-            hint="Most apps look for this name. Change it only if yours expects another."
-          />
+          {database.engine === 's3' ? (
+            <div className="grid gap-1.5 text-sm">
+              <span className="font-medium">The settings the app gets</span>
+              <p className="font-mono text-xs break-words">{OBJECT_STORAGE_SETTINGS.join(' · ')}</p>
+              <p className="text-muted-foreground">
+                The names every S3 library reads by itself; the secret key is kept as a secret. Ask
+                your library for path-style requests — in the AWS SDK,{' '}
+                <code className="font-mono">forcePathStyle: true</code>.
+              </p>
+            </div>
+          ) : (
+            <Field
+              label="The setting the app reads"
+              name="envKey"
+              defaultValue={defaultEnvKey(database.engine)}
+              hint="Most apps look for this name. Change it only if yours expects another."
+            />
+          )}
           <div className="flex justify-end gap-2">
             <Button
               type="button"

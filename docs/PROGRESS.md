@@ -280,7 +280,25 @@ each is one task, one commit.
   the instant URL settings had no screen before
 
 **Data (§17)**
-- [ ] object storage: a bucket you bring, or managed MinIO (§17.1, M5)
+- [x] **object storage: a bucket you bring, or a managed one (§17.1, M5;
+  ADR 0026)**: MinIO no longer publishes its images, so the managed store
+  is RustFS — Apache-2.0, S3 of the same shape, running as its own user —
+  as the `s3` engine: created, linked (across servers too), opened,
+  stopped and deleted like a database. The agent makes its bucket before
+  it starts and keeps its web console off. Linking hands the app the names
+  every S3 SDK reads by itself (the secret key kept as a secret);
+  unlinking takes every one away — and links now remember everything they
+  set, which also fixed unlinking a database linked "in pieces" leaving
+  its password behind. Backups archive the store's folder through
+  Docker's copy endpoints while it runs; verification reads every byte
+  back and counts buckets and objects; a restore reads the whole archive
+  first, refuses a cut-short or foreign one, then puts every object back
+  over the running store. Checked against the real image: the bucket
+  appears, objects round-trip and survive restarts, wrong or anonymous
+  keys get 403, and a deleted object comes back from a restore. A bucket
+  you bring is the project's Object storage section — presets for S3, R2,
+  B2 and Spaces — storing the key as a secret and the same five settings
+  in one deploy. A compose file's `minio/minio` imports as this engine
 - [x] **managed Redis ran without its password**: found on the way that
   the official image reads no password from its environment, so the
   generated one was handed over and never asked for — Redis answered

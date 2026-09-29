@@ -37,7 +37,15 @@ export function useSpec(): EditableSpec {
   return useProject().row.spec as unknown as EditableSpec;
 }
 
-function Section({ title, hint, children }: { title: string; hint: string; children?: ReactNode }) {
+export function Section({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint: string;
+  children?: ReactNode;
+}) {
   return (
     <Card className="grid gap-4">
       <div className="grid gap-1">

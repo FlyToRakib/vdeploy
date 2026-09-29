@@ -9,7 +9,7 @@
 /** How much of a dump says what it is; a header is never further in than this. */
 export const DUMP_HEAD_BYTES = 64 * 1024;
 
-export type DumpFormat = 'postgres-custom' | 'sql' | 'redis-rdb';
+export type DumpFormat = 'postgres-custom' | 'sql' | 'redis-rdb' | 'gzip';
 
 export interface DumpFacts {
   format: DumpFormat | null;
@@ -38,6 +38,11 @@ export function sniffDump(head: Buffer | Uint8Array): DumpFacts {
   }
   if (bytes.subarray(0, 5).toString('latin1') === 'REDIS') {
     return { format: 'redis-rdb', engine: null, version: null };
+  }
+  // Compressed: a gzipped dump, or a backup of object storage — an archive
+  // of its folder (ADR 0026), which the agent checks is a store.
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    return { format: 'gzip', engine: null, version: null };
   }
   const text = bytes.toString('utf8');
   const postgres = PG_VERSION.exec(text);
@@ -75,6 +80,14 @@ export function dumpRefusal(
 ): string | null {
   if (!facts.format) {
     return 'That file is not a database dump VDeploy can read. Export it with pg_dump, mysqldump, or as plain SQL.';
+  }
+  if (target.engine === 's3') {
+    return facts.format === 'gzip'
+      ? null
+      : 'Object storage takes an archive of a store, as VDeploy backs one up — not a database dump.';
+  }
+  if (facts.format === 'gzip') {
+    return 'That file is compressed. Unpack it (gunzip) and upload the dump inside.';
   }
   if (facts.format === 'redis-rdb') {
     return 'A Redis dump is a file the server loads when it starts, not something that can be sent to a running one.';

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -162,47 +163,12 @@ func (r *Runner) take(
 	fail := func(reason string) SnapshotResult {
 		return SnapshotResult{SnapshotID: req.SnapshotID, Error: reason}
 	}
-	file, err := os.CreateTemp(r.TempDir, "vd-snapshot-*.tar.gz")
-	if err != nil {
-		return fail("the snapshot had nowhere to be written")
-	}
-	defer func() { _ = os.Remove(file.Name()); _ = file.Close() }()
-
-	sum := sha256.New()
-	counter := &countingWriter{}
-	zipped := gzip.NewWriter(io.MultiWriter(file, sum, counter))
-	read, err := r.Engine.ReadVolumesInto(
-		ctx,
-		"vd-snapshot-"+shortID(req.SnapshotID),
-		req.Image,
-		mounts,
-		snapPath,
-		zipped,
-	)
-	if err != nil {
-		return fail("the folders could not be read: " + err.Error())
-	}
-	if err := zipped.Close(); err != nil {
-		return fail("the snapshot could not be finished")
-	}
-	if read == 0 || counter.n == 0 {
+	kept, err := r.archive(ctx, "vd-snapshot-"+shortID(req.SnapshotID), req.Image, mounts, snapPath, req.FileName)
+	if errors.Is(err, errNothingToArchive) {
 		return fail("there was nothing in those folders to snapshot")
 	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return fail("the snapshot could not be read back")
-	}
-
-	if err := r.Engine.WriteVolumeFile(
-		ctx,
-		"vd-snapshot-store-"+shortID(req.SnapshotID),
-		req.Image,
-		Volume,
-		mountPath,
-		req.FileName,
-		counter.n,
-		file,
-	); err != nil {
-		return fail("the snapshot could not be put in the store: " + err.Error())
+	if err != nil {
+		return fail("the snapshot " + err.Error())
 	}
 
 	result := SnapshotResult{
@@ -210,12 +176,12 @@ func (r *Runner) take(
 		OK:             true,
 		Removed:        []string{},
 		DeletedVolumes: []string{},
-		SizeBytes:      counter.n,
-		SHA256:         hex.EncodeToString(sum.Sum(nil)),
+		SizeBytes:      kept.size,
+		SHA256:         kept.sha256,
 		// Written here and measured here: what is in the store is what came
 		// out of those folders, and it is not empty.
 		Verified: true,
-		Log:      fmt.Sprintf("%d folders, %d bytes read, %d bytes kept", len(mounts), read, counter.n),
+		Log:      fmt.Sprintf("%d folders, %d bytes read, %d bytes kept", len(mounts), kept.read, kept.size),
 	}
 	// A copy leaves before anything here is deleted, as for a dump (§17.4).
 	if req.Offsite != nil {
@@ -305,6 +271,57 @@ func (r *Runner) putBack(ctx context.Context, req SnapshotRequest, mounts map[st
 		return fmt.Errorf("the folders could not be written back: %w", err)
 	}
 	return nil
+}
+
+// errNothingToArchive is an archive of empty folders: a failure, caught
+// here rather than on the day somebody needs what should be in it.
+var errNothingToArchive = errors.New("had nothing in it")
+
+// archived is what an archive left in the store.
+type archived struct {
+	read, size int64
+	sha256     string
+}
+
+/*
+archive copies folders out through Docker, compresses them on the way to a
+file of its own, measures what landed, and only then writes it into the
+store under fileName. Its errors finish a sentence about what was archived.
+*/
+func (r *Runner) archive(
+	ctx context.Context,
+	key, image string,
+	mounts map[string]string,
+	root, fileName string,
+) (archived, error) {
+	file, err := os.CreateTemp(r.TempDir, "vd-archive-*.tar.gz")
+	if err != nil {
+		return archived{}, errors.New("had nowhere to be written")
+	}
+	defer func() { _ = os.Remove(file.Name()); _ = file.Close() }()
+
+	sum := sha256.New()
+	counter := &countingWriter{}
+	zipped := gzip.NewWriter(io.MultiWriter(file, sum, counter))
+	read, err := r.Engine.ReadVolumesInto(ctx, key, image, mounts, root, zipped)
+	if err != nil {
+		return archived{}, fmt.Errorf("could not be read: %w", err)
+	}
+	if err := zipped.Close(); err != nil {
+		return archived{}, errors.New("could not be finished")
+	}
+	if read == 0 || counter.n == 0 {
+		return archived{}, errNothingToArchive
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return archived{}, errors.New("could not be read back")
+	}
+	if err := r.Engine.WriteVolumeFile(
+		ctx, key+"-store", image, Volume, mountPath, fileName, counter.n, file,
+	); err != nil {
+		return archived{}, fmt.Errorf("could not be put in the store: %w", err)
+	}
+	return archived{read: read, size: counter.n, sha256: hex.EncodeToString(sum.Sum(nil))}, nil
 }
 
 // countingWriter measures what was actually written.

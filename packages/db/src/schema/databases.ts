@@ -113,6 +113,15 @@ export const databaseLinks = pgTable(
      * database is somewhere else.
      */
     meshPort: integer('mesh_port'),
+    /**
+     * Every other setting the link gave the app — the pieces of an address,
+     * or object storage's keys and bucket — so unlinking takes them all
+     * away, the password's secret among them.
+     */
+    otherKeys: text('other_keys')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     createdAt: createdAt(),
   },
   (t) => [

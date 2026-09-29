@@ -198,6 +198,7 @@ type hostConfig struct {
 // CreateBody is the Engine's container-create request, as the agent builds it.
 type CreateBody struct {
 	Image        string              `json:"Image"`
+	Entrypoint   []string            `json:"Entrypoint,omitempty"`
 	Cmd          []string            `json:"Cmd,omitempty"`
 	User         string              `json:"User,omitempty"`
 	Env          []string            `json:"Env"`
@@ -225,6 +226,7 @@ func CreateRequest(ct compose.Container) CreateBody {
 	}
 	return CreateBody{
 		Image:        ct.Image,
+		Entrypoint:   ct.Entrypoint,
 		Cmd:          ct.Cmd,
 		User:         ct.User,
 		Env:          ct.Env,
