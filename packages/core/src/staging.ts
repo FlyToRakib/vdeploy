@@ -48,6 +48,24 @@ export function stagingSpec(parent: ApplicationSpec, branch: string): Applicatio
 }
 
 /**
+ * A clone of an app (§20 Projects): a new, independent app made from this
+ * one's spec, on the same server. It starts as a copy that works — same
+ * source, same settings, its own copies of the keys — and leaves behind
+ * the two things that must never exist twice: its domains, which answer
+ * for the original, and its scheduled jobs, since a job that runs in both
+ * places runs twice. Previews stay with the original too.
+ */
+export function cloneSpec(parent: ApplicationSpec, name: string): ApplicationSpec {
+  return ApplicationSpec.parse({
+    ...parent,
+    metadata: { ...parent.metadata, name },
+    ...(parent.network ? { network: { ...parent.network, domains: [] } } : {}),
+    schedule: { crons: [] },
+    preview: { ...parent.preview, enabled: false },
+  });
+}
+
+/**
  * The same spec, with each reference to a secret pointed at the copy this
  * project now owns.
  *

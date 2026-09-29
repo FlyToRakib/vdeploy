@@ -67,6 +67,11 @@ export const PlanStep = z.discriminatedUnion('kind', [
      * over the app; unlike it, the new project owns its own secrets.
      */
     stagingOf: idSchema('project').optional(),
+    /**
+     * The app this project is a clone of (§20 Projects): a new row, an
+     * independent app with no tie back, which owns its secrets.
+     */
+    cloneOf: idSchema('project').optional(),
   }),
   /**
    * A release from the project's spec. It runs the image the current one

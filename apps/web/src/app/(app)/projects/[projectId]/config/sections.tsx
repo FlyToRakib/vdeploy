@@ -673,6 +673,36 @@ export function MovedPagesSection() {
   );
 }
 
+/** A copy of this app under a new name (§20 Projects). */
+export function CloneSection() {
+  const { projectId, row, act } = useProject();
+  return (
+    <Section
+      title="Make a copy"
+      hint="A new app with this one's code and settings, and its own copies of the secrets. Its domains and scheduled jobs stay with this app; the copy gets an address of its own."
+    >
+      <form
+        action={(form) => {
+          const name = formText(form, 'name').trim();
+          void act('project.clone', { projectId, name }, `Making ${name}`);
+        }}
+        className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
+      >
+        <Field
+          label="Name of the copy"
+          name="name"
+          required
+          maxLength={63}
+          pattern="[a-z]([a-z0-9\-]*[a-z0-9])?"
+          defaultValue={`${row.name.slice(0, 58)}-copy`}
+          hint="Lowercase letters, digits and hyphens."
+        />
+        <Button type="submit">Make a copy</Button>
+      </form>
+    </Section>
+  );
+}
+
 /** Hands a text file to the browser to save, named as it will be used. */
 function save(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));

@@ -761,6 +761,16 @@ export const OPERATIONS = [
     obj({ ...P, branch: z.string().min(1).max(255) }),
     { minRole: 'admin' },
   ),
+  // A clone is a new app, made from this one: scoped to the app it copies,
+  // and to admins, because it copies the app's keys with it.
+  operation(
+    'project.clone',
+    'sensitive',
+    'project',
+    'Make an independent copy of this app under a new name: its code, settings and its own copies of the secrets, without its domains or scheduled jobs',
+    obj({ ...P, name: ResourceName }),
+    { minRole: 'admin' },
+  ),
   operation(
     'staging.promote',
     'sensitive',

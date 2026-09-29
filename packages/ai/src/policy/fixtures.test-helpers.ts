@@ -139,6 +139,7 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'git.connect': { provider: 'github' },
   'preview.configure': { preview: { enabled: true } },
   'staging.create': { branch: 'develop' },
+  'project.clone': { name: 'shop-copy' },
   'sso.connect': {
     domain: 'acme.example',
     settings: {

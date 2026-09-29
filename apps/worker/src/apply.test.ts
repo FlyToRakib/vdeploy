@@ -1011,6 +1011,42 @@ describe('staging', () => {
     expect((await readSecret(t.db, SECRETS, app.id, secretId)).value).toBe('sk_live_the_real_one');
   });
 
+  it('clones an app into one of its own: its keys copied, its domains and jobs left behind', async () => {
+    const { app, secretId } = await withStaging();
+    const [current] = await t.db.select().from(projects).where(eq(projects.id, app.id));
+    const nightly = {
+      name: 'nightly',
+      command: ['node', 'x.js'],
+      expr: '0 3 * * *',
+      timezone: 'UTC',
+    };
+    await t.db
+      .update(projects)
+      .set({ spec: { ...current!.spec, schedule: { crons: [nightly] } } })
+      .where(eq(projects.id, app.id));
+
+    const made = await plan('project.clone', { projectId: app.id, name: 'blog-two' });
+    expect(await applyPlan(deps, made.id)).toBe('applied');
+    const [clone] = await t.db.select().from(projects).where(eq(projects.name, 'blog-two'));
+    expect(clone).toBeDefined();
+    // Nothing ties it back: it is an app, not a preview or a staging copy.
+    expect(clone!.stagingOf).toBeNull();
+    expect(clone!.previewOf).toBeNull();
+    expect(clone!.spec.network?.domains).toEqual([]);
+    expect(clone!.spec.schedule.crons).toEqual([]);
+    const copies = await listSecrets(t.db, clone!.id);
+    expect(copies[0]?.id).not.toBe(secretId);
+    expect(clone!.spec.runtime.env).toEqual([{ key: 'STRIPE_KEY', secretRef: copies[0]?.id }]);
+    // The original is as it was.
+    const [after] = await t.db.select().from(projects).where(eq(projects.id, app.id));
+    expect(after!.spec.network?.domains).toHaveLength(1);
+
+    // A name is one app's.
+    await expect(plan('project.clone', { projectId: app.id, name: 'blog-two' })).rejects.toThrow(
+      /already an app called blog-two/,
+    );
+  });
+
   it('refuses a second staging copy, and a copy of a copy', async () => {
     const { app, staging } = await withStaging();
     await expect(plan('staging.create', { projectId: app.id, branch: 'other' })).rejects.toThrow(

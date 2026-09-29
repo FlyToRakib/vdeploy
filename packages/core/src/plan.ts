@@ -100,6 +100,8 @@ export interface PlanContext {
    * domain with them.
    */
   hostsTaken?: Record<string, string>;
+  /** The names of the organization's apps, for an operation that names a new one. */
+  appNames?: string[];
   /**
    * Folders where the running app wrote files outside its permanent folders,
    * as its agent last reported (§17.2), minus those marked only temporary.
@@ -443,6 +445,35 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
         });
         // Between writing the spec and pinning the release, so the first
         // version already runs against its own keys rather than the app's.
+        steps.push({ kind: 'copy_secrets', from: parent.id });
+      } else {
+        steps.push(step);
+      }
+    }
+    return { ...draft, steps };
+  },
+  /**
+   * A new app from this one (§20 Projects), made the way a staging copy is:
+   * the spec written, then its own copies of the secrets, then the first
+   * release — which therefore runs against keys it owns, and can have them
+   * changed without touching the original's.
+   */
+  'project.clone': (args, context) => {
+    const parent = requireProject(context);
+    const name = String(args.name);
+    if (context.appNames?.includes(name)) {
+      throw new VDeployError('conflict', `There is already an app called ${name}`);
+    }
+    const spec = specAfter('project.clone', args, parent.spec);
+    const draft = specChange(null, spec, 'sensitive', context);
+    const steps: PlanStep[] = [];
+    for (const step of draft.steps) {
+      if (step.kind === 'update_spec') {
+        steps.push({
+          ...step,
+          cloneOf: parent.id,
+          ...(spec.placement.server ? { server: spec.placement.server } : {}),
+        });
         steps.push({ kind: 'copy_secrets', from: parent.id });
       } else {
         steps.push(step);

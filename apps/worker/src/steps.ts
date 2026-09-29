@@ -189,6 +189,7 @@ const SPEC_EDITS = new Set([
   'cron.delete',
   'preview.open',
   'staging.create',
+  'project.clone',
   ...SECTION_EDITS,
 ]);
 
@@ -855,7 +856,7 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
         deps,
         state,
         step.server,
-        step.previewOf || step.stagingOf
+        step.previewOf || step.stagingOf || step.cloneOf
           ? {
               ...(step.previewOf ? { previewOf: step.previewOf } : {}),
               ...(step.previewRef ? { ref: step.previewRef } : {}),

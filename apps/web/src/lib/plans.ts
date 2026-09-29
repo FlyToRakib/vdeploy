@@ -32,6 +32,7 @@ const OPERATION_WORDS: Record<string, string> = {
   'release.rollback': 'Go back to an earlier version',
   'env.set': 'Set a setting',
   'env.import': 'Set several settings at once',
+  'project.clone': 'Make a copy of the app',
   'env.unset': 'Remove a setting',
   'secret.rotate': 'Replace a secret with a new value',
   'storage.make_persistent': 'Keep a folder’s files',

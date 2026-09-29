@@ -5,7 +5,7 @@ import {
   type OperationArgs,
 } from '@vdeploy/contracts';
 import { previewSpec, type PullRequest } from './previews.js';
-import { stagingSpec } from './staging.js';
+import { cloneSpec, stagingSpec } from './staging.js';
 import { templateSpec } from './templates.js';
 
 /** A volume name for a folder: its last part, made into a resource name, never clashing. */
@@ -146,6 +146,7 @@ export function specAfter(
     | 'storage.make_persistent'
     | 'preview.open'
     | 'staging.create'
+    | 'project.clone'
     | SectionEdit,
   args: Record<string, unknown>,
   current: ApplicationSpec | null,
@@ -170,6 +171,7 @@ export function specAfter(
   if (name === 'staging.create') {
     return stagingSpec(current, String(args.branch));
   }
+  if (name === 'project.clone') return cloneSpec(current, String(args.name));
   if (name === 'storage.make_persistent') {
     return makePersistent(current, String(args.mountPath));
   }

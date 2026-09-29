@@ -269,7 +269,13 @@ each is one task, one commit.
 **The manual control surface (§20, §24, §25)**
 - [ ] cancel a deploy, and promote a canary early (§7, §20)
 - [ ] deploy locks and freeze windows (§20)
-- [ ] clone a project (§20)
+- [x] **clone a project (§20)**: `project.clone` makes a new, independent
+  app from this one on the same server, the way a staging copy is made —
+  the spec written, then its own copies of the secrets, then its first
+  release, so it runs against keys it owns from the start. Its domains,
+  scheduled jobs and previews stay with the original (a job in both places
+  runs twice), a name already taken is refused before anything is planned,
+  and the copy gets its own address
 - [x] **env import and export in bulk (§20)**: a pasted `.env` is read the
   way the common loaders read it (`export`, comments, both quotes, a
   quoted value over several lines) and says which lines it could not

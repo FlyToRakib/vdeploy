@@ -8,6 +8,7 @@ import { specToYaml, yamlToSpec } from '@/lib/config';
 import { useProject } from '../project-shell';
 import {
   AccessSection,
+  CloneSection,
   DomainsSection,
   ExportSection,
   HealthSection,
@@ -147,6 +148,7 @@ export function ProjectConfig() {
       <PreviewsSection />
       <ServerSection />
       <BuildServerSection />
+      <CloneSection />
       <ExportSection />
       {mode === 'advanced' && <RawSpec />}
     </div>

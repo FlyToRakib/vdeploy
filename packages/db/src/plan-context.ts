@@ -53,6 +53,8 @@ export interface PlanWorld {
   unsaved?: string[];
   /** Addresses the organization's other apps answer to, by app name (2.4). */
   hostsTaken?: Record<string, string>;
+  /** The names of the organization's apps, for an operation that names a new one. */
+  appNames?: string[];
 }
 
 /**
@@ -285,6 +287,14 @@ export async function loadPlanWorld(
     unsaved: await unsavedFor(db, row),
   };
   if (bringsHosts(args)) world.hostsTaken = await hostsTaken(db, row.orgId, row.id);
+  // A clone names the app it makes: that name must still be free.
+  if (typeof args.name === 'string') {
+    const apps = await db
+      .select({ name: projects.name })
+      .from(projects)
+      .where(and(eq(projects.orgId, row.orgId), isNull(projects.deletedAt)));
+    world.appNames = apps.map((a) => a.name);
+  }
   // Choosing which machine compiles this app needs to see the machines.
   if (args.builder !== undefined && orgId) {
     world.candidates = await placementCandidates(db, orgId);
