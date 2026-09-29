@@ -40,6 +40,16 @@ export const ApiConfig = z.object({
   GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
   GITHUB_API_URL: z.url().default('https://api.github.com'),
   GITHUB_WEB_URL: z.url().default('https://github.com'),
+  /**
+   * Signing in with GitHub or Google (§20.2, optional): an OAuth app of
+   * each, whose callback is <PUBLIC_URL>/api/auth/callback/github (or
+   * /google). Separate from the GitHub App above, which reads repositories
+   * and has nothing to do with who signs in. Each pair, or neither.
+   */
+  SIGN_IN_GITHUB_CLIENT_ID: z.string().min(1).optional(),
+  SIGN_IN_GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
+  SIGN_IN_GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  SIGN_IN_GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   /** The key for the assistant's model (§26, bring your own key). Without it the assistant is off. */
   ANTHROPIC_API_KEY: z.string().min(8).optional(),
   ANTHROPIC_BASE_URL: z.url().optional(),

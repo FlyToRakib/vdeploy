@@ -28,6 +28,10 @@ const PUBLIC_PATHS: readonly RegExp[] = [
   // VDeploy operations, so that the organization a provider belongs to
   // is decided by the session rather than claimed in a request body.
   /^\/sign-in\/sso$/,
+  // GitHub and Google (§20.2): the sign-in and its return, for exactly
+  // those two; a provider that is not configured answers that it is not.
+  /^\/sign-in\/social$/,
+  /^\/callback\/(github|google)$/,
   /^\/sso\/callback(\/[\w.-]+)?$/,
   /^\/sso\/saml2\/sp\/(acs|slo|metadata)(\/[\w.-]+)?$/,
   /^\/sso\/saml2\/logout\/[\w.-]+$/,

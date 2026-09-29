@@ -23,6 +23,8 @@ export interface AccountDeps {
   db: Database;
   secret: string;
   publicUrl: string;
+  /** Which of GitHub and Google this VDeploy offers for signing in. */
+  socialProviders?: ('github' | 'google')[];
 }
 
 function slugify(name: string): string {
@@ -35,7 +37,7 @@ function slugify(name: string): string {
 }
 
 export const accountRoutes =
-  ({ auth, db, secret, publicUrl }: AccountDeps): FastifyPluginAsyncZod =>
+  ({ auth, db, secret, publicUrl, socialProviders = [] }: AccountDeps): FastifyPluginAsyncZod =>
   (app) => {
     const origin = new URL(publicUrl).origin;
     const rpID = new URL(publicUrl).hostname;
@@ -50,6 +52,9 @@ export const accountRoutes =
         outcome: 'succeeded',
         details,
       });
+
+    /** How somebody may sign in here, for the sign-in page to offer exactly that. */
+    app.get('/api/v1/auth/methods', () => ({ social: socialProviders }));
 
     app.get('/api/v1/setup', async () => {
       const [settings] = await db

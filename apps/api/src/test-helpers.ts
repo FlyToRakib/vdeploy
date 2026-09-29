@@ -48,6 +48,8 @@ export async function startTestApp(
     txt?: Map<string, string[]>;
     /** Where the agent builds are, for the installer and for updates. */
     agentBinariesDir?: string;
+    /** More of the environment, as an installation would set it. */
+    env?: Record<string, string>;
   } = {},
 ): Promise<TestApp> {
   const database = await startTestDatabase();
@@ -61,10 +63,10 @@ export async function startTestApp(
     ...(options.fetch ? { fetch: options.fetch } : {}),
     resolveTxt: (name) => Promise.resolve(txt.get(name) ?? []),
     probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
-    config: testConfig(
-      database.url,
-      options.agentBinariesDir ? { AGENT_BINARIES_DIR: options.agentBinariesDir } : {},
-    ),
+    config: testConfig(database.url, {
+      ...(options.agentBinariesDir ? { AGENT_BINARIES_DIR: options.agentBinariesDir } : {}),
+      ...options.env,
+    }),
     db: database.db,
     mailer,
     authRateLimit: options.authRateLimit ?? false,

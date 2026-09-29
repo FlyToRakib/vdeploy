@@ -12,7 +12,7 @@ import {
 import websocket from '@fastify/websocket';
 import { agentRoutes, Gateway } from './agents/gateway.js';
 import { privateKeyFromSeed } from './agents/frames.js';
-import { createAuth } from './auth/auth.js';
+import { createAuth, socialSignIn } from './auth/auth.js';
 import { logMailer, smtpMailer, type Mailer } from './auth/mailer.js';
 import type { ApiConfig } from './config.js';
 import { handleError } from './errors.js';
@@ -118,12 +118,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // From the address, not from NODE_ENV: https means Secure cookies,
     // http means a browser would refuse to send them.
     secureCookies: new URL(config.PUBLIC_URL).protocol === 'https:',
+    social: socialSignIn(config),
   });
 
   await app.register(healthRoutes(db));
   await app.register(authRoutes(auth, config.PUBLIC_URL));
   await app.register(
-    accountRoutes({ auth, db, secret: config.AUTH_SECRET, publicUrl: config.PUBLIC_URL }),
+    accountRoutes({
+      auth,
+      db,
+      secret: config.AUTH_SECRET,
+      publicUrl: config.PUBLIC_URL,
+      socialProviders: (['github', 'google'] as const).filter((p) => socialSignIn(config)[p]),
+    }),
   );
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });
   const probe = deps.probe ?? tcpProbe;

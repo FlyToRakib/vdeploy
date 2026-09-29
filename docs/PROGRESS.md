@@ -393,7 +393,16 @@ each is one task, one commit.
   that has not taken the build holds everyone else back. The server screen shows where each agent
   stands, why it last failed, and a canary switch; the installer's
   `--uninstall` removes the agent and leaves apps, volumes and backups
-- [ ] GitHub and Google sign-in, when configured (§20.2)
+- [x] **GitHub and Google sign-in, when configured (§20.2)**: an OAuth app
+  of each (`SIGN_IN_GITHUB_*`, `SIGN_IN_GOOGLE_*`), deliberately separate
+  from the GitHub App that reads repositories. The sign-in page offers
+  exactly the providers configured in full, and only the sign-in and its
+  two callbacks are let through to the auth library. A new account made
+  this way passes the same invite-only gate as any other, and an existing
+  one is joined only when the provider vouches for the address — no
+  "trusted provider" shortcut that would let an unverified address at
+  GitHub take over the account that owns it here. A refusal comes back to
+  the sign-in page, in words
 - [ ] a session's approximate location, when a GeoIP database is configured (§20.2)
 - [ ] CAPTCHA after repeated failures, when configured (§20.2)
 - [x] **the 4 GB image warning, and a DNS propagation countdown (§30 ④ ⑤)**:

@@ -77,6 +77,40 @@ export interface AuthDeps {
    * nothing to read.
    */
   secureCookies: boolean;
+  /** GitHub and Google sign-in, each only when its OAuth app is configured (§20.2). */
+  social?: SocialSignIn;
+}
+
+export interface SocialSignIn {
+  github?: { clientId: string; clientSecret: string };
+  google?: { clientId: string; clientSecret: string };
+}
+
+/** The providers configured, from the environment: a pair, or nothing. */
+export function socialSignIn(env: {
+  SIGN_IN_GITHUB_CLIENT_ID?: string | undefined;
+  SIGN_IN_GITHUB_CLIENT_SECRET?: string | undefined;
+  SIGN_IN_GOOGLE_CLIENT_ID?: string | undefined;
+  SIGN_IN_GOOGLE_CLIENT_SECRET?: string | undefined;
+}): SocialSignIn {
+  return {
+    ...(env.SIGN_IN_GITHUB_CLIENT_ID && env.SIGN_IN_GITHUB_CLIENT_SECRET
+      ? {
+          github: {
+            clientId: env.SIGN_IN_GITHUB_CLIENT_ID,
+            clientSecret: env.SIGN_IN_GITHUB_CLIENT_SECRET,
+          },
+        }
+      : {}),
+    ...(env.SIGN_IN_GOOGLE_CLIENT_ID && env.SIGN_IN_GOOGLE_CLIENT_SECRET
+      ? {
+          google: {
+            clientId: env.SIGN_IN_GOOGLE_CLIENT_ID,
+            clientSecret: env.SIGN_IN_GOOGLE_CLIENT_SECRET,
+          },
+        }
+      : {}),
+  };
 }
 
 export function createAuth(deps: AuthDeps) {
@@ -108,6 +142,18 @@ export function createAuth(deps: AuthDeps) {
           text: `Someone asked to reset the password for ${user.email}.\n\nReset it here (valid for 30 minutes, once): ${url}\n\nIf this wasn't you, ignore this email; your password is unchanged.`,
         });
       },
+    },
+    /*
+     * GitHub and Google (§20.2), when configured. A new account made this
+     * way passes the same invite-only gate as any other (the user-create
+     * hook), and an existing one is joined only when the provider vouches
+     * for the address — Better Auth's default, deliberately not widened
+     * with trusted providers, which would let an unverified address at
+     * GitHub take over the account that owns it here.
+     */
+    socialProviders: {
+      ...(deps.social?.github ? { github: deps.social.github } : {}),
+      ...(deps.social?.google ? { google: deps.social.google } : {}),
     },
     emailVerification: {
       sendOnSignUp: true,

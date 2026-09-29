@@ -9,10 +9,31 @@ import { Field } from '@/components/ui/field';
 import { authClient } from '@/lib/auth-client';
 import { formText, messageOf } from '@/lib/forms';
 
-export function SignInForm() {
+const PROVIDERS = { github: 'GitHub', google: 'Google' } as const;
+
+/** What went wrong at GitHub or Google, in words; Better Auth names it in the address. */
+function returnedWords(code: string): string {
+  if (/sign.?up|create.?user|invitation|forbidden/i.test(code)) {
+    return 'That account has no place here yet: sign-up is by invitation. Ask an administrator to invite the email address it uses.';
+  }
+  if (/email.?not.?verified|not.?verified/i.test(code)) {
+    return 'That account’s email is not verified there, so it cannot be joined to one here.';
+  }
+  return 'Signing in that way did not work. Try again, or sign in another way.';
+}
+
+export function SignInForm({
+  social = [],
+  returnedError = null,
+}: {
+  social?: readonly ('github' | 'google')[];
+  returnedError?: string | null;
+}) {
   const router = useRouter();
   const [step, setStep] = useState<'password' | 'code' | 'sso'>('password');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    returnedError ? returnedWords(returnedError) : null,
+  );
   const [busy, setBusy] = useState(false);
 
   const done = () => {
@@ -166,6 +187,22 @@ export function SignInForm() {
       >
         <Building2 aria-hidden className="size-4" /> Sign in with your company account
       </Button>
+      {social.map((provider) => (
+        <Button
+          key={provider}
+          variant="secondary"
+          type="button"
+          onClick={() =>
+            void authClient.signIn.social({
+              provider,
+              callbackURL: '/',
+              errorCallbackURL: '/sign-in',
+            })
+          }
+        >
+          Sign in with {PROVIDERS[provider]}
+        </Button>
+      ))}
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />
       </div>

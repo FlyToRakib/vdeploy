@@ -37,6 +37,15 @@ export async function setupNeeded(): Promise<boolean> {
   return (body as { needed?: boolean } | null)?.needed === true;
 }
 
+/** Which of GitHub and Google this VDeploy offers for signing in (§20.2). */
+export async function socialSignIn(): Promise<('github' | 'google')[]> {
+  const { body } = await apiGet('/api/v1/auth/methods');
+  const social = (body as { social?: unknown } | null)?.social;
+  return Array.isArray(social)
+    ? social.filter((p): p is 'github' | 'google' => p === 'github' || p === 'google')
+    : [];
+}
+
 export async function activeOrganizationName(): Promise<string | null> {
   const { body } = await apiGet('/api/auth/organization/get-full-organization');
   const name = (body as { name?: unknown } | null)?.name;
