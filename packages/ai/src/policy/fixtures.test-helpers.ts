@@ -140,6 +140,13 @@ const EXTRA_INPUT: Partial<Record<OperationName, Record<string, unknown>>> = {
   'preview.configure': { preview: { enabled: true } },
   'staging.create': { branch: 'develop' },
   'project.clone': { name: 'shop-copy' },
+  'deploy.lock': { reason: 'the launch is today' },
+  'freeze.add': {
+    reason: 'the holidays',
+    from: '2026-12-24T00:00:00Z',
+    until: '2026-12-27T00:00:00Z',
+  },
+  'freeze.remove': { freezeId: newId('deployFreeze') },
   'sso.connect': {
     domain: 'acme.example',
     settings: {

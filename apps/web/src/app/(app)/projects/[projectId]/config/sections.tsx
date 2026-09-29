@@ -675,6 +675,51 @@ export function MovedPagesSection() {
   );
 }
 
+/** Holding this app's deploys (§20): nothing new goes live until it is unlocked. */
+export function DeployLockSection() {
+  const { projectId, row, act } = useProject();
+  const lock = row.deployLock;
+  return (
+    <Section
+      title="Deploy lock"
+      hint="Locked, nothing new goes live for this app — not from a person, a push or the assistant. Going back to an earlier version, restarting and resizing still work."
+    >
+      {lock ? (
+        <div className="grid gap-3 text-sm">
+          <p>
+            <Lock aria-hidden className="mr-1 inline size-4" />
+            Locked by {lock.by} {new Date(lock.at).toLocaleString()}: {lock.reason}
+          </p>
+          <Button
+            variant="secondary"
+            className="justify-self-start"
+            onClick={() => void act('deploy.unlock', { projectId }, 'Unlocking')}
+          >
+            Unlock
+          </Button>
+        </div>
+      ) : (
+        <form
+          action={(form) => {
+            void act('deploy.lock', { projectId, reason: formText(form, 'reason') }, 'Locking');
+          }}
+          className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
+        >
+          <Field
+            label="Why"
+            name="reason"
+            required
+            maxLength={200}
+            placeholder="The launch is today"
+            hint="Whoever finds it locked sees this and your name."
+          />
+          <Button type="submit">Lock</Button>
+        </form>
+      )}
+    </Section>
+  );
+}
+
 /** A copy of this app under a new name (§20 Projects). */
 export function CloneSection() {
   const { projectId, row, act } = useProject();

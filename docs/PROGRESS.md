@@ -290,7 +290,16 @@ each is one task, one commit.
 
 **The manual control surface (§20, §24, §25)**
 - [ ] cancel a deploy, and promote a canary early (§7, §20)
-- [ ] deploy locks and freeze windows (§20)
+- [x] **deploy locks and freeze windows (§20)**: a lock holds one app,
+  with a reason and the name of whoever set it; a freeze holds the whole
+  organization, once between two moments or every week in a window. While
+  either holds, nothing that makes or promotes a release is planned — from
+  a person, a push, an integration or the assistant — and because the
+  worker plans again when it applies, a change approved before a freeze
+  began does not slip out during it. Going back to a version that already
+  ran, restarting and resizing still work (that is incident handling), and
+  a pull request's preview is exempt. Setting and lifting either is a
+  person's act; the assistant is held by them and sets neither
 - [x] **clone a project (§20)**: `project.clone` makes a new, independent
   app from this one on the same server, the way a staging copy is made —
   the spec written, then its own copies of the secrets, then its first

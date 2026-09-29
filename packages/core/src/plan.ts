@@ -102,6 +102,8 @@ export interface PlanContext {
   hostsTaken?: Record<string, string>;
   /** The names of the organization's apps, for an operation that names a new one. */
   appNames?: string[];
+  /** Why nothing new may go live now — a lock or a freeze (§20) — or absent. */
+  deployBlock?: string | null;
   /**
    * Folders where the running app wrote files outside its permanent folders,
    * as its agent last reported (§17.2), minus those marked only temporary.
@@ -1331,6 +1333,21 @@ export function isPlannable(name: OperationName): boolean {
  * the caller loads state, this computes. Every mutation from every origin
  * comes through here; there is no other way to produce steps for the worker.
  */
+/**
+ * Nothing new goes live while a lock or a freeze holds (§20). "New" is a
+ * release made or promoted: going back to one that already ran, a
+ * restart and a resize are what handling an incident looks like, and stay
+ * possible. A preview is exempt — it is a pull request's own copy, and
+ * holding it holds nobody's production.
+ */
+function refuseWhileHeld(steps: readonly PlanStep[], context: PlanContext): void {
+  if (!context.deployBlock || context.project?.previewOf) return;
+  const goesLive = steps.some((s) => s.kind === 'create_release' || s.kind === 'promote_release');
+  if (goesLive) {
+    throw new VDeployError('conflict', `Not now: ${context.deployBlock}.`);
+  }
+}
+
 export function buildPlan(name: OperationName, input: unknown, context: PlanContext): Plan {
   const operation = findOperation(name);
   const planner = PLANNERS[name] as Planner<OperationName> | undefined;
@@ -1345,6 +1362,7 @@ export function buildPlan(name: OperationName, input: unknown, context: PlanCont
   }
   const args = parsed.data as OperationArgs<OperationName>;
   const drafted = planner(args, context);
+  refuseWhileHeld(drafted.steps, context);
   // Every path that deploys copies the data first: one place, not each planner.
   const withBackup = { ...drafted, steps: withPreDeployBackup(drafted.steps, context) };
   const tier = maxTier(operation.tier, withBackup.tier);

@@ -9,6 +9,7 @@ import { useProject } from '../project-shell';
 import {
   AccessSection,
   CloneSection,
+  DeployLockSection,
   DomainsSection,
   ExportSection,
   HealthSection,
@@ -150,6 +151,7 @@ export function ProjectConfig() {
       <PreviewsSection />
       <ServerSection />
       <BuildServerSection />
+      <DeployLockSection />
       <CloneSection />
       <ExportSection />
       {mode === 'advanced' && <RawSpec />}

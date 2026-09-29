@@ -174,6 +174,21 @@ describe('the catalog and the planners agree', () => {
     expect(after.runtime.env.filter((e) => e.key === 'A')).toEqual([{ key: 'A', value: '2' }]);
   });
 
+  it('plans nothing new while a lock or a freeze holds, except for a preview', () => {
+    const held = { project, server, deployBlock: 'deploys are frozen until Monday: the holidays' };
+    expect(() =>
+      buildPlan('env.set', { projectId: project.id, key: 'A', value: '1' }, held),
+    ).toThrow('Not now: deploys are frozen until Monday: the holidays.');
+    // A restart runs what already runs.
+    expect(buildPlan('project.restart', { projectId: project.id }, held).steps).not.toContainEqual(
+      expect.objectContaining({ kind: 'create_release' }),
+    );
+    const preview = { ...held, project: { ...project, previewOf: project.id } };
+    expect(() =>
+      buildPlan('env.set', { projectId: project.id, key: 'A', value: '1' }, preview),
+    ).not.toThrow();
+  });
+
   it('has a planner for every section edit', () => {
     for (const name of SECTION_EDITS) {
       expect(isSectionEdit(name)).toBe(true);

@@ -35,6 +35,8 @@ export interface ProjectRow {
     network?: { containerPort: number };
     runtime: { replicas: number; volumes: { name: string; mountPath: string }[] };
   };
+  /** Set while nothing new may go live for this app (§20). */
+  deployLock: { reason: string; by: string; at: string } | null;
 }
 
 interface ProjectContextValue {

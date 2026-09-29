@@ -2,6 +2,8 @@ import type {
   AiGrants,
   ApplicationSpec,
   BlastRadius,
+  DeployLock,
+  DeployWindow,
   DnsInstruction,
   DomainStatus,
   ObservedReport,
@@ -158,6 +160,8 @@ export const projects = pgTable(
     stagingOf: text('staging_of'),
     /** Flagged folders a person marked as only temporary (§17.2). */
     ignoredPaths: jsonb('ignored_paths').$type<string[]>().notNull().default([]),
+    /** Set while nothing new may go live for this app, and why (§20). */
+    deployLock: jsonb('deploy_lock').$type<DeployLock>(),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -242,6 +246,22 @@ export const plans = pgTable(
     index('plans_status').on(t.status),
   ],
 );
+
+/**
+ * Times an organization's deploys are held (§20): either once, between two
+ * moments, or every week in a window.
+ */
+export const deployFreezes = pgTable('deploy_freezes', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id')
+    .notNull()
+    .references(() => organization.id, { onDelete: 'cascade' }),
+  reason: text('reason').notNull(),
+  startsAt: timestamp('starts_at', { withTimezone: true }),
+  endsAt: timestamp('ends_at', { withTimezone: true }),
+  window: jsonb('window').$type<DeployWindow>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** The org's AI grant matrix (§8 L1); absent means the defaults. */
 export const aiGrants = pgTable('ai_grants', {

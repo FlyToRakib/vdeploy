@@ -584,6 +584,42 @@ describe('the gate', () => {
     expect(followed.statusCode).toBe(200);
   });
 
+  it('holds new versions while an app is locked or deploys are frozen, and nothing else', async () => {
+    const projectId = await seedProject(orgId, 'held');
+    const setting = (value: string) => op(owner, 'env.set', { projectId, key: 'MODE', value });
+
+    expect(
+      (await op(owner, 'deploy.lock', { projectId, reason: 'the launch is today' })).statusCode,
+    ).toBe(200);
+    const refused = await setting('a');
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { message: string } }>().error.message).toMatch(
+      /locked by .*: the launch is today/,
+    );
+    // A restart is not a new version: it is how an incident is handled.
+    expect((await op(owner, 'project.restart', { projectId })).statusCode).toBe(202);
+    expect((await op(owner, 'deploy.unlock', { projectId })).statusCode).toBe(200);
+    expect((await setting('b')).statusCode).toBe(202);
+
+    const now = Date.now();
+    const frozen = await op(owner, 'freeze.add', {
+      reason: 'the holidays',
+      from: new Date(now - 3600_000).toISOString(),
+      until: new Date(now + 3600_000).toISOString(),
+    });
+    expect(frozen.statusCode).toBe(200);
+    const { id: freezeId } = frozen.json<{ result: { id: string } }>().result;
+    const listed = await op(owner, 'freeze.list', {});
+    expect(listed.json<{ result: { id: string; active: boolean }[] }>().result).toContainEqual(
+      expect.objectContaining({ id: freezeId, active: true }),
+    );
+    expect((await setting('c')).json<{ error: { message: string } }>().error.message).toMatch(
+      /frozen until .*: the holidays/,
+    );
+    expect((await op(owner, 'freeze.remove', { freezeId })).statusCode).toBe(200);
+    expect((await setting('d')).statusCode).toBe(202);
+  });
+
   it('ends the sessions of someone whose role changes', async () => {
     const developer = await member('developer', 'dev@example.com');
     const [devMember] = await t.database.db

@@ -9,6 +9,7 @@ import {
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
 import { getBackup, getDatabase, linksOf } from './databases.js';
+import { deployBlock } from './freezes.js';
 import { stagingFor } from './staging.js';
 import {
   databaseLinks,
@@ -55,6 +56,8 @@ export interface PlanWorld {
   hostsTaken?: Record<string, string>;
   /** The names of the organization's apps, for an operation that names a new one. */
   appNames?: string[];
+  /** Why nothing new may go live now: a lock or a freeze (§20). */
+  deployBlock?: string | null;
 }
 
 /**
@@ -236,9 +239,11 @@ export async function loadPlanWorld(
   const database = await requestedDatabase(db, args);
   if (projectId === null) {
     const serverId = requestedServer(args) ?? database?.serverId;
+    const block = orgId ? await deployBlock(db, orgId, null, new Date()) : null;
     if (serverId) {
       return {
         project: null,
+        deployBlock: block,
         server: await serverBudget(db, serverId, null),
         ...(database ? { database: database.state } : {}),
         ...(orgId && bringsHosts(args) ? { hostsTaken: await hostsTaken(db, orgId, null) } : {}),
@@ -249,6 +254,7 @@ export async function loadPlanWorld(
     const candidates = orgId ? await placementCandidates(db, orgId) : [];
     return {
       project: null,
+      deployBlock: block,
       server: null,
       candidates,
       ...(database ? { database: database.state } : {}),
@@ -285,6 +291,7 @@ export async function loadPlanWorld(
     // fits where it is going is the whole point of checking at all.
     server: await budgetFor(db, row, requestedServer(args)),
     unsaved: await unsavedFor(db, row),
+    deployBlock: await deployBlock(db, row.orgId, row.deployLock, new Date()),
   };
   if (bringsHosts(args)) world.hostsTaken = await hostsTaken(db, row.orgId, row.id);
   // A clone names the app it makes: that name must still be free.

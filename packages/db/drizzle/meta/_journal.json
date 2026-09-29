@@ -330,6 +330,13 @@
       "when": 1790662748609,
       "tag": "0046_server-maintenance",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790663075973,
+      "tag": "0047_deploy-locks-and-freezes",
+      "breakpoints": true
     }
   ]
 }

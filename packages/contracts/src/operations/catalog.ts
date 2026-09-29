@@ -20,6 +20,7 @@ import { BackupPolicy, DatabaseEngine, DatabaseVersion } from '../databases.js';
 import { FolderPath } from '../files.js';
 import { NewChannelConfig, NotificationTrigger } from '../notifications.js';
 import { ENV_KEY } from '../dotenv.js';
+import { NewDeployFreeze } from '../freezes.js';
 import { PluginManifest } from '../plugins.js';
 import { PreviewRef } from '../previews.js';
 import { EmailDomain, SsoSettings } from '../sso.js';
@@ -759,6 +760,45 @@ export const OPERATIONS = [
     'project',
     'Make a staging copy of this app that follows another branch',
     obj({ ...P, branch: z.string().min(1).max(255) }),
+    { minRole: 'admin' },
+  ),
+  // A lock and a freeze are people's decisions about when things change:
+  // an assistant can read them, and is held by them, but sets neither.
+  operation(
+    'deploy.lock',
+    'human_only',
+    'project',
+    'Lock this app so nothing new goes live until it is unlocked; going back, restarting and resizing still work',
+    obj({ ...P, reason: z.string().trim().min(1).max(200) }),
+  ),
+  operation(
+    'deploy.unlock',
+    'human_only',
+    'project',
+    'Unlock this app so new versions can go live again',
+    obj(P),
+  ),
+  query(
+    'freeze.list',
+    'org',
+    'config',
+    "List the organization's deploy freezes, and whether each holds now",
+    obj({}),
+  ),
+  operation(
+    'freeze.add',
+    'human_only',
+    'org',
+    'Hold every deploy in the organization, once between two moments or every week in a window',
+    NewDeployFreeze,
+    { minRole: 'admin' },
+  ),
+  operation(
+    'freeze.remove',
+    'human_only',
+    'org',
+    'Remove a deploy freeze',
+    obj({ freezeId: idSchema('deployFreeze') }),
     { minRole: 'admin' },
   ),
   // A clone is a new app, made from this one: scoped to the app it copies,

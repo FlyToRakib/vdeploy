@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   Server,
   ShieldCheck,
+  Snowflake,
   Sparkles,
   type LucideIcon,
 } from 'lucide-react';
@@ -62,7 +63,13 @@ export const NAV: readonly NavItem[] = [
     href: '/settings/notifications',
     label: 'Notifications',
     icon: Bell,
-    keywords: ['email', 'webhook', 'alerts'],
+    keywords: ['email', 'webhook', 'alerts', 'slack', 'discord', 'telegram'],
+  },
+  {
+    href: '/settings/freezes',
+    label: 'Deploy freezes',
+    icon: Snowflake,
+    keywords: ['freeze', 'lock', 'holiday', 'launch', 'hold deploys', 'window'],
   },
   {
     href: '/settings/github',

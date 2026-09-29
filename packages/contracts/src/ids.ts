@@ -54,6 +54,8 @@ export const ID_PREFIXES = {
   cloudAccount: 'cld',
   notificationChannel: 'nch',
   notification: 'ntf',
+  /** A time an organization's deploys are held (§20). */
+  deployFreeze: 'frz',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;
