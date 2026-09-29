@@ -54,6 +54,7 @@ export function renderPlan(plan: PlanView): string {
   if (radius.downtime !== 'none') risky.push(`downtime: ${radius.downtime}`);
   if (radius.dataAtRisk.length > 0) risky.push(`at risk: ${radius.dataAtRisk.join(', ')}`);
   if (risky.length > 0) lines.push('', `  ${red(risky.join(' · '))}`);
+  for (const caution of radius.cautions ?? []) lines.push(`  ${caution}`);
 
   if (waiting) {
     lines.push('', dim(`  Approve it in the dashboard, or: vdeploy plan approve ${plan.id}`));

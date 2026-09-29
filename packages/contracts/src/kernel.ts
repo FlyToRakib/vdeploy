@@ -202,6 +202,8 @@ export const BlastRadius = z.strictObject({
   downtime: z.enum(['none', 'brief', 'until_started', 'permanent']),
   dataAtRisk: z.array(z.string()),
   rollbackTo: idSchema('release').nullable(),
+  /** What is worth reading first that loses nothing: scaling's surprises (§17.3, §17.6). */
+  cautions: z.array(z.string().max(500)).max(10).optional(),
 });
 export type BlastRadius = z.infer<typeof BlastRadius>;
 

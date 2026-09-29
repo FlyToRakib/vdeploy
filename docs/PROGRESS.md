@@ -254,8 +254,17 @@ each is one task, one commit.
 **Data (§17)**
 - [ ] object storage: a bucket you bring, or managed MinIO (§17.1, M5)
 - [ ] a database's public port, as a warned opt-in (§17.3)
-- [ ] the connection-limit warning (§17.3)
-- [ ] the filesystem-sessions warning when scaling (§17.6)
+- [x] **the connection-limit warning (§17.3)**: before an app grows, its
+  plan says when the copies of every app reading a linked Postgres, MySQL
+  or MariaDB could open 80% or more of the connections the engine allows.
+  Each app's pool is read from its settings (`DB_POOL` and the like, or
+  Prisma's `connection_limit`), and assumed to be the usual 10 otherwise
+- [x] **the filesystem-sessions warning when scaling (§17.6)**: going from
+  one copy to several without sticky sessions, the plan says visitors may
+  be signed out at random — plainly when the app keeps sessions in files
+  (`SESSION_DRIVER=file`), and as an "if" when it cannot tell. Both are
+  plan cautions, shown with the risks in the dashboard and the CLI:
+  things worth reading first that lose nothing
 - [ ] per-volume usage, and an alert before one fills (§17.2)
 - [x] **scheduled clean-up of unused images and build cache (§19)**: once
   a day each connected server is asked to free disk with the same request

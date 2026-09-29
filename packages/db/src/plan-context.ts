@@ -2,11 +2,12 @@ import { readSpec, type ApplicationSpec, type Id } from '@vdeploy/contracts';
 import {
   footprint,
   NO_FOOTPRINT,
+  poolSize,
   type Candidate,
   type DatabaseState,
   type ServerBudget,
 } from '@vdeploy/core';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Database } from './client.js';
 import { getBackup, getDatabase, linksOf } from './databases.js';
 import { deployBlock } from './freezes.js';
@@ -189,22 +190,40 @@ async function requestedDatabase(
 export async function linkedDatabases(
   db: Database,
   projectId: string,
-): Promise<{ id: Id<'database'>; name: string; readers: number }[]> {
+): Promise<
+  { id: Id<'database'>; name: string; readers: number; engine: string; otherConnections: number }[]
+> {
   const rows = await db
-    .select({ id: databases.id, name: databases.name })
+    .select({ id: databases.id, name: databases.name, engine: databases.engine })
     .from(databaseLinks)
     .innerJoin(databases, eq(databases.id, databaseLinks.databaseId))
     .where(and(eq(databaseLinks.projectId, projectId), isNull(databases.deletedAt)));
-  const seen = new Map(rows.map((row) => [row.id, row.name]));
+  const seen = new Map(rows.map((row) => [row.id, row]));
   const out = [];
-  for (const [id, name] of seen) {
+  for (const [id, row] of seen) {
     // How many apps read it, which is what decides whether it can move
     // with this one or is stuck where it is (§17.6).
     const links = await linksOf(db, id);
+    const readers = [...new Set(links.map((link) => link.projectId))];
+    // And how many connections the others may open, for the warning
+    // before this one grows (§17.3).
+    const others = readers.filter((p) => p !== projectId);
+    const specs = others.length
+      ? await db
+          .select({ spec: projects.spec })
+          .from(projects)
+          .where(and(inArray(projects.id, others), isNull(projects.deletedAt)))
+      : [];
+    const otherConnections = specs.reduce((sum, { spec }) => {
+      const read = readSpec(spec);
+      return sum + read.runtime.replicas * poolSize(read);
+    }, 0);
     out.push({
       id: id as Id<'database'>,
-      name,
-      readers: new Set(links.map((link) => link.projectId)).size,
+      name: row.name,
+      readers: readers.length,
+      engine: row.engine,
+      otherConnections,
     });
   }
   return out;

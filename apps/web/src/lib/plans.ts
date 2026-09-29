@@ -14,6 +14,7 @@ export interface PendingPlan {
       domains: string[];
       downtime: 'none' | 'brief' | 'until_started' | 'permanent';
       dataAtRisk: string[];
+      cautions?: string[];
       rollbackTo: string | null;
     };
   };
@@ -71,6 +72,7 @@ export function riskSentences(plan: PendingPlan['plan']): string[] {
   const downtime = DOWNTIME[r.downtime];
   if (downtime) out.push(downtime);
   if (r.domains.length) out.push(`Affects ${r.domains.join(', ')}.`);
+  for (const c of r.cautions ?? []) out.push(c);
   if (r.rollbackTo) out.push('The version running now stays available to go back to.');
   return out;
 }

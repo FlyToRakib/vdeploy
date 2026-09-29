@@ -28,3 +28,4 @@ export * from './placement.js';
 export * from './undo.js';
 export * from './export.js';
 export * from './agent-updates.js';
+export * from './scale-cautions.js';

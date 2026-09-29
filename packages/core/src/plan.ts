@@ -20,6 +20,7 @@ import { describeCron } from './cron.js';
 import { defaultEnvKey, engineProfile } from './databases.js';
 import type { SectionEdit } from './spec-edit.js';
 import { place, type Candidate } from './placement.js';
+import { scaleCautions } from './scale-cautions.js';
 import { promotionRefusal } from './staging.js';
 import { templateSecrets } from './templates.js';
 import { checkFits, footprint, type ServerBudget } from './governor.js';
@@ -70,7 +71,14 @@ export interface PlanContext {
    * `readers` is how many apps read each, which decides whether one can
    * move with this app or is stuck where it is (§17.6).
    */
-  linkedDatabases?: { id: Id<'database'>; name: string; readers?: number }[];
+  linkedDatabases?: {
+    id: Id<'database'>;
+    name: string;
+    readers?: number;
+    engine?: string;
+    /** Connections the other apps reading it may open (§17.3). */
+    otherConnections?: number;
+  }[];
   /** The release a rollback returns to, loaded by the caller. */
   targetRelease?: { id: Id<'release'>; spec: ApplicationSpec };
   /**
@@ -705,6 +713,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       withinDeclared ? 'safe' : 'sensitive',
       shrinking ? context : { ...context, unsaved: [] },
     );
+    const cautions = scaleCautions(project.spec, args.replicas, context.linkedDatabases ?? []);
     // Replicas are live state, not part of a release: scaling changes no image and no release.
     return {
       ...draft,
@@ -712,6 +721,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
       blastRadius: {
         ...draft.blastRadius,
         downtime: args.replicas === 0 ? 'until_started' : 'none',
+        ...(cautions.length ? { cautions } : {}),
       },
     };
   },
