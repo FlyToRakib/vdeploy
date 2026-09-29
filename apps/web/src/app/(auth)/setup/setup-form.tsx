@@ -8,7 +8,7 @@ import { Field } from '@/components/ui/field';
 import { messageOf } from '@/lib/forms';
 
 /** First-run setup (§34.1): the owner account and the first organization. */
-export function SetupForm() {
+export function SetupForm({ codeRequired }: { codeRequired: boolean }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,6 +45,15 @@ export function SetupForm() {
           This creates the owner account. Everyone else joins by invitation.
         </p>
       </div>
+      {codeRequired && (
+        <Field
+          label="Setup code"
+          name="setupCode"
+          autoComplete="off"
+          required
+          hint="It proves you installed this. On the server: grep SETUP_CODE deploy/.env"
+        />
+      )}
       <Field label="Your name" name="name" autoComplete="name" required />
       <Field label="Email" name="email" type="email" autoComplete="email" required />
       <Field

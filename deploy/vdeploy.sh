@@ -81,6 +81,7 @@ install() {
       -e "s|^AUTH_SECRET=.*|AUTH_SECRET=$(b64 48)|" \
       "$here/../apps/api/.env.example" >"$here/.env"
     printf 'POSTGRES_PASSWORD=%s\n' "$(hex 24)" >>"$here/.env"
+    printf 'SETUP_CODE=%s\n' "$(hex 16)" >>"$here/.env"
     say 'Made deploy/.env with new keys. Copy it somewhere that is not this server:'
     say 'without SECRETS_KEY no stored secret can be opened again, by anybody.'
   fi
@@ -89,7 +90,8 @@ install() {
   public=$(sed -n 's/^PUBLIC_URL=//p' "$here/.env")
   say ''
   say "VDeploy is running. Put your TLS in front of 127.0.0.1:8080, then open $public"
-  say 'and create the owner account. The first person to do so owns this installation.'
+  say 'and create the owner account. It asks for the setup code, which proves it is you:'
+  say "  grep SETUP_CODE $here/.env"
 }
 
 upgrade() {
@@ -107,6 +109,11 @@ upgrade() {
   [ -f "$here/.env" ] || fail 'nothing is installed here yet: run install first'
   if [ "$pull" = 1 ] && [ -d "$here/../.git" ]; then
     git -C "$here/.." pull --ff-only || fail 'could not update the checkout without merging; nothing was changed'
+  fi
+  # Installed before the owner account asked for a setup code: it gets one.
+  # Once there is an owner nothing asks for it again.
+  if ! grep -q '^SETUP_CODE=.' "$here/.env"; then
+    printf 'SETUP_CODE=%s\n' "$(hex 16)" >>"$here/.env"
   fi
   say 'Backing up the database first…'
   backup=$(dump pre-upgrade)

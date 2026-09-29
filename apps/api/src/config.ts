@@ -23,6 +23,12 @@ export const ApiConfig = z.object({
   CONTROL_PLANE_KEY: Key32,
   /** Signs sessions and encrypts 2FA secrets. At least 32 random characters. */
   AUTH_SECRET: z.string().min(32),
+  /**
+   * Asked for when the owner account is created (§34.1). Without it, the
+   * first person to open a new installation owns it — and a new address
+   * is found within minutes, from the certificate logs.
+   */
+  SETUP_CODE: z.string().min(16).optional(),
   /** smtp(s)://user:pass@host:port — without it, email is logged, not sent. */
   SMTP_URL: z.url({ protocol: /^smtps?$/ }).optional(),
   MAIL_FROM: z.string().min(3).default('VDeploy <no-reply@localhost>'),

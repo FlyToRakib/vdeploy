@@ -33,8 +33,14 @@ export async function currentSession(): Promise<SessionView | null> {
 }
 
 export async function setupNeeded(): Promise<boolean> {
+  return (await setupState()).needed;
+}
+
+/** Whether this installation still has no owner, and asks for its setup code. */
+export async function setupState(): Promise<{ needed: boolean; codeRequired: boolean }> {
   const { body } = await apiGet('/api/v1/setup');
-  return (body as { needed?: boolean } | null)?.needed === true;
+  const answer = body as { needed?: boolean; codeRequired?: boolean } | null;
+  return { needed: answer?.needed === true, codeRequired: answer?.codeRequired === true };
 }
 
 /** How this VDeploy lets people sign in (§20.2): GitHub or Google, and a CAPTCHA site. */

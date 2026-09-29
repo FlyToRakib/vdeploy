@@ -359,6 +359,13 @@ each is one task, one commit.
   case — knows only the old key: the agent keeps it, tries it once when
   refused, and offers its current key again, so a restore never locks a
   server out
+- [x] **a new installation asks for its setup code** — found installing on
+  the live VPS: the first person to open a new installation became its
+  owner, and a new address is found within minutes, from the public
+  certificate logs. The installer now writes a one-time SETUP_CODE beside
+  the other keys (an upgrade adds one to an installation that has none),
+  and the owner account is made only with it — compared in the same time
+  whatever is typed, and a wrong one claims nothing
 - [x] **API keys can be made from the dashboard** — found preparing the
   first live deploy: the CLI, MCP and the public API all take a key, and
   the only way to make one was to call the API with a signed-in session

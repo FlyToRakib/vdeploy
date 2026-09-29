@@ -147,6 +147,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       socialProviders: (['github', 'google'] as const).filter((p) => socialSignIn(config)[p]),
       locate,
       ...(captcha ? { captchaSiteKey: captcha.siteKey } : {}),
+      ...(config.SETUP_CODE ? { setupCode: config.SETUP_CODE } : {}),
     }),
   );
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });

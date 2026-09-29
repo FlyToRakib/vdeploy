@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { newId, SetupRequest, VDeployError } from '@vdeploy/contracts';
 import {
   appendAudit,
@@ -30,6 +30,14 @@ export interface AccountDeps {
   locate?: Locate;
   /** The Turnstile site to show after repeated failures, when configured (§20.2). */
   captchaSiteKey?: string;
+  /** Asked for before the owner account is created, when configured. */
+  setupCode?: string;
+}
+
+/** The two codes compared as their hashes: in the same time whatever was typed. */
+function sameCode(given: string, expected: string): boolean {
+  const hash = (text: string) => createHash('sha256').update(text).digest();
+  return timingSafeEqual(hash(given), hash(expected));
 }
 
 function slugify(name: string): string {
@@ -50,6 +58,7 @@ export const accountRoutes =
     socialProviders = [],
     locate = NO_LOCATION,
     captchaSiteKey,
+    setupCode,
   }: AccountDeps): FastifyPluginAsyncZod =>
   (app) => {
     const origin = new URL(publicUrl).origin;
@@ -77,7 +86,7 @@ export const accountRoutes =
         .select()
         .from(instanceSettings)
         .where(isNotNull(instanceSettings.ownerUserId));
-      return { needed: !settings };
+      return { needed: !settings, codeRequired: Boolean(setupCode) };
     });
 
     /**
@@ -86,6 +95,12 @@ export const accountRoutes =
      * setup attempts impossible to win twice.
      */
     app.post('/api/v1/setup', { schema: { body: SetupRequest } }, async (req, reply) => {
+      if (setupCode && !sameCode(req.body.setupCode ?? '', setupCode)) {
+        throw new VDeployError(
+          'forbidden',
+          'That is not this installation\u2019s setup code. It is in deploy/.env on the server, as SETUP_CODE.',
+        );
+      }
       const [claimed] = await db
         .insert(instanceSettings)
         .values({ id: 1 })
