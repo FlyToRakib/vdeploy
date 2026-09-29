@@ -359,6 +359,14 @@ each is one task, one commit.
   case — knows only the old key: the agent keeps it, tries it once when
   refused, and offers its current key again, so a restore never locks a
   server out
+- [x] **API keys can be made from the dashboard** — found preparing the
+  first live deploy: the CLI, MCP and the public API all take a key, and
+  the only way to make one was to call the API with a signed-in session
+  (which is what the end-to-end run did), so no person could ever use
+  them. Security now has an API keys panel — name, scope, how long it
+  works, the key shown once — with the keys listed by name and first
+  letters (`api_key.list`, each person's own) and revoked in a click.
+  Checked in a browser: made, shown once, listed, revoked
 - [x] **an upload leaves out what the folder keeps out of git** — found
   preparing the first live deploy: `vdeploy up` and the dashboard's folder
   upload skipped dependencies, git history and .env files, but not what

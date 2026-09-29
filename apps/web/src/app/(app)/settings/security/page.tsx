@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { ApiKeysPanel } from './api-keys-panel';
 import { PasskeysPanel } from './passkeys-panel';
 import { SessionsPanel } from './sessions-panel';
 import { TwoFactorPanel } from './two-factor-panel';
@@ -13,6 +14,7 @@ export default function SecurityPage() {
       <SessionsPanel />
       <PasskeysPanel />
       <TwoFactorPanel />
+      <ApiKeysPanel />
     </div>
   );
 }

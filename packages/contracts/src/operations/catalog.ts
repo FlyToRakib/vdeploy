@@ -143,6 +143,13 @@ export const OPERATIONS = [
   query('health.check', 'project', 'metrics', 'Run the health checks of a project now', obj(P)),
   query('urls.get', 'org', 'config', 'Show how projects get their instant URLs', obj({})),
   query(
+    'api_key.list',
+    'org',
+    'config',
+    'List your API keys: their names and first letters, never the keys',
+    obj({}),
+  ),
+  query(
     'cloud.list',
     'org',
     'config',

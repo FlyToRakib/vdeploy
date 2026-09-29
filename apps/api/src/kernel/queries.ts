@@ -18,6 +18,7 @@ import {
   templateLink,
 } from '@vdeploy/core';
 import {
+  apikey,
   builds,
   buildView,
   CERTIFICATE_WARNING_DAYS,
@@ -434,6 +435,38 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       committed: budget.committed,
       summary: describeCapacity(budget, typical),
     };
+  },
+  /*
+   * The keys the person asking has made for this organization (§23): what
+   * each is called, the letters it starts with, what it may do, and when it
+   * was last used and runs out. The key itself was shown once, when made.
+   */
+  'api_key.list': async ({ deps, actor }) => {
+    const rows = await deps.db
+      .select()
+      .from(apikey)
+      .where(eq(apikey.referenceId, actor.userId))
+      .orderBy(desc(apikey.createdAt));
+    return rows.flatMap((row) => {
+      let meta: { orgId?: unknown; scope?: unknown } = {};
+      try {
+        meta = JSON.parse(row.metadata ?? '{}') as typeof meta;
+      } catch {
+        return [];
+      }
+      if (meta.orgId !== actor.orgId) return [];
+      return [
+        {
+          id: row.id,
+          name: row.name ?? 'API key',
+          start: row.start,
+          scope: typeof meta.scope === 'string' ? meta.scope : 'read',
+          createdAt: row.createdAt.toISOString(),
+          expiresAt: row.expiresAt?.toISOString() ?? null,
+          lastUsedAt: row.lastRequest?.toISOString() ?? null,
+        },
+      ];
+    });
   },
   'urls.get': async ({ deps, actor }) => ({
     settings: await urlSettingsFor(deps.db, actor.orgId),
