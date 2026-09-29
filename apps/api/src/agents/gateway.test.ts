@@ -52,6 +52,9 @@ function enrollBody(token: string, key: KeyObject) {
     agentVersion: 'test',
     cpus: 2,
     memoryBytes: 2 ** 31,
+    // What a real agent sends: the facts it also says hello with.
+    binarySha256: 'b'.repeat(64),
+    schemaSha256: 'c'.repeat(64),
   };
 }
 

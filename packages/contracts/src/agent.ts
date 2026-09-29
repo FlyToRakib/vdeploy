@@ -116,6 +116,9 @@ export const DesiredState = z.strictObject({
 });
 export type DesiredState = z.infer<typeof DesiredState>;
 
+/** A SHA-256, as lowercase hex. */
+const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+
 /** Header every signed frame body carries (ADR 0004). */
 const FrameHeader = {
   v: z.literal(1),
@@ -234,14 +237,8 @@ export const AgentFrame = z.discriminatedUnion('type', [
     /** The agent's X25519 public key: secrets are sealed to it. */
     boxKey: z.base64().length(44).optional(),
     /** Which build it is, and which desired-state contract it reads (§25). */
-    binarySha256: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/)
-      .optional(),
-    schemaSha256: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/)
-      .optional(),
+    binarySha256: Sha256.optional(),
+    schemaSha256: Sha256.optional(),
   }),
   z.strictObject({
     ...FrameHeader,
@@ -360,6 +357,9 @@ export const EnrollRequest = z.strictObject({
   memoryBytes: z.number().int().min(0),
   addresses: z.array(z.string().max(45)).max(16).optional(),
   provider: z.string().max(64).optional(),
+  /** The agent describes itself with the facts it says hello with. */
+  binarySha256: Sha256.optional(),
+  schemaSha256: Sha256.optional(),
 });
 export type EnrollRequest = z.infer<typeof EnrollRequest>;
 
