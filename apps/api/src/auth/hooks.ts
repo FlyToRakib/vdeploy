@@ -1,8 +1,8 @@
 import { createHash, createHmac } from 'node:crypto';
-import { appendAudit, knownDevice, type Database } from '@vdeploy/db';
+import { appendAudit, knownDevice, member, type Database } from '@vdeploy/db';
 import type { BetterAuthOptions } from 'better-auth';
 import { APIError, createAuthMiddleware, isAPIError } from 'better-auth/api';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { assertMayRegister } from './registration.js';
 import { clearFailures, failureCount, lockedUntil, recordFailure } from './lockout.js';
 import type { Mailer } from './mailer.js';
@@ -143,6 +143,25 @@ export function createHooks(deps: HookDeps) {
     },
     session: {
       create: {
+        /*
+         * Every session starts in the person's organization. Without this,
+         * only the session setup made had one: signing in again gave a
+         * session in no organization, and every screen answered "choose an
+         * organization first" — with nowhere on the dashboard to choose.
+         */
+        before: async (session) => {
+          const current = (session as { activeOrganizationId?: string | null })
+            .activeOrganizationId;
+          if (current) return;
+          const [first] = await db
+            .select({ organizationId: member.organizationId })
+            .from(member)
+            .where(eq(member.userId, session.userId))
+            .orderBy(asc(member.createdAt))
+            .limit(1);
+          if (!first) return;
+          return { data: { ...session, activeOrganizationId: first.organizationId } };
+        },
         after: async (session) => {
           await alertOnNewDevice(deps, session);
         },

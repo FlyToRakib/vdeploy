@@ -156,6 +156,15 @@ describe('administrative operations', () => {
     expect(domains.json<{ result: unknown[] }>().result).toEqual([]);
   });
 
+  it('puts a session made by signing in again in the person’s organization', async () => {
+    // A new browser, as after signing out: nothing chooses an organization.
+    const again = new Browser(t.app, 'Owner/2.0');
+    const signed = await again.signIn('owner@example.com', PASSWORD);
+    expect(signed.statusCode).toBe(200);
+    const listed = await op(again, 'project.list', {});
+    expect(listed.statusCode).toBe(200);
+  });
+
   it('gives instant URLs one wildcard certificate only once DNS can prove it', async () => {
     const wildcard = { mode: 'wildcard', baseDomain: 'apps.acme.dev', wildcardCertificate: true };
     const early = await op(owner, 'urls.configure', wildcard);
