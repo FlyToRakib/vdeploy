@@ -53,6 +53,12 @@ governor that refuses what will not fit. Dedicated build machines, a
 dedicated edge tier, and private traffic between your own servers over
 mutual TLS keyed on identities the agents already have.
 
+**Gives you somewhere to try things.** A preview of every pull request,
+built and run at its own address and taken away whole when the pull
+request closes, and a staging copy that follows another branch. Promoting
+staging runs **exactly the image staging was running**, not a rebuild of
+the same commit.
+
 **Explains itself.** Live logs, a web terminal, a file browser, uptime,
 metrics, notifications, and a deterministic diagnostic layer that turns
 "exit code 137" into "it ran out of memory".
@@ -67,6 +73,14 @@ document generated from the operation catalog, a CLI generated from the
 same catalog, an MCP server so somebody else's AI can drive it, and
 integrations that get a key allowed to call exactly the operations you
 read and agreed to.
+
+**Fits a company.** Sign-in through your own identity provider, OIDC or
+SAML, alongside the passwords and passkeys that already work — people
+arrive as viewers and are promoted by hand, because a platform that can
+delete production should not hand out roles it inferred. And if you have
+no server yet, VDeploy can order one at Hetzner, DigitalOcean or Vultr:
+the monthly price is on the screen before the button, and the machine
+boots into the same one-line installer you would have pasted yourself.
 
 ## How it is arranged
 

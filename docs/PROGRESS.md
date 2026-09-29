@@ -1,9 +1,15 @@
 # VDeploy Implementation Progress
 
-**Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — 54 checks locally, 53 on the VPS, baseline unchanged
-**Status:** in progress
-**Updated:** 2026-09-30 11:20 UTC
+**Milestone:** M6 — met 2026-09-30 (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
+**Task:** all ten §26 items built; 54 checks locally, 53 on the VPS, the
+three M6 screens opened in a browser, baseline unchanged
+**Status:** M1–M6 implemented and exercised. What is left needs somebody
+with an account: an AI provider key for the M3 exit eval, GitHub App
+credentials, a live GitLab, Bitbucket, identity provider or cloud
+provider, and a way to receive ports 80 and 443 for real certificates.
+Those are listed under **Blocked / needs the user**, and every provider
+shape they cover is exercised against a stand-in in the meantime.
+**Updated:** 2026-09-30 11:45 UTC
 
 ## M6 — the ecosystem
 
@@ -523,6 +529,11 @@ GitHub.
   re-confirmed this time is the four multi-server checks M5 already
   passed there — placement, the builder, the mesh and the edge — which
   come after the point it stopped
+- [x] **the M2 walkthrough again, on the rebuilt dashboard** — the
+  non-coder path is the one thing a change to the Config screen could
+  break without any test noticing, so it was run again afterwards:
+  setup, the one-command server, a folder online, live logs and a broken
+  version survived
 - [x] **the three M6 screens, opened in a real browser** — previews and
   staging on a project's Config screen, and Integrations. Everything
   they drive is proved by the API run; what was not proved is that the
