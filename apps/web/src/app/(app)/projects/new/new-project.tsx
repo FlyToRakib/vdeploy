@@ -1,5 +1,6 @@
 'use client';
 
+import { STATIC_PORT } from '@vdeploy/contracts';
 import { Blocks, Box, FileStack, FolderUp, GitBranch, Server } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -124,6 +125,9 @@ export function NewProject() {
   const [plan, setPlan] = useState<PlanView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // The one-click correction to a wrong guess (§21 risks): "no, it is a
+  // website of files, in this folder".
+  const [asStatic, setAsStatic] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [compose, setCompose] = useState<ComposeRead | null>(null);
 
@@ -183,6 +187,14 @@ export function NewProject() {
     setError(null);
     const name = formText(form, 'name');
     const template = ready.template;
+    const command = formText(form, 'command').trim();
+    const build = asStatic
+      ? {
+          strategy: 'static',
+          output: formText(form, 'output').trim() || '.',
+          ...(command ? { command } : {}),
+        }
+      : ready.build;
     const spec = ready.compose
       ? { ...ready.compose.spec, metadata: { name } }
       : {
@@ -190,10 +202,17 @@ export function NewProject() {
           kind: 'Application',
           metadata: { name },
           source: ready.source,
-          build: ready.build,
+          build,
           // A template already knows its port, its folders and its settings;
-          // asking a person for them is asking them to get it wrong.
-          ...(template ? {} : { network: { containerPort: Number(formText(form, 'port')) } }),
+          // asking a person for them is asking them to get it wrong. A static
+          // site is served where its server listens.
+          ...(template
+            ? {}
+            : {
+                network: {
+                  containerPort: asStatic ? STATIC_PORT : Number(formText(form, 'port')),
+                },
+              }),
         };
     try {
       const outcome = await stepUp(() =>
@@ -356,7 +375,39 @@ export function NewProject() {
                 pattern="[a-z]([a-z0-9-]{0,61}[a-z0-9])?"
                 hint="It becomes part of the address."
               />
-              {!ready.template && !ready.compose && (
+              {ready.build.strategy === 'railpack' && (
+                <label className="flex items-start gap-2 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={asStatic}
+                    onChange={(event) => {
+                      setAsStatic(event.target.checked);
+                    }}
+                    className="mt-1"
+                  />
+                  <span>Not right? Serve it as a website of files instead.</span>
+                </label>
+              )}
+              {asStatic && (
+                <>
+                  <Field
+                    label="The folder the finished site is in"
+                    name="output"
+                    defaultValue="dist"
+                    hint="Like dist or build; a dot for the folder itself."
+                  />
+                  <Field
+                    label="What builds it"
+                    name="command"
+                    defaultValue={
+                      ready.detection?.runtime === 'node' ? 'npm ci && npm run build' : ''
+                    }
+                    placeholder="npm ci && npm run build"
+                    hint="Leave it empty if the files are ready as they are."
+                  />
+                </>
+              )}
+              {!ready.template && !ready.compose && !asStatic && (
                 <Field
                   label="Port the app listens on"
                   name="port"

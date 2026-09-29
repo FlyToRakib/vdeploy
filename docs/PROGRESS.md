@@ -323,7 +323,10 @@ each is one task, one commit.
   and the files are served by nginx running as a user that is not root,
   on 8080, which the spec is held to. `strategy: compose` is refused in
   words at the spec — a compose file is imported, a project per service —
-  rather than accepted and then failing at deploy
+  rather than accepted and then failing at deploy. And the detection
+  preview has the one-click correction §21 asks for ("We think this is a
+  Vite SPA … Right?"): "Not right? Serve it as a website of files
+  instead", with the folder and what builds it
 - [x] **signing in again reaches the organization** — found by opening
   the new screens in a real browser: only the session made at first-run
   setup ever had an organization. Signing in again — after signing out,
