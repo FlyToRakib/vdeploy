@@ -1,15 +1,72 @@
 # VDeploy Implementation Progress
 
-**Milestone:** M6 — met 2026-09-30 (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** all ten §26 items built; 54 checks locally, 53 on the VPS, the
-three M6 screens opened in a browser, baseline unchanged
-**Status:** M1–M6 implemented and exercised. What is left needs somebody
-with an account: an AI provider key for the M3 exit eval, GitHub App
-credentials, a live GitLab, Bitbucket, identity provider or cloud
-provider, and a way to receive ports 80 and 443 for real certificates.
-Those are listed under **Blocked / needs the user**, and every provider
-shape they cover is exercised against a stand-in in the meantime.
-**Updated:** 2026-09-30 11:45 UTC
+**Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
+**Task:** liveness and readiness probes
+**Status:** in progress
+**Updated:** 2026-09-30 12:30 UTC
+
+## v1 completion — what the audit found
+
+M4, M5 and M6 were each marked met on the strength of the Known gaps
+list, and that list was never checked against `docs/vdeploy.md`. Doing
+so found it wrong in both directions: it listed rule-based autoscaling
+and log search/download as missing when both are built, and it did not
+list most of what follows at all — including two of §35's twelve
+completeness items (undo, and leaving with everything) and a field the
+spec accepts and the agent silently ignores. The milestones are
+reopened until these are in. Grouped by the harm of leaving them out;
+each is one task, one commit.
+
+**Accepted by the spec and silently ignored — worst first, because they look configured**
+- [ ] liveness and readiness probes (§5, §18) — the agent reads only `startup`, and not its interval
+- [ ] `build.cache` (§5, §15) — no build reads it
+- [ ] the AI's deploy-window guardrail (§8 L1) — on the grant matrix in the spec, not in the grants
+- [ ] `domain.add` refusing a host another project routes (2.4) — the agent refuses it later instead
+
+**§35's completeness test, and the M4/§31 features behind it**
+- [ ] Undo last change (§31 #9, §35.7)
+- [ ] Export everything: specs, a Compose equivalent, an env template with secret names (§17.7, §31 #11, §35.12)
+- [ ] step-up with a passkey or an authenticator code (§20.2) — a passkey-only person cannot do anything sensitive
+- [ ] certificate renewal status, and an alert 21 days out (§30 ⑦, §18)
+- [ ] the break-glass command on the control-plane host (§30 ⑧)
+- [ ] one command to install the control plane, one to upgrade it with a backup first (§34.1)
+- [ ] `vdeploy up` from a local folder (§30 ③)
+
+**Routing (§13)**
+- [ ] redirects: www↔apex on by default, and custom rules
+- [ ] auth in front of an app: basic auth, and forward-auth for OIDC
+- [ ] IP deny lists, and rate limits keyed by a header
+- [ ] HTTP/3, and timeouts that suit SSE and WebSockets
+- [ ] the raw Traefik escape hatch (§20)
+- [ ] `network.protocol: tcp`
+- [ ] DNS-01 certificates, and a wildcard certificate as the opt-in (§13, §13.1)
+
+**Data (§17)**
+- [ ] object storage: a bucket you bring, or managed MinIO (§17.1, M5)
+- [ ] a database's public port, as a warned opt-in (§17.3)
+- [ ] the connection-limit warning (§17.3)
+- [ ] the filesystem-sessions warning when scaling (§17.6)
+- [ ] per-volume usage, and an alert before one fills (§17.2)
+- [ ] scheduled clean-up of unused images and build cache (§19)
+
+**Notifications (§18)**
+- [ ] Slack, Discord and Telegram
+- [ ] triggers: health failing without crashing, certificate renewal failed, autoscaling
+
+**The manual control surface (§20, §24, §25)**
+- [ ] cancel a deploy, and promote a canary early (§7, §20)
+- [ ] deploy locks and freeze windows (§20)
+- [ ] clone a project (§20)
+- [ ] env import and export in bulk (§20)
+- [ ] maintenance mode for a server (§20)
+- [ ] `registry.add`: pulling from a private registry (§15, §24)
+- [ ] teams and custom roles (§20, M1)
+- [ ] a server's SSH keys, read like its firewall is (§20, ADR 0016)
+- [ ] agent version, self-update by channel, staged rollout, clean uninstall (§25, §34.2)
+- [ ] GitHub and Google sign-in, when configured (§20.2)
+- [ ] a session's approximate location, when a GeoIP database is configured (§20.2)
+- [ ] CAPTCHA after repeated failures, when configured (§20.2)
+- [ ] the 4 GB image warning, and a DNS propagation countdown (§30 ④ ⑤)
 
 ## M6 — the ecosystem
 
@@ -702,9 +759,9 @@ GitHub.
 - The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.
 - Liveness/readiness probes after startup (§ health.liveness/readiness) are not run by the agent yet; startup probes gate traffic (2.2). Snapshots before destructive steps are in (4.3a), and the agent deletes a volume only as the second half of a copy it has just proved (4.3h).
 - Instant URLs: settings are per org only (not per server); `{env}`/`{team}` patterns wait for environments and teams; no automatic sslip.io ↔ nip.io failover on Let's Encrypt rate limits (needs ACME outcomes from the agent, 2.12); a custom domain added later is not yet checked against other projects' instant hosts (2.4). The agent reads its interface addresses at start only.
-- Logs: streamed on demand from Docker's own capped log files, not a separate ring buffer; live streams need the viewer's API instance to hold the agent connection (single API instance until pub/sub, §6); log search and download arrive with the dashboard (2.16).
+- Logs: streamed on demand from Docker's own capped log files, not a separate ring buffer; live streams need the viewer's API instance to hold the agent connection (single API instance until pub/sub, §6).
 - Builds: an agent restarted mid-build loses that build (the worker gives up after its timeout and the plan fails with a plain reason); registry cache and a separate builder server wait for multi-server; unused images and build cache are measured and freed on request, keeping the last ten releases of each app; nothing frees them on a schedule yet; uploads are kept in the database with no retention yet.
-- Governor: the brief blue/green overlap (old and new replicas together) is not counted, disk is not budgeted, and the agent's reserve is a fixed 256 MB; rule-based autoscaling with governor veto is not built yet.
+- Governor: the brief blue/green overlap (old and new replicas together) is not counted, disk is not budgeted, and the agent's reserve is a fixed 256 MB.
 - Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); no bulk env import/export yet (2.16); build secrets are stored but used only once builds exist (2.7); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
 - DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale); `domain.add` does not yet refuse a host another project routes (the agent refuses such a frame).
 
