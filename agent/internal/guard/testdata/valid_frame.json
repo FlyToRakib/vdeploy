@@ -21,6 +21,7 @@
         "build": {
           "strategy": "image",
           "context": ".",
+          "output": ".",
           "args": {},
           "secrets": [],
           "cache": "registry"
