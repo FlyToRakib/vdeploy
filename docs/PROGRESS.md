@@ -1,9 +1,9 @@
 # VDeploy Implementation Progress
 
 **Milestone:** M6 — the rest of it (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, M4 2026-09-27, M5 2026-09-28)
-**Task:** M6 — 54 checks locally, 42 on the VPS including all five M6 ones
+**Task:** M6 — 54 checks locally, 53 on the VPS, baseline unchanged
 **Status:** in progress
-**Updated:** 2026-09-30 09:10 UTC
+**Updated:** 2026-09-30 10:05 UTC
 
 ## M6 — the ecosystem
 
@@ -523,6 +523,22 @@ GitHub.
   re-confirmed this time is the four multi-server checks M5 already
   passed there — placement, the builder, the mesh and the edge — which
   come after the point it stopped
+- [x] **the M6 exit on the VPS testbed, run through to the end — 53
+  checks passed**, on a fresh testbed with both images rebuilt first,
+  and the baseline verified unchanged before and after. Everything the
+  throttled run above reached, and then the four it did not: an app
+  **placed on a server nobody named**, one that fits nowhere **refused
+  in words naming what was free**, an app reading a database **on
+  another machine by the name it would use at home**, and an image
+  **built on one server, carried to another and checked on arrival**.
+  After them the audit chain over 75 entries, the control plane backed
+  up, killed, and the apps healing without it, and the restore drill.
+  Both testbeds removed by name with their volumes. The **edge tier was
+  not run here and that is deliberate**: it needs a third Docker
+  daemon, the host has 8 GB with about 6 GB free, and two testbeds
+  capped at 3 GB already account for it — a third would put memory
+  pressure on a machine whose other thirteen containers are somebody's
+  production. It is covered locally, where the same run is 54 checks
 - [x] **a run that opens hundreds of SSH connections survives being
   throttled for it** — the VPS run above did not stop because anything
   was wrong with VDeploy; it stopped because a harness that opens one
