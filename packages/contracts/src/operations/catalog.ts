@@ -1215,6 +1215,16 @@ export const OPERATIONS = [
     obj({ ...S, channel: z.enum(['canary', 'general']) }),
     { minRole: 'admin' },
   ),
+  // Maintenance holds a server's alerts, so it is a person's switch: an
+  // assistant able to turn it on could quiet the alarm it should raise.
+  operation(
+    'server.set_maintenance',
+    'human_only',
+    'server',
+    'Put this server in maintenance, or take it out: in maintenance it takes no new apps and its going offline tells nobody',
+    obj({ ...S, on: z.boolean() }),
+    { minRole: 'admin' },
+  ),
   operation(
     'server.remove',
     'human_only',

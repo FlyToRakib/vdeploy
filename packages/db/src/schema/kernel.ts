@@ -97,6 +97,12 @@ export const servers = pgTable('servers', {
   /** The last time disk was freed here, and what it actually freed (§18). */
   lastReclaim: jsonb('last_reclaim').$type<ReclaimResult>(),
   /**
+   * Since when a person has this server in maintenance (§20 Servers): no
+   * new app is placed on it, and its going offline tells nobody. Null when
+   * it is not.
+   */
+  maintenanceSince: timestamp('maintenance_since', { withTimezone: true }),
+  /**
    * Where other servers in this organization reach this one privately
    * (§13, ADR 0018): `host:port`, and null while the mesh is off here.
    *

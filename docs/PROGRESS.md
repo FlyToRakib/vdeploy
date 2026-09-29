@@ -283,7 +283,12 @@ each is one task, one commit.
   every setting goes in as one `env.import` change, so the app deploys
   once rather than once a line. The download writes a `.env` that reads
   back the same, with each encrypted value's line there and empty
-- [ ] maintenance mode for a server (§20)
+- [x] **maintenance mode for a server (§20)**: while a person works on a
+  server — an upgrade, a reboot — no new app is placed on it (placement
+  says so when every server that could take one is in maintenance), and
+  its going offline or unreachable tells nobody. The apps already there
+  keep running and can still be deployed. It is a person's switch, never
+  an assistant's, because it holds the alarm that would otherwise sound
 - [ ] `registry.add`: pulling from a private registry (§15, §24)
 - [ ] teams and custom roles (§20, M1)
 - [ ] a server's SSH keys, read like its firewall is (§20, ADR 0016)

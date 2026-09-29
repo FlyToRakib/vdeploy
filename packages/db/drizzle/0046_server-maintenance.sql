@@ -1,0 +1,1 @@
+ALTER TABLE "servers" ADD COLUMN "maintenance_since" timestamp with time zone;

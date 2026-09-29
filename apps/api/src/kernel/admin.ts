@@ -361,6 +361,21 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
     if (!updated.length) throw new VDeployError('not_found', 'That server is not one of yours');
     return { serverId: String(args.serverId), channel };
   },
+  'server.set_maintenance': async ({ deps, actor, args }) => {
+    const on = args.on === true;
+    const [row] = await deps.db
+      .select({ since: servers.maintenanceSince })
+      .from(servers)
+      .where(and(eq(servers.id, String(args.serverId)), eq(servers.orgId, actor.orgId)));
+    if (!row) throw new VDeployError('not_found', 'That server is not one of yours');
+    // Turning it on again keeps when it started: that is the useful date.
+    const since = on ? (row.since ?? deps.now()) : null;
+    await deps.db
+      .update(servers)
+      .set({ maintenanceSince: since })
+      .where(eq(servers.id, String(args.serverId)));
+    return { serverId: String(args.serverId), maintenanceSince: since?.toISOString() ?? null };
+  },
   'server.set_private_traffic': async ({ deps, actor, args }) => {
     const serverId = String(args.serverId);
     const [row] = await deps.db

@@ -25,6 +25,8 @@ export interface Candidate {
   connected: boolean;
   /** A builder compiles and an edge routes; neither ever runs an app (§13, §15). */
   role?: 'apps' | 'builder' | 'edge';
+  /** A server somebody is working on takes no new apps (§20 Servers). */
+  maintenance?: boolean;
 }
 
 export interface Placed {
@@ -42,8 +44,14 @@ export interface Placed {
  */
 export function place(spec: ApplicationSpec, candidates: readonly Candidate[]): Placed {
   const serving = candidates.filter((c) => c.role === undefined || c.role === 'apps');
-  const usable = serving.filter((c) => c.connected && c.budget.capacity);
+  const usable = serving.filter((c) => c.connected && c.budget.capacity && !c.maintenance);
   if (usable.length === 0) {
+    if (serving.some((c) => c.maintenance)) {
+      throw new VDeployError(
+        'conflict',
+        'Every server that could take this is in maintenance. Take one out of maintenance, or connect another.',
+      );
+    }
     // A builder is a machine on purpose empty of apps, so "you have servers
     // but none of them runs anything" is its own sentence rather than a
     // count that looks wrong.

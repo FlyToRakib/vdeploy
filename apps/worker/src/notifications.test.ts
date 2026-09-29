@@ -283,6 +283,18 @@ describe('notifications', () => {
     clock = new Date(clock.getTime() + 4 * 60_000);
     expect(await notifyOfflineServers(t.db, clock)).toBe(1);
     expect(await notifyOfflineServers(t.db, clock)).toBe(0);
+
+    // A server somebody is working on going quiet is not news.
+    const worked = newId('server');
+    await t.db.insert(servers).values({
+      id: worked,
+      orgId,
+      name: 'rebooting',
+      status: 'offline',
+      lastSeenAt: new Date(clock.getTime() - 30 * 60_000),
+      maintenanceSince: new Date(clock.getTime() - 60 * 60_000),
+    });
+    expect(await notifyOfflineServers(t.db, clock)).toBe(0);
   });
 
   it('turns an out-of-memory kill in a report into a plain notification, once an hour', async () => {

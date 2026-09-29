@@ -40,6 +40,14 @@ describe('choosing a server when nobody said (§14)', () => {
     expect(place(spec(), tie).serverId).toBe(place(spec(), [...tie]).serverId);
   });
 
+  it('keeps new apps off a server in maintenance, and says so when that is all there is', () => {
+    const placed = place(spec(), [server('big', 4, { maintenance: true }), server('small', 1)]);
+    expect(placed.serverId).toBe('srv_small');
+    expect(() => place(spec(), [server('big', 4, { maintenance: true })])).toThrow(
+      /in maintenance/,
+    );
+  });
+
   it('will not place on a server no agent has ever reached', () => {
     const placed = place(spec(), [server('big', 4, { connected: false }), server('small', 1)]);
     expect(placed.serverId).toBe('srv_small');

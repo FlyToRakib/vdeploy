@@ -13,7 +13,7 @@ import {
   type Reachability,
 } from '@vdeploy/contracts';
 import { diagnose, openValue, sealValue } from '@vdeploy/core';
-import { and, desc, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
 import { notificationChannels, notificationDeliveries, projects, servers } from './schema/index.js';
 
@@ -516,6 +516,8 @@ export async function notifyOfflineServers(db: Executor, now: Date): Promise<num
         eq(servers.status, 'offline'),
         isNotNull(servers.lastSeenAt),
         lt(servers.lastSeenAt, new Date(now.getTime() - 5 * 60_000)),
+        // Somebody said they are working on it: a reboot is not news.
+        isNull(servers.maintenanceSince),
       ),
     );
   let sent = 0;
@@ -546,7 +548,7 @@ export async function notifyUnreachable(
   now: Date,
 ): Promise<number> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
-  if (!server) return 0;
+  if (!server || server.maintenanceSince) return 0;
   return notify(
     db,
     server.orgId,

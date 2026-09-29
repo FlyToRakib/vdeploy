@@ -55,6 +55,7 @@ interface ServerStatus {
   lastReclaim: LastReclaim | null;
   /** Whether this server takes a new agent first (§34.2). */
   updateChannel: 'canary' | 'general';
+  maintenanceSince: string | null;
   /** Where its agent stands against the build served here (§25). */
   agent: { state: AgentState; error: string | null };
 }
@@ -207,6 +208,28 @@ export function ServerDetail({ serverId }: { serverId: string }) {
       if (outcome.status === 'done') {
         setServer((current) =>
           current ? { ...current, meshEndpoint: outcome.result.endpoint } : current,
+        );
+      }
+    } catch (err) {
+      if (!(err instanceof OperationError && err.code === 'cancelled')) {
+        setError(message(err, 'That could not be changed.'));
+      }
+    }
+  }
+
+  /** Maintenance (§20 Servers): no new apps here, and no alarms while it is being worked on. */
+  async function setMaintenance(on: boolean) {
+    setError(null);
+    try {
+      const outcome = await stepUp(() =>
+        runOperation<{ maintenanceSince: string | null }>('server.set_maintenance', {
+          serverId,
+          on,
+        }),
+      );
+      if (outcome.status === 'done') {
+        setServer((current) =>
+          current ? { ...current, maintenanceSince: outcome.result.maintenanceSince } : current,
         );
       }
     } catch (err) {
@@ -557,6 +580,22 @@ export function ServerDetail({ serverId }: { serverId: string }) {
             />
             Try a new agent here first, before the other servers
           </label>
+        </Card>
+        <Card className="grid content-start gap-2 md:col-span-2">
+          <h2 className="font-medium">Maintenance</h2>
+          <p className="text-sm text-muted-foreground">
+            {server.maintenanceSince
+              ? `In maintenance since ${new Date(server.maintenanceSince).toLocaleString()}. No new app is put here, and nobody is told if it goes offline. The apps already here keep running and can still be deployed.`
+              : 'While you work on this server — an upgrade, a reboot — maintenance keeps new apps off it and holds its offline alerts.'}
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="justify-self-start"
+            onClick={() => void setMaintenance(!server.maintenanceSince)}
+          >
+            {server.maintenanceSince ? 'End maintenance' : 'Start maintenance'}
+          </Button>
         </Card>
       </div>
     </div>

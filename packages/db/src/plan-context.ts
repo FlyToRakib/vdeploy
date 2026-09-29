@@ -339,6 +339,7 @@ export async function placementCandidates(db: Database, orgId: string): Promise<
       budget,
       connected: server.agentPublicKey !== null,
       role: server.role,
+      maintenance: server.maintenanceSince !== null,
     });
   }
   return out;

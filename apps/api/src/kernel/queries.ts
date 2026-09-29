@@ -271,6 +271,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         reachability: servers.reachability,
         capacity: servers.capacity,
         updateChannel: servers.updateChannel,
+        maintenanceSince: servers.maintenanceSince,
       })
       .from(servers)
       .where(eq(servers.orgId, actor.orgId))
@@ -292,6 +293,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       role: r.role,
       capacity: r.capacity,
       updateChannel: r.updateChannel,
+      maintenanceSince: r.maintenanceSince,
       reachable: r.reachability?.status ?? null,
       projects: counts.find((c) => c.serverId === r.id)?.n ?? 0,
       agent: agentOf(r.id),
@@ -366,6 +368,7 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         meshEndpoint: servers.meshEndpoint,
         orgId: servers.orgId,
         updateChannel: servers.updateChannel,
+        maintenanceSince: servers.maintenanceSince,
         /** The last time disk was freed here, and what it actually freed. */
         lastReclaim: servers.lastReclaim,
       })
