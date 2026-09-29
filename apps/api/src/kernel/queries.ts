@@ -1,5 +1,6 @@
 import { readSpec, VDeployError, type LogLine, type OperationName } from '@vdeploy/contracts';
 import {
+  changeWords,
   describeCapacity,
   diagnoseBuild,
   footprint,
@@ -31,7 +32,7 @@ import {
   servers,
   urlSettingsFor,
 } from '@vdeploy/db';
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
 import { AI_QUERIES } from './ai-settings.js';
 import { DATABASE_QUERIES } from './database-queries.js';
 import { drainPlan } from './reclaim.js';
@@ -107,6 +108,55 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       );
     if (!row) throw new VDeployError('not_found', 'Release not found');
     return row;
+  },
+  /**
+   * The last change, and the way back from it (§30 ⑦). "Before" is what
+   * was running before, read from what actually deployed rather than from
+   * version numbers — so undoing an undo goes forward again, which is what
+   * somebody pressing it twice means.
+   */
+  'project.last_change': async ({ deps, args }) => {
+    const projectId = id(args, 'projectId');
+    const [project] = await deps.db
+      .select({ currentReleaseId: projects.currentReleaseId })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    const current = project?.currentReleaseId;
+    if (!current) return null;
+    const [previous] = await deps.db
+      .select({ releaseId: deployments.releaseId })
+      .from(deployments)
+      .where(
+        and(
+          eq(deployments.projectId, projectId),
+          eq(deployments.status, 'succeeded'),
+          isNotNull(deployments.releaseId),
+          ne(deployments.releaseId, current),
+        ),
+      )
+      .orderBy(desc(deployments.createdAt))
+      .limit(1);
+    if (!previous?.releaseId) return null;
+    const pair = await deps.db
+      .select()
+      .from(releases)
+      .where(
+        and(eq(releases.projectId, projectId), inArray(releases.id, [current, previous.releaseId])),
+      );
+    const now = pair.find((r) => r.id === current);
+    const before = pair.find((r) => r.id === previous.releaseId);
+    if (!now || !before) return null;
+    const side = (r: typeof now) => ({
+      spec: readSpec(r.spec),
+      image: r.image,
+      secretVersions: r.secretVersions,
+    });
+    return {
+      undoTo: { releaseId: before.id, version: before.version },
+      current: { releaseId: now.id, version: now.version },
+      at: now.createdAt.toISOString(),
+      changes: changeWords(side(before), side(now)),
+    };
   },
   'deployment.list': async ({ deps, args }) =>
     deps.db

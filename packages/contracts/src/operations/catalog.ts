@@ -76,6 +76,15 @@ export const OPERATIONS = [
     obj({ ...P, deploymentId: idSchema('deployment') }),
   ),
   query('release.list', 'project', 'deployHistory', 'List releases of a project', obj(P)),
+  // Undoing it is release.rollback to the release this names: one way back,
+  // for the button, the AI and the API alike (§31 #9).
+  query(
+    'project.last_change',
+    'project',
+    'deployHistory',
+    'Show what the last change to an app did, in plain words, and the release that undoes it',
+    obj(P),
+  ),
   query('build.list', 'project', 'deployHistory', 'List the builds of a project', obj(P)),
   query(
     'storage.status',

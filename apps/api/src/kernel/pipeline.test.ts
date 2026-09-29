@@ -5,10 +5,12 @@ import {
   approvals,
   auditLog,
   claimBuilds,
+  deployments,
   idempotencyKeys,
   organization,
   plans,
   projects,
+  releases,
   secretVersions,
   serverEnrollments,
   servers,
@@ -609,6 +611,90 @@ describe('server list', () => {
       projects: 0,
     });
     expect(list.every((s) => typeof s.projects === 'number')).toBe(true);
+  });
+});
+
+describe('undo', () => {
+  it('says what the last change did, and undoing an undo goes forward again', async () => {
+    const projectId = newId('project');
+    const small = ApplicationSpec.parse({ ...spec, metadata: { name: 'undo-me' } });
+    const big = ApplicationSpec.parse({
+      ...small,
+      runtime: { ...small.runtime, resources: { memory: { limit: '1Gi' } } },
+    });
+    const release = (version: number, s: ApplicationSpec) => ({
+      id: newId('release'),
+      projectId,
+      version,
+      spec: s,
+      specHash: hashOf(s),
+      image: `nginx@sha256:${'a'.repeat(64)}`,
+      secretVersions: {},
+    });
+    const v1 = release(1, small);
+    const v2 = release(2, big);
+    await t.database.db.insert(projects).values({
+      id: projectId,
+      orgId,
+      name: 'undo-me',
+      spec: big,
+      specHash: hashOf(big),
+      currentReleaseId: v2.id,
+    });
+    await t.database.db.insert(releases).values([v1, v2]);
+    const deployed = async (releaseId: string, at: number) => {
+      const planId = newId('plan');
+      await t.database.db.insert(plans).values({
+        id: planId,
+        orgId,
+        projectId,
+        operation: 'project.update_spec',
+        args: {},
+        plan: {} as never,
+        planHash: 'x',
+        tier: 'sensitive',
+        blastRadius: {} as never,
+        status: 'applied',
+        actor: { userId: 'usr_x', origin: 'dashboard' },
+        expiresAt: new Date(),
+      });
+      await t.database.db.insert(deployments).values({
+        id: newId('deployment'),
+        projectId,
+        releaseId,
+        planId,
+        status: 'succeeded',
+        createdAt: new Date(at),
+      });
+    };
+    await deployed(v1.id, 1_000);
+    await deployed(v2.id, 2_000);
+
+    const last = async () =>
+      (await op(owner, 'project.last_change', { projectId })).json<{
+        result: { undoTo: { version: number }; changes: string[] } | null;
+      }>().result;
+    expect(await last()).toMatchObject({
+      undoTo: { version: 1 },
+      changes: ['Memory 512 MB → 1 GB'],
+    });
+
+    // Undone: version 1 runs again, and the last change is now the undo.
+    await t.database.db
+      .update(projects)
+      .set({ currentReleaseId: v1.id, spec: small })
+      .where(eq(projects.id, projectId));
+    await deployed(v1.id, 3_000);
+    expect(await last()).toMatchObject({
+      undoTo: { version: 2 },
+      changes: ['Memory 1 GB → 512 MB'],
+    });
+  });
+
+  it('has nothing to undo before a second version ever ran', async () => {
+    const projectId = await seedProject(orgId, 'first-only');
+    const res = await op(owner, 'project.last_change', { projectId });
+    expect(res.json<{ result: unknown }>().result).toBeNull();
   });
 });
 

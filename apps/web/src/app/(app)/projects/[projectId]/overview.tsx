@@ -1,7 +1,9 @@
 'use client';
 
+import { Undo2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { UsageGraph, type Reading } from '@/components/usage-graph';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { query } from '@/lib/operations';
@@ -27,6 +29,71 @@ interface Release {
   id: string;
   version: number;
   createdAt: string;
+}
+
+interface LastChange {
+  undoTo: { releaseId: string; version: number };
+  current: { releaseId: string; version: number };
+  at: string;
+  changes: string[];
+}
+
+/**
+ * The last change, in the words it was made in, and one button that takes
+ * it back (§30 ⑦, §35.7). Undoing is an ordinary rollback: the same plan,
+ * the same approval, the same record — and pressed again it goes forward,
+ * because "the last change" is then the undo.
+ */
+function LastChangeCard() {
+  const { projectId, row, act } = useProject();
+  const [last, setLast] = useState<LastChange | null>(null);
+  useEffect(() => {
+    const live = { current: true };
+    void query<LastChange | null>('project.last_change', { projectId }).then(
+      (answer) => {
+        if (live.current) setLast(answer);
+      },
+      () => undefined,
+    );
+    return () => {
+      live.current = false;
+    };
+  }, [projectId, row.currentReleaseId]);
+  if (!last) return null;
+  return (
+    <Card className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-medium">Last change, {ago(last.at)}</h2>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() =>
+            void act(
+              'release.rollback',
+              { projectId, releaseId: last.undoTo.releaseId },
+              'Undoing the last change',
+            )
+          }
+        >
+          <Undo2 aria-hidden className="size-4" />
+          Undo this change
+        </Button>
+      </div>
+      {last.changes.length > 0 ? (
+        <ul className="grid gap-1 text-sm">
+          {last.changes.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">It was deployed again with nothing changed.</p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Undoing puts back version {last.undoTo.version} as it was, and replaces the running copies
+        the way any deploy does.
+      </p>
+    </Card>
+  );
 }
 
 const SOURCE: Record<string, (s: { repo?: string; branch?: string }) => string> = {
@@ -136,6 +203,8 @@ export function ProjectOverview() {
           ))}
         </Card>
       )}
+
+      <LastChangeCard />
 
       <Card>
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">

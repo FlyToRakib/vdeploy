@@ -25,3 +25,4 @@ export * from './templates.js';
 export * from './compose.js';
 export * from './autoscale.js';
 export * from './placement.js';
+export * from './undo.js';

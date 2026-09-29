@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** Undo last change
+**Task:** Export everything
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -100,7 +100,17 @@ each is one task, one commit.
   between planning and applying is caught there too
 
 **§35's completeness test, and the M4/§31 features behind it**
-- [ ] Undo last change (§31 #9, §35.7)
+- [x] **Undo last change (§31 #9, §35.7)**. A project's Overview shows
+  its last change in the words of the screen it was made on — "Memory
+  512 MB → 1 GB", "Added the address shop.example.com", "Changed the
+  setting MODE", "A new version of its code" — and one button that takes
+  it back. Settings are named and never shown. "Before" is what was
+  *running* before, read from what actually deployed rather than from
+  version numbers, so pressing it twice goes forward again, which is
+  what pressing it twice means. The undo itself is an ordinary
+  `release.rollback`: one way back for the button, the AI and the API,
+  through the same plan and approval. The description is
+  `project.last_change`, a read, so the AI and the CLI have it too
 - [ ] Export everything: specs, a Compose equivalent, an env template with secret names (§17.7, §31 #11, §35.12)
 - [ ] step-up with a passkey or an authenticator code (§20.2) — a passkey-only person cannot do anything sensitive
 - [ ] certificate renewal status, and an alert 21 days out (§30 ⑦, §18)
