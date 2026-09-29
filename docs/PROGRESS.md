@@ -299,6 +299,15 @@ each is one task, one commit.
   you bring is the project's Object storage section — presets for S3, R2,
   B2 and Spaces — storing the key as a secret and the same five settings
   in one deploy. A compose file's `minio/minio` imports as this engine
+- [x] **agent keys rotate by themselves (§25; ADR 0004 addendum)**: the
+  spec has agent credentials rotate automatically, and ADR 0004 left it
+  "to build". Every 30 days the agent offers a new key signed with the
+  current one; the control plane keeps it beside the current key and
+  says so; only then does the agent write it — renamed over the old, so
+  a crash leaves one whole key — and reconnect, and that first hello
+  makes it the only key, in the audit log. Every step leaves a working
+  pair: a lost answer or a crash leaves the old key, still accepted, and
+  a key the agent did not offer is never kept
 - [x] **uploads no longer fill the database for ever**: every uploaded
   source and dump was kept in Postgres with no end — the "disk fills"
   outage §6 guards against, moved into the database. An hourly sweep now

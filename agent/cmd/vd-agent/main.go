@@ -315,10 +315,11 @@ func serve(configPath string, log *slog.Logger) error {
 		}
 		client := &transport.Client{
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
-			BoxKey:  sealed.PublicKey(box),
-			Builder: builder,
-			Updater: updater(id.ControlPlaneURL),
-			Backups: backups,
+			StateDir: cfg.StateDir,
+			BoxKey:   sealed.PublicKey(box),
+			Builder:  builder,
+			Updater:  updater(id.ControlPlaneURL),
+			Backups:  backups,
 			Terminals: &terminal.Runner{
 				Engine:   engine,
 				Projects: reconciler.Project,

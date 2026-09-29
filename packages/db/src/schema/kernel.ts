@@ -42,6 +42,13 @@ export const servers = pgTable('servers', {
     .notNull()
     .default('pending'),
   agentPublicKey: text('agent_public_key'),
+  /**
+   * The key the agent will sign with next (§25): it asked for it signed
+   * with the current one, and the first connection signed with it makes it
+   * the current one. Until then either is accepted.
+   */
+  agentPublicKeyNext: text('agent_public_key_next'),
+  agentKeyRotatedAt: timestamp('agent_key_rotated_at', { withTimezone: true }),
   /** The agent's X25519 key (from its signed hello): secrets are sealed to it. */
   agentBoxKey: text('agent_box_key'),
   agentVersion: text('agent_version'),

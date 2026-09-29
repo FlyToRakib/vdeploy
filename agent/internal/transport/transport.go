@@ -51,8 +51,10 @@ const maxFrameBytes = 16 << 20
 
 // Client is the agent's side of the connection.
 type Client struct {
-	Identity     identity.Identity
-	Key          ed25519.PrivateKey
+	Identity identity.Identity
+	Key      ed25519.PrivateKey
+	// StateDir is where the identity lives; empty never rotates the key.
+	StateDir     string
 	ControlPlane ed25519.PublicKey
 	Facts        identity.Facts
 	// BoxKey is this agent's X25519 public key (base64): secrets are sealed to it.
@@ -111,7 +113,14 @@ type Client struct {
 
 	artifactMu sync.Mutex
 	artifacts  map[string]*artifactSend // by request id, while a download is running
+
+	// nextKey is the key offered in a rekey frame, until the control plane
+	// says it is kept. Only the receive loop touches it.
+	nextKey ed25519.PrivateKey
 }
+
+// errRekeyed ends a session so the next one signs with the new key.
+var errRekeyed = errors.New("the agent's key was changed")
 
 // BackupTaker takes one backup to completion, and puts one back.
 type BackupTaker interface {
@@ -201,6 +210,10 @@ func (c *Client) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errRekeyed) {
+			c.Log.Info("agent key rotated; reconnecting with the new one")
+			continue
+		}
 		if time.Since(started) > time.Minute {
 			backoff = time.Second // it was a working connection; reconnect promptly
 		}
@@ -218,6 +231,51 @@ func (c *Client) Run(ctx context.Context) {
 
 type challenge struct {
 	protocol.Header
+}
+
+type rekeyFrame struct {
+	protocol.Header
+	PublicKey string `json:"publicKey"`
+}
+
+/*
+offerNextKey asks the control plane to keep a new key (§25), signed with
+this one, when this one is due to go. Nothing is written yet: the new key
+becomes this agent's only when the control plane says it is kept.
+*/
+func (c *Client) offerNextKey(ctx context.Context, k *conn) error {
+	if c.StateDir == "" || !identity.RotationDue(c.Identity, c.Now()) {
+		return nil
+	}
+	pub, priv, err := identity.NewKey()
+	if err != nil {
+		return err
+	}
+	c.nextKey = priv
+	return k.send(ctx, protocol.TypeRekey, func(h protocol.Header) any {
+		return rekeyFrame{Header: h, PublicKey: base64.StdEncoding.EncodeToString(pub)}
+	})
+}
+
+// takeNextKey makes the offered key this agent's, once it is kept, and
+// ends the session so the next one is signed with it.
+func (c *Client) takeNextKey(kept string) error {
+	if c.nextKey == nil {
+		return errors.New("a key was confirmed that this agent did not offer")
+	}
+	offered := base64.StdEncoding.EncodeToString(c.nextKey.Public().(ed25519.PublicKey))
+	if kept != offered {
+		return errors.New("the control plane kept a key this agent did not offer")
+	}
+	id, err := identity.Replace(c.StateDir, c.Identity, c.nextKey, c.Now())
+	if err != nil {
+		// Still the old key on disk, and the control plane accepts it.
+		c.nextKey = nil
+		c.Log.Warn("could not keep the new key; keeping the old one", "err", err)
+		return nil
+	}
+	c.Identity, c.Key, c.nextKey = id, c.nextKey, nil
+	return errRekeyed
 }
 
 type hello struct {
@@ -339,6 +397,9 @@ func (c *Client) session(ctx context.Context) error {
 	go c.forwardVerifyResults(ctx, k)
 	go c.forwardSnapshotResults(ctx, k)
 	go c.forwardTaskResults(ctx, k)
+	if err := c.offerNextKey(ctx, k); err != nil {
+		c.Log.Warn("could not offer a new key; keeping this one", "err", err)
+	}
 	for {
 		if err := c.receive(ctx, k); err != nil {
 			_ = ws.Close(websocket.StatusPolicyViolation, "frame refused")
@@ -395,6 +456,15 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 		return fmt.Errorf("malformed frame: %w", err)
 	}
 	switch head.Type {
+	case protocol.TypeRekeyed:
+		var frame rekeyFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		return c.takeNextKey(frame.PublicKey)
 	case protocol.TypeLogs:
 		var frame logsFrame
 		if err := strictDecode(body, &frame); err != nil {

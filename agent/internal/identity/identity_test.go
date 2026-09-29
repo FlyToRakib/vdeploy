@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testServerID = "srv_01J9Z3Q8S7M2K4X6V1B5N0C9D8"
@@ -110,5 +111,35 @@ func TestPlainHTTPIsOnlyAllowedToThisMachine(t *testing.T) {
 		if _, err := CheckURL(raw); (err == nil) != ok {
 			t.Errorf("CheckURL(%q) err = %v", raw, err)
 		}
+	}
+}
+
+func TestAKeyIsReplacedWholeAndDated(t *testing.T) {
+	dir := t.TempDir()
+	_, first, _ := ed25519.GenerateKey(rand.Reader)
+	id := Identity{ServerID: "srv_01J9Z3Q8S7M2K4X6V1B5N0C9D8", ControlPlaneURL: "https://cp.example.com",
+		ControlPlaneKey: base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))}
+	if !RotationDue(id, time.Now()) {
+		t.Fatal("a key with no date is not due")
+	}
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	if _, err := Replace(dir, id, first, now); err != nil {
+		t.Fatal(err)
+	}
+	_, second, _ := ed25519.GenerateKey(rand.Reader)
+	saved, err := Replace(dir, id, second, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, key, _, err := Load(dir)
+	if err != nil || !key.Equal(second) || loaded.KeyRotatedAt != saved.KeyRotatedAt {
+		t.Fatalf("loaded %+v, %v", loaded, err)
+	}
+	if RotationDue(loaded, now.Add(RotateEvery-time.Hour)) || !RotationDue(loaded, now.Add(RotateEvery)) {
+		t.Fatal("due at the wrong time")
+	}
+	// Nothing half-written is left beside it.
+	if leftovers, _ := filepath.Glob(filepath.Join(dir, "*.next")); len(leftovers) != 0 {
+		t.Fatalf("left behind: %v", leftovers)
 	}
 }

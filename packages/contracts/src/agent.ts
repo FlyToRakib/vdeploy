@@ -272,6 +272,15 @@ export const AgentFrame = z.discriminatedUnion('type', [
   }),
   z.strictObject({
     ...FrameHeader,
+    /**
+     * The agent's next identity key (§25), sent signed with its current
+     * one. The control plane keeps both until the next key is used.
+     */
+    type: z.literal('rekey'),
+    publicKey: z.base64().length(44),
+  }),
+  z.strictObject({
+    ...FrameHeader,
     type: z.literal('update_result'),
     sha256: z.string().max(64),
     /** Why it did not become that build: an agent that did says so by reconnecting. */

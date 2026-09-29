@@ -1270,7 +1270,12 @@ export class Gateway
       socket.close(1008, 'unknown server');
       return;
     }
-    const agentKey = publicKeyFromRaw(Buffer.from(server.agentPublicKey, 'base64'));
+    let agentKey = publicKeyFromRaw(Buffer.from(server.agentPublicKey, 'base64'));
+    // An agent that has just changed its key (§25) says hello with the new
+    // one; that hello is what makes it current.
+    const nextKey = server.agentPublicKeyNext
+      ? publicKeyFromRaw(Buffer.from(server.agentPublicKeyNext, 'base64'))
+      : null;
     const session = new FrameSession(serverId, randomBytes(24).toString('base64url'), now);
     socket.send(seal(key, session.next('challenge')));
 
@@ -1292,7 +1297,17 @@ export class Gateway
     socket.on('message', (data: Buffer) => {
       queue = queue
         .then(async () => {
-          const frame = AgentFrame.parse(open(agentKey, data.toString('utf8')));
+          const wire = data.toString('utf8');
+          let signed: unknown;
+          try {
+            signed = open(agentKey, wire);
+          } catch (err) {
+            if (hello || !nextKey) throw err;
+            signed = open(nextKey, wire);
+            agentKey = nextKey;
+            await this.promoteKey(serverId);
+          }
+          const frame = AgentFrame.parse(signed);
           session.check(frame);
           if (!hello) {
             if (frame.type !== 'hello') throw new VDeployError('forbidden', 'Expected hello');
@@ -1347,6 +1362,32 @@ export class Gateway
           });
       }
     });
+  }
+
+  /** The agent signed with its next key: that key is now its only one. */
+  private async promoteKey(serverId: string) {
+    const { db, now, log } = this.deps;
+    await db.transaction(async (tx) => {
+      const [server] = await tx.select().from(servers).where(eq(servers.id, serverId));
+      if (!server?.agentPublicKeyNext) return;
+      await tx
+        .update(servers)
+        .set({
+          agentPublicKey: server.agentPublicKeyNext,
+          agentPublicKeyNext: null,
+          agentKeyRotatedAt: now(),
+        })
+        .where(eq(servers.id, serverId));
+      await appendAudit(tx, {
+        chain: server.orgId,
+        actor: { system: 'agent' },
+        action: 'agent.key_rotated',
+        target: serverId,
+        outcome: 'succeeded',
+        details: {},
+      });
+    });
+    log.info({ serverId }, 'agent key rotated');
   }
 
   private async online(
@@ -1566,6 +1607,17 @@ export class Gateway
         return;
       }
       request.onLines(frame.lines.map((line) => ({ ...line, text: cleanLogText(line.text) })));
+    } else if (frame.type === 'rekey') {
+      // Kept beside the current key, not over it: the agent starts using it
+      // only once told it is kept, and until it does the old one still works.
+      await db
+        .update(servers)
+        .set({ agentPublicKeyNext: frame.publicKey })
+        .where(eq(servers.id, serverId));
+      const connection = this.connections.get(serverId);
+      connection?.socket.send(
+        seal(this.deps.key, { ...connection.session.next('rekeyed'), publicKey: frame.publicKey }),
+      );
     } else if (frame.type === 'update_result') {
       // It did not become that build; it said why. It is asked again later.
       await db

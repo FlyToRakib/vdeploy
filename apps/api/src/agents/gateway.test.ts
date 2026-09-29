@@ -885,6 +885,45 @@ describe('agent channel', () => {
     current.close();
   });
 
+  it('lets an agent change its key, and forgets the old one once the new one is used', async () => {
+    const agent = await enroll('rekeying');
+    const fake = new FakeAgent(agent);
+    await fake.connect();
+    await fake.next(); // the first desired state
+    const { privateKey: next } = generateKeyPairSync('ed25519');
+    // Offered signed with the key it has now; kept beside it, not over it.
+    fake.send({ ...fake.session.next('rekey'), publicKey: rawPublicKey(next) });
+    let kept: Record<string, unknown> | undefined;
+    for (let i = 0; i < 5 && !kept; i++) {
+      const frame = await fake.next();
+      if (frame.type === 'rekeyed') kept = frame;
+    }
+    expect(kept?.publicKey).toBe(rawPublicKey(next));
+    const [offered] = await t.database.db
+      .select()
+      .from(servers)
+      .where(eq(servers.id, agent.serverId));
+    expect(offered?.agentPublicKey).toBe(rawPublicKey(agent.key));
+    expect(offered?.agentPublicKeyNext).toBe(rawPublicKey(next));
+    fake.close();
+    await fake.waitClosed();
+
+    // The first hello signed with the new key makes it the only one.
+    const renewed = new FakeAgent({ ...agent, key: next });
+    await renewed.connect();
+    await renewed.next();
+    const [row] = await t.database.db.select().from(servers).where(eq(servers.id, agent.serverId));
+    expect(row?.agentPublicKey).toBe(rawPublicKey(next));
+    expect(row?.agentPublicKeyNext).toBeNull();
+    expect(row?.agentKeyRotatedAt).not.toBeNull();
+    renewed.close();
+    await renewed.waitClosed();
+
+    const old = new FakeAgent(agent);
+    await old.connect();
+    expect(await old.waitClosed()).toBe(1008);
+  });
+
   it('refuses a connection for a server that never enrolled', async () => {
     const socket = new WebSocket(`${base.replace('http', 'ws')}/api/v1/agent/connect`, {
       headers: { 'x-vdeploy-server': newId('server') },

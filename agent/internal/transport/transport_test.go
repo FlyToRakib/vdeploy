@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -390,5 +391,66 @@ func TestADownloadStopsWhenTheOtherEndGivesUp(t *testing.T) {
 	case <-done:
 	case <-time.After(20 * time.Second):
 		t.Fatal("the download never stopped")
+	}
+}
+
+func TestAnAgentChangesItsKeyOnlyOnceTheControlPlaneKeepsIt(t *testing.T) {
+	h := newHarness(t)
+	offered := make(chan string, 1)
+	url, _ := serve(t, h, func(c *cp) {
+		rekey, err := c.read()
+		if err != nil || rekey["type"] != protocol.TypeRekey {
+			t.Errorf("rekey = %v, %v", rekey, err)
+			return
+		}
+		key, _ := rekey["publicKey"].(string)
+		offered <- key
+		c.send(frame(c.session.Next(protocol.TypeRekeyed), map[string]any{"publicKey": key}))
+	})
+	dir := t.TempDir()
+	client := h.client(url)
+	client.StateDir = dir // and no date on its key: it rotates at once
+	client.Identity.ControlPlaneKey = base64.StdEncoding.EncodeToString(h.cpPub)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.session(ctx); !errors.Is(err, errRekeyed) {
+		t.Fatalf("session ended with %v", err)
+	}
+	next := <-offered
+	id, key, _, err := identity.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// On disk and in use: the key it offered, dated now.
+	if base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey)) != next ||
+		!client.Key.Equal(key) || identity.RotationDue(id, time.Now()) {
+		t.Fatalf("the offered key is not the agent's now: %+v", id)
+	}
+}
+
+func TestAKeyTheAgentDidNotOfferIsNeverKept(t *testing.T) {
+	h := newHarness(t)
+	stranger, _, _ := ed25519.GenerateKey(rand.Reader)
+	url, _ := serve(t, h, func(c *cp) {
+		if _, err := c.read(); err != nil {
+			return
+		}
+		c.send(frame(c.session.Next(protocol.TypeRekeyed), map[string]any{
+			"publicKey": base64.StdEncoding.EncodeToString(stranger),
+		}))
+	})
+	dir := t.TempDir()
+	client := h.client(url)
+	client.StateDir = dir
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.session(ctx); err == nil || errors.Is(err, errRekeyed) {
+		t.Fatalf("session ended with %v", err)
+	}
+	if _, _, _, err := identity.Load(dir); !errors.Is(err, identity.ErrNotEnrolled) {
+		t.Fatalf("something was written: %v", err)
+	}
+	if !client.Key.Equal(h.agentKey) {
+		t.Fatal("the agent stopped using its own key")
 	}
 }

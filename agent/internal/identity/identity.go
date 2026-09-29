@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 )
 
 // Identity is what enrollment establishes.
@@ -27,6 +28,74 @@ type Identity struct {
 	ServerID        string `json:"serverId"`
 	ControlPlaneURL string `json:"controlPlaneUrl"`
 	ControlPlaneKey string `json:"controlPlaneKey"`
+	// KeyRotatedAt is when the agent's key was made (RFC 3339); an agent
+	// enrolled before keys rotated has none, and rotates at once.
+	KeyRotatedAt string `json:"keyRotatedAt,omitempty"`
+}
+
+// RotateEvery is how long an agent keeps one key (§25). A key that leaked
+// without anyone noticing stops working this long after, at the latest.
+const RotateEvery = 30 * 24 * time.Hour
+
+// RotationDue says whether the agent should change its key now.
+func RotationDue(id Identity, now time.Time) bool {
+	made, err := time.Parse(time.RFC3339, id.KeyRotatedAt)
+	return err != nil || now.Sub(made) >= RotateEvery
+}
+
+// NewKey makes a key to rotate to; it is written only once the control
+// plane has said it will accept it.
+func NewKey() (ed25519.PublicKey, ed25519.PrivateKey, error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate key: %w", err)
+	}
+	return pub, priv, nil
+}
+
+/*
+Replace makes key this agent's key. Each file is written beside the old one
+and renamed over it, so a crash leaves one whole key or the other, never
+half of one; the key goes first, because the control plane accepts the new
+key and the old one alike until it has seen the new one used.
+*/
+func Replace(dir string, id Identity, key ed25519.PrivateKey, now time.Time) (Identity, error) {
+	id.KeyRotatedAt = now.UTC().Format(time.RFC3339)
+	seed := base64.StdEncoding.EncodeToString(key.Seed())
+	if err := writeAtomic(filepath.Join(dir, keyFile), []byte(seed+"\n")); err != nil {
+		return id, fmt.Errorf("write agent key: %w", err)
+	}
+	encoded, err := json.MarshalIndent(id, "", "  ")
+	if err != nil {
+		return id, fmt.Errorf("encode identity: %w", err)
+	}
+	if err := writeAtomic(filepath.Join(dir, identityFile), encoded); err != nil {
+		return id, fmt.Errorf("write identity: %w", err)
+	}
+	return id, nil
+}
+
+func writeAtomic(path string, content []byte) error {
+	next := path + ".next"
+	file, err := os.OpenFile(next, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- the agent's own state dir
+	if err != nil {
+		return fmt.Errorf("open %s: %w", next, err)
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write %s: %w", next, err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("sync %s: %w", next, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", next, err)
+	}
+	if err := os.Rename(next, path); err != nil {
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	return nil
 }
 
 // Facts describe this machine to the control plane at enrollment.
@@ -153,7 +222,10 @@ func Enroll(ctx context.Context, client *http.Client, dir, cpURL, token string, 
 	if key, err := base64.StdEncoding.DecodeString(granted.ControlPlaneKey); err != nil || len(key) != ed25519.PublicKeySize {
 		return Identity{}, errors.New("enrollment answer carries no valid control-plane key")
 	}
-	id := Identity{ServerID: granted.ServerID, ControlPlaneURL: base.String(), ControlPlaneKey: granted.ControlPlaneKey}
+	id := Identity{
+		ServerID: granted.ServerID, ControlPlaneURL: base.String(), ControlPlaneKey: granted.ControlPlaneKey,
+		KeyRotatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
 	return id, save(dir, id, priv)
 }
 

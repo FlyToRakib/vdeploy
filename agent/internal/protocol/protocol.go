@@ -75,6 +75,9 @@ const (
 
 	TypeUpdate       = "update"
 	TypeUpdateResult = "update_result"
+	// TypeRekey offers the agent's next key; TypeRekeyed says it is kept.
+	TypeRekey   = "rekey"
+	TypeRekeyed = "rekeyed"
 )
 
 // MaxClockSkew bounds how far a frame's timestamp may be from ours.
