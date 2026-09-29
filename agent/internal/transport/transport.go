@@ -83,6 +83,8 @@ type Client struct {
 	Images ImageLoader
 	// Reclaim frees disk on this server; nil refuses to free anything.
 	Reclaim DiskReclaimer
+	// Updater replaces this agent with the build the control plane serves (§25); nil refuses.
+	Updater Updater
 	// Logs streams a project's container output; nil refuses log requests.
 	Logs func(ctx context.Context, projectID string, tail int, follow bool, emit func([]logs.Line) error) error
 
@@ -423,6 +425,17 @@ func (c *Client) receive(ctx context.Context, k *conn) error {
 			return err
 		}
 		c.startRestore(ctx, frame.Restore)
+		return nil
+	}
+	if head.Type == protocol.TypeUpdate {
+		var frame updateFrame
+		if err := strictDecode(body, &frame); err != nil {
+			return err
+		}
+		if err := k.session.Check(frame.Header); err != nil {
+			return err
+		}
+		go c.selfUpdate(ctx, k, frame.Update.SHA256)
 		return nil
 	}
 	if head.Type == protocol.TypeReclaim {
@@ -991,6 +1004,44 @@ func (c *Client) forwardCheckResults(ctx context.Context, k *conn) {
 type artifactFrame struct {
 	protocol.Header
 	Artifact backup.ArtifactRequest `json:"artifact"`
+}
+
+// Updater replaces the running agent; it returns only if it could not.
+type Updater interface {
+	Apply(ctx context.Context, sha256 string) error
+}
+
+type updateFrame struct {
+	protocol.Header
+	Update struct {
+		SHA256 string `json:"sha256"`
+	} `json:"update"`
+}
+
+type updateResultFrame struct {
+	protocol.Header
+	SHA256 string `json:"sha256"`
+	Error  string `json:"error"`
+}
+
+// selfUpdate becomes the build the control plane named. On success it
+// never returns — the process is the new agent, which reconnects and says
+// so in its hello. What it can report is only why it did not.
+func (c *Client) selfUpdate(ctx context.Context, k *conn, sha string) {
+	err := errors.New("this agent cannot update itself")
+	if c.Updater != nil {
+		c.Log.Info("updating to the agent the control plane serves", "sha256", sha)
+		err = c.Updater.Apply(ctx, sha)
+	}
+	if err == nil {
+		return // already that build
+	}
+	c.Log.Warn("could not update", "error", err)
+	if sendErr := k.send(ctx, protocol.TypeUpdateResult, func(h protocol.Header) any {
+		return updateResultFrame{Header: h, SHA256: sha, Error: err.Error()}
+	}); sendErr != nil {
+		c.Log.Warn("why the update failed could not be reported", "error", sendErr)
+	}
 }
 
 type reclaimFrame struct {

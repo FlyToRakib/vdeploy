@@ -78,6 +78,7 @@ export function installScript(publicUrl: string, sums: Record<AgentArch, string>
 #   --dry-run         check this server and stop; nothing is installed or changed
 #   --no-service      do not set up systemd (containers and test machines)
 #   --builder         this machine only compiles: no Traefik, ports 80/443 left alone
+#   --uninstall       remove the agent; apps, their folders and backups are left alone
 # Running it again updates the agent; it never touches anything else.
 set -eu
 
@@ -90,12 +91,14 @@ TOKEN=''
 DRY_RUN=0
 SERVICE=1
 BUILDER=0
+UNINSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --token) TOKEN="\${2:-}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-service) SERVICE=0; shift ;;
     --builder) BUILDER=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
     *) echo "VDeploy: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -109,6 +112,25 @@ fetch() {
 }
 
 [ "$(id -u)" = 0 ] || fail "run this as root (for example: sudo sh), so the agent can manage Docker."
+
+# A clean uninstall (§25): the agent, its service, its identity and its
+# settings go. What it ran stays — apps keep serving on their own, and
+# their permanent folders and backups are data, which nothing here deletes.
+if [ "$UNINSTALL" = 1 ]; then
+  if command -v systemctl >/dev/null 2>&1 && [ -f /etc/systemd/system/vd-agent.service ]; then
+    systemctl disable --now vd-agent >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/vd-agent.service
+    systemctl daemon-reload
+  fi
+  pkill -x vd-agent 2>/dev/null || true
+  rm -f /usr/local/bin/vd-agent
+  rm -rf /etc/vdeploy "$STATE_DIR"
+  say "The VDeploy agent is removed, with its identity and settings."
+  say "Your apps are still running, and their permanent folders and backups are untouched."
+  say "To see what VDeploy started:   docker ps -a --filter label=io.vdeploy.managed=true"
+  say "Remove this server in the dashboard as well, so it is no longer listed."
+  exit 0
+fi
 case "$(uname -m)" in
   x86_64|amd64) ARCH=amd64; SUM="$SUM_amd64" ;;
   aarch64|arm64) ARCH=arm64; SUM="$SUM_arm64" ;;

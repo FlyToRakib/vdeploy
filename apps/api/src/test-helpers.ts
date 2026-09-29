@@ -9,8 +9,9 @@ import { buildServer } from './server.js';
 
 export const ORIGIN = 'https://dashboard.example.com';
 
-export function testConfig(databaseUrl: string) {
+export function testConfig(databaseUrl: string, overrides: Record<string, string> = {}) {
   return ApiConfig.parse({
+    ...overrides,
     NODE_ENV: 'test',
     LOG_LEVEL: 'fatal',
     DATABASE_URL: databaseUrl,
@@ -45,6 +46,8 @@ export async function startTestApp(
     fetch?: typeof fetch;
     /** What each name answers with; unlisted names answer with nothing. */
     txt?: Map<string, string[]>;
+    /** Where the agent builds are, for the installer and for updates. */
+    agentBinariesDir?: string;
   } = {},
 ): Promise<TestApp> {
   const database = await startTestDatabase();
@@ -58,7 +61,10 @@ export async function startTestApp(
     ...(options.fetch ? { fetch: options.fetch } : {}),
     resolveTxt: (name) => Promise.resolve(txt.get(name) ?? []),
     probe: (host, port) => Promise.resolve(ports.get(`${host}:${port}`) ?? 'filtered'),
-    config: testConfig(database.url),
+    config: testConfig(
+      database.url,
+      options.agentBinariesDir ? { AGENT_BINARIES_DIR: options.agentBinariesDir } : {},
+    ),
     db: database.db,
     mailer,
     authRateLimit: options.authRateLimit ?? false,

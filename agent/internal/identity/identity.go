@@ -41,6 +41,12 @@ type Facts struct {
 	Addresses []string `json:"addresses,omitempty"`
 	// Provider is the hosting provider, guessed from firmware ("" if unknown).
 	Provider string `json:"provider,omitempty"`
+	// BinarySHA256 names the build this agent is, so the control plane
+	// knows whether it serves a newer one (§25).
+	BinarySHA256 string `json:"binarySha256,omitempty"`
+	// SchemaSHA256 names the desired-state contract this agent reads: a
+	// state written to another one would be refused, whole.
+	SchemaSHA256 string `json:"schemaSha256,omitempty"`
 }
 
 var serverID = regexp.MustCompile(`^srv_[0-9A-HJKMNP-TV-Z]{26}$`)

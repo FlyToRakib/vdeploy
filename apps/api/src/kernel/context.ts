@@ -57,6 +57,8 @@ export interface KernelDeps {
   model?: ModelClient;
   /** Each AI session's calls in the last minute, for the rate limit (§8 L3). */
   aiCalls: AiCallWindow;
+  /** The agent builds this control plane serves, per processor; absent without them. */
+  agentBuilds?: () => Promise<Record<string, string> | null>;
 }
 
 export interface GithubDeps {

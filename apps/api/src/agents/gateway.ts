@@ -16,6 +16,8 @@ import {
   generateSecret,
   isPublicIpv4,
   sealTo,
+  updateDecision,
+  type FleetServer,
 } from '@vdeploy/core';
 import {
   appendAudit,
@@ -86,6 +88,7 @@ import type { WebSocket } from 'ws';
 import { hashToken } from '../kernel/admin.js';
 import { checkReachability, type PortProbe } from './reachability.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
+import { DESIRED_STATE_SCHEMA_SHA } from './schema-hash.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
 
@@ -122,12 +125,19 @@ export interface GatewayDeps {
   log: FastifyBaseLogger;
   /** When set, each server's web ports are checked from here after it connects (§30 ③). */
   probe?: PortProbe;
+  /** The agent builds this control plane serves, per processor; without them nothing is updated. */
+  binaries?: { checksums(): Promise<Record<string, string> | null> };
 }
 
 interface Connection {
   socket: WebSocket;
   session: FrameSession;
+  /** The contract the agent reads, as its hello said; absent from agents older than updating. */
+  schemaSha?: string;
 }
+
+/** How often connected agents are looked at for an update that has become due (§34.2). */
+const UPDATE_SWEEP_MS = 60_000;
 
 interface LogRequest {
   serverId: string;
@@ -262,6 +272,8 @@ export class Gateway
   private readonly terminalRequests = new Map<string, TerminalRequest>();
   private readonly fileRequests = new Map<string, FileRequest>();
   private stopListening: (() => Promise<void>) | null = null;
+  /** Looks at connected agents for an update that has become due: after a soak, the next wave. */
+  private updateSweep: NodeJS.Timeout | undefined;
   private stopBuildListening: (() => Promise<void>) | null = null;
   private stopBackupListening: (() => Promise<void>) | null = null;
   private stopRestoreListening: (() => Promise<void>) | null = null;
@@ -279,6 +291,14 @@ export class Gateway
     this.stopListening = await listen(this.deps.databaseUrl, DESIRED_STATE_CHANNEL, (serverId) => {
       void this.push(serverId);
     });
+    this.updateSweep = setInterval(() => {
+      for (const serverId of this.connections.keys()) {
+        void this.offerUpdate(serverId).catch((err: unknown) => {
+          this.deps.log.error({ err, serverId }, 'could not offer an update');
+        });
+      }
+    }, UPDATE_SWEEP_MS);
+    this.updateSweep.unref();
     this.stopBuildListening = await listen(this.deps.databaseUrl, BUILDS_CHANNEL, (serverId) => {
       void this.dispatchBuilds(serverId).catch((err: unknown) => {
         this.deps.log.error({ err, serverId }, 'could not send builds');
@@ -1130,7 +1150,41 @@ export class Gateway
     });
   }
 
+  /**
+   * Asks a connected server to become the agent build this control plane
+   * serves, when the rollout says it is its turn (§25, §34.2).
+   */
+  async offerUpdate(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    const served = await this.deps.binaries?.checksums();
+    if (!connection || !served) return;
+    const { db, now, key, log } = this.deps;
+    const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+    if (!server) return;
+    const fleet = await db.select().from(servers).where(eq(servers.orgId, server.orgId));
+    const view = (s: typeof server): FleetServer => ({
+      id: s.id,
+      channel: s.updateChannel,
+      online: this.connections.has(s.id),
+      arch: s.arch,
+      binarySha: s.agentBinarySha,
+      updateAskedAt: s.agentUpdateAskedAt,
+      updatedAt: s.agentUpdatedAt,
+    });
+    const decision = updateDecision(view(server), fleet.map(view), served, now());
+    if (!decision.ask || !server.arch) return;
+    const sha256 = served[server.arch];
+    if (!sha256) return;
+    await db
+      .update(servers)
+      .set({ agentUpdateAskedAt: now(), agentUpdateError: null })
+      .where(eq(servers.id, serverId));
+    log.info({ serverId, sha256 }, 'asking the agent to update');
+    connection.socket.send(seal(key, { ...connection.session.next('update'), update: { sha256 } }));
+  }
+
   async stop(): Promise<void> {
+    clearInterval(this.updateSweep);
     for (const { socket } of this.connections.values())
       socket.close(1001, 'control plane stopping');
     await this.stopListening?.();
@@ -1147,10 +1201,20 @@ export class Gateway
     return this.connections.has(serverId);
   }
 
-  /** Sends the server its current desired state, if its agent is connected here. */
+  /**
+   * Sends the server its current desired state, if its agent is connected
+   * here — and if it can read it. An agent built against another contract
+   * refuses a state whole (L6), so it is held until the agent has become
+   * the build this control plane serves; the apps on it keep running on
+   * the state they have (N6), and only changes wait.
+   */
   async push(serverId: string): Promise<void> {
     const connection = this.connections.get(serverId);
     if (!connection) return;
+    if (connection.schemaSha && connection.schemaSha !== DESIRED_STATE_SCHEMA_SHA) {
+      this.deps.log.info({ serverId }, 'desired state held: the agent reads another contract');
+      return;
+    }
     const state = await desiredStateFor(this.deps.db, serverId, {
       secretsKey: this.deps.secretsKey,
     });
@@ -1196,7 +1260,12 @@ export class Gateway
             clearTimeout(helloTimer);
             await this.online(serverId, server.orgId, frame, remote);
             this.connections.get(serverId)?.socket.close(1000, 'replaced by a newer connection');
-            this.connections.set(serverId, { socket, session });
+            this.connections.set(serverId, {
+              socket,
+              session,
+              ...(frame.schemaSha256 ? { schemaSha: frame.schemaSha256 } : {}),
+            });
+            await this.offerUpdate(serverId);
             await this.push(serverId);
             await this.dispatchBuilds(serverId);
             // A target configured while this server was away is proved now,
@@ -1256,6 +1325,12 @@ export class Gateway
           status: 'online',
           lastSeenAt: this.deps.now(),
           agentVersion: hello.agentVersion,
+          agentBinarySha: hello.binarySha256 ?? null,
+          agentSchemaSha: hello.schemaSha256 ?? null,
+          // Back as the build it was asked to become: the canary soak starts now.
+          ...(hello.binarySha256 && hello.binarySha256 !== before?.agentBinarySha
+            ? { agentUpdatedAt: this.deps.now(), agentUpdateAskedAt: null, agentUpdateError: null }
+            : {}),
           arch: hello.arch,
           capacity: { cpus: hello.cpus, memoryBytes: hello.memoryBytes, diskBytes: 0 },
           ...(hello.boxKey ? { agentBoxKey: hello.boxKey } : {}),
@@ -1445,6 +1520,12 @@ export class Gateway
         return;
       }
       request.onLines(frame.lines.map((line) => ({ ...line, text: cleanLogText(line.text) })));
+    } else if (frame.type === 'update_result') {
+      // It did not become that build; it said why. It is asked again later.
+      await db
+        .update(servers)
+        .set({ agentUpdateError: frame.error.slice(0, 500) })
+        .where(eq(servers.id, serverId));
     } else if (frame.type === 'ack' && !frame.accepted) {
       // The agent refused a desired state (L6). That is a security event, recorded as such.
       await appendAudit(db, {

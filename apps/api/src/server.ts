@@ -140,7 +140,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       }
     });
   const github = deps.github ?? githubFromConfig(config);
+  // One set of agent builds: the installer hands them out, the gateway updates to them.
+  const binaries = new AgentBinaries(config.AGENT_BINARIES_DIR);
   const gatewayDeps = {
+    binaries,
     db,
     databaseUrl: config.DATABASE_URL,
     key: privateKeyFromSeed(config.CONTROL_PLANE_KEY),
@@ -199,6 +202,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     probe,
     resolveTxt,
     aiCalls: new AiCallWindow(),
+    agentBuilds: () => binaries.checksums(),
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(github ? { github } : {}),
     ...(model ? { model } : {}),
@@ -219,7 +223,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(
     agentInstallRoutes({
       publicUrl: config.PUBLIC_URL,
-      binaries: new AgentBinaries(config.AGENT_BINARIES_DIR),
+      binaries,
     }),
   );
   return app;

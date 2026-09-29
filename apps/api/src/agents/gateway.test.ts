@@ -1,4 +1,7 @@
 import { createHash, generateKeyPairSync, type KeyObject } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { ApplicationSpec, newId } from '@vdeploy/contracts';
 import { hashOf } from '@vdeploy/core';
@@ -18,6 +21,7 @@ import WebSocket from 'ws';
 import { Browser, startTestApp, type TestApp } from '../test-helpers.js';
 import { FrameSession, open, publicKeyFromRaw, rawPublicKey, seal } from './frames.js';
 import { publicAddress } from './gateway.js';
+import { DESIRED_STATE_SCHEMA_SHA } from './schema-hash.js';
 
 let t: TestApp;
 let base: string;
@@ -83,7 +87,11 @@ class FakeAgent {
   private socket!: WebSocket;
   private waiters: (() => void)[] = [];
 
-  constructor(private readonly agent: Agent) {}
+  constructor(
+    private readonly agent: Agent,
+    /** Hello fields a particular test needs: which build it is, what it reads. */
+    private readonly extra: Record<string, unknown> = {},
+  ) {}
 
   async connect(): Promise<void> {
     this.socket = new WebSocket(`${base.replace('http', 'ws')}/api/v1/agent/connect`, {
@@ -112,6 +120,7 @@ class FakeAgent {
       os: 'linux',
       cpus: 2,
       memoryBytes: 2 ** 31,
+      ...this.extra,
     });
   }
 
@@ -123,8 +132,8 @@ class FakeAgent {
     this.socket.send(seal(key, body));
   }
 
-  async next(): Promise<Record<string, unknown>> {
-    const deadline = Date.now() + 5000;
+  async next(waitMs = 5000): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + waitMs;
     while (!this.inbox.length) {
       if (this.closed !== null) throw new Error(`closed ${this.closed}`);
       if (Date.now() > deadline) throw new Error('no frame');
@@ -228,8 +237,15 @@ async function downloadServer() {
   return downloads;
 }
 
+/** Two stand-in agent builds: what this control plane serves, and updates to. */
+const builds = mkdtempSync(join(tmpdir(), 'vdeploy-agents-'));
+writeFileSync(join(builds, 'vd-agent-linux-amd64'), 'agent build amd64');
+writeFileSync(join(builds, 'vd-agent-linux-arm64'), 'agent build arm64');
+const SERVED = createHash('sha256').update('agent build amd64').digest('hex');
+const OLD_BUILD = 'a'.repeat(64);
+
 beforeAll(async () => {
-  t = await startTestApp();
+  t = await startTestApp({ agentBinariesDir: builds });
   owner = new Browser(t.app, 'Owner/1.0');
   await owner.request('POST', '/api/v1/setup', {
     name: 'Owner',
@@ -742,6 +758,45 @@ describe('agent channel', () => {
     });
     expect(res.statusCode).toBe(404);
     expect(fake.inbox.filter((frame) => frame.type === 'files')).toHaveLength(0);
+  });
+
+  it('holds a state from an agent that could not read it, and asks it to update first', async () => {
+    const agent = await enroll('behind');
+    const fake = new FakeAgent(agent, { binarySha256: OLD_BUILD, schemaSha256: 'f'.repeat(64) });
+    await fake.connect();
+    // Asked to become the build we serve — named by hash, nothing else.
+    const update = await fake.next();
+    expect(update).toMatchObject({ type: 'update', update: { sha256: SERVED } });
+    // And no desired state it would have refused whole.
+    await expect(fake.next(1500)).rejects.toThrow('no frame');
+    const [row] = await t.database.db.select().from(servers).where(eq(servers.id, agent.serverId));
+    expect(row?.agentUpdateAskedAt).toBeInstanceOf(Date);
+
+    // It could not; it says why, and the dashboard can too.
+    fake.send({
+      ...fake.session.next('update_result'),
+      sha256: SERVED,
+      error: 'the download does not match',
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    const [failed] = await t.database.db
+      .select()
+      .from(servers)
+      .where(eq(servers.id, agent.serverId));
+    expect(failed?.agentUpdateError).toBe('the download does not match');
+    fake.close();
+
+    // Back as the served build, on the same contract: the state flows again.
+    const current = new FakeAgent(agent, {
+      binarySha256: SERVED,
+      schemaSha256: DESIRED_STATE_SCHEMA_SHA,
+    });
+    await current.connect();
+    expect(await current.next()).toMatchObject({ type: 'desired_state' });
+    const [back] = await t.database.db.select().from(servers).where(eq(servers.id, agent.serverId));
+    expect(back).toMatchObject({ agentBinarySha: SERVED, agentUpdateError: null });
+    expect(back?.agentUpdatedAt).toBeInstanceOf(Date);
+    current.close();
   });
 
   it('refuses a connection for a server that never enrolled', async () => {

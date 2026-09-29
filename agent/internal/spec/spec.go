@@ -9,7 +9,9 @@ package spec
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -19,6 +21,14 @@ import (
 
 //go:embed desired_state.schema.json
 var desiredStateSchema []byte
+
+// SchemaSHA256 names the contract this agent reads desired state against.
+// The control plane hashes the same bytes, so equal means every field it
+// may send is one this agent knows (§25).
+func SchemaSHA256() string {
+	sum := sha256.Sum256(desiredStateSchema)
+	return hex.EncodeToString(sum[:])
+}
 
 // Protocol is the desired-state protocol version this agent speaks.
 const Protocol = 2

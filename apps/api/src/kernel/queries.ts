@@ -2,6 +2,8 @@ import { readSpec, VDeployError, type LogLine, type OperationName } from '@vdepl
 import {
   changeWords,
   describeCapacity,
+  updateDecision,
+  type FleetServer,
   exportProject,
   diagnoseBuild,
   footprint,
@@ -48,7 +50,7 @@ import { CLOUD_QUERIES } from './clouds.js';
 import { PLUGIN_QUERIES } from './plugins.js';
 import { SSO_QUERIES } from './sso.js';
 import { NOTIFICATION_QUERIES } from './notifications.js';
-import type { Handler } from './context.js';
+import type { Handler, KernelDeps } from './context.js';
 
 const id = (args: Record<string, unknown>, field: string): string => String(args[field]);
 
@@ -70,6 +72,32 @@ const notYet: Handler = () =>
  * scoped resource belongs to the actor's org; every query still filters by
  * the scoped id so a secondary id can never reach another project's rows.
  */
+/**
+ * Where each of an organization's agents stands against the build this
+ * control plane serves (§25): the same rule the gateway follows when it
+ * decides whom to ask, so the screen says what will actually happen.
+ */
+async function agentStanding(deps: KernelDeps, orgId: string) {
+  const rows = await deps.db.select().from(servers).where(eq(servers.orgId, orgId));
+  const served = (await deps.agentBuilds?.()) ?? null;
+  const fleet: FleetServer[] = rows.map((r) => ({
+    id: r.id,
+    channel: r.updateChannel,
+    online: r.status === 'online',
+    arch: r.arch,
+    binarySha: r.agentBinarySha,
+    updateAskedAt: r.agentUpdateAskedAt,
+    updatedAt: r.agentUpdatedAt,
+  }));
+  return (id: string) => {
+    const me = fleet.find((f) => f.id === id);
+    const error = rows.find((r) => r.id === id)?.agentUpdateError ?? null;
+    if (!served || !me) return { state: 'unknown' as const, error };
+    const decision = updateDecision(me, fleet, served, deps.now());
+    return { state: decision.ask ? ('due' as const) : decision.reason, error };
+  };
+}
+
 export const QUERIES: Partial<Record<OperationName, Handler>> = {
   ...AI_QUERIES,
   ...DATABASE_QUERIES,
@@ -242,19 +270,31 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         role: servers.role,
         reachability: servers.reachability,
         capacity: servers.capacity,
+        updateChannel: servers.updateChannel,
       })
       .from(servers)
       .where(eq(servers.orgId, actor.orgId))
       .orderBy(servers.name);
+    const agentOf = await agentStanding(deps, actor.orgId);
     const counts = await deps.db
       .select({ serverId: projects.serverId, n: count() })
       .from(projects)
       .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)))
       .groupBy(projects.serverId);
-    return rows.map(({ reachability, ...row }) => ({
-      ...row,
-      reachable: reachability?.status ?? null,
-      projects: counts.find((c) => c.serverId === row.id)?.n ?? 0,
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      lastSeenAt: r.lastSeenAt,
+      agentVersion: r.agentVersion,
+      publicIpv4: r.publicIpv4,
+      provider: r.provider,
+      role: r.role,
+      capacity: r.capacity,
+      updateChannel: r.updateChannel,
+      reachable: r.reachability?.status ?? null,
+      projects: counts.find((c) => c.serverId === r.id)?.n ?? 0,
+      agent: agentOf(r.id),
     }));
   },
   /**
@@ -324,6 +364,8 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
         provider: servers.provider,
         reachability: servers.reachability,
         meshEndpoint: servers.meshEndpoint,
+        orgId: servers.orgId,
+        updateChannel: servers.updateChannel,
         /** The last time disk was freed here, and what it actually freed. */
         lastReclaim: servers.lastReclaim,
       })
@@ -337,10 +379,12 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       .select({ report: observedState.report })
       .from(observedState)
       .where(eq(observedState.serverId, row.id));
+    const agentOf = await agentStanding(deps, row.orgId);
     return {
       ...row,
       health: seen?.report.health ?? null,
       using: seen?.report.usage?.server ?? null,
+      agent: agentOf(row.id),
     };
   },
   'server.resources': async ({ deps, args }) => {

@@ -233,10 +233,18 @@ each is one task, one commit.
 - [ ] `registry.add`: pulling from a private registry (§15, §24)
 - [ ] teams and custom roles (§20, M1)
 - [ ] a server's SSH keys, read like its firewall is (§20, ADR 0016)
-- [ ] agent version, self-update by channel, staged rollout, clean uninstall (§25, §34.2) —
-  **must** handle an agent older than its control plane: it refuses
-  fields it does not know, so the control plane has to update it before
-  sending it a state it cannot read
+- [x] **agent version, self-update by channel, staged rollout, clean
+  uninstall (§25, §34.2)**: an agent says which build it is and which
+  desired-state schema it reads, by hash. When either differs from what
+  the control plane serves, the control plane holds that server's state
+  and asks the agent to update first — so an agent older than its
+  control plane is never sent a field it would refuse. The agent
+  downloads its build from its own control plane, checks the hash, swaps
+  the file beside itself and re-executes. Canary servers go first; the
+  rest follow after a 30-minute soak, a quarter at a time, and a canary
+  that has not taken the build holds everyone else back. The server screen shows where each agent
+  stands, why it last failed, and a canary switch; the installer's
+  `--uninstall` removes the agent and leaves apps, volumes and backups
 - [ ] GitHub and Google sign-in, when configured (§20.2)
 - [ ] a session's approximate location, when a GeoIP database is configured (§20.2)
 - [ ] CAPTCHA after repeated failures, when configured (§20.2)

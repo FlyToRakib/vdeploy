@@ -53,7 +53,25 @@ interface ServerStatus {
   health: ServerHealth | null;
   using: ServerUsing | null;
   lastReclaim: LastReclaim | null;
+  /** Whether this server takes a new agent first (§34.2). */
+  updateChannel: 'canary' | 'general';
+  /** Where its agent stands against the build served here (§25). */
+  agent: { state: AgentState; error: string | null };
 }
+
+type AgentState = 'current' | 'due' | 'asked' | 'canaries' | 'soaking' | 'wave' | 'unknown';
+
+/** Where an agent stands, in words; the rollout's own reasons (§34.2). */
+const AGENT_WORDS: Record<AgentState, string> = {
+  current: 'Up to date',
+  due: 'Updating now',
+  asked: 'Updating now',
+  canaries: 'A newer agent is waiting for the canary servers to take it first',
+  soaking: 'A newer agent will come once the canary servers have run it for half an hour',
+  wave: 'A newer agent is coming, a few servers at a time',
+  unknown:
+    'This agent does not say which build it is: run the install command on it again to update it',
+};
 
 const REACH_HEALTH = {
   reachable: 'healthy',
@@ -189,6 +207,28 @@ export function ServerDetail({ serverId }: { serverId: string }) {
       if (outcome.status === 'done') {
         setServer((current) =>
           current ? { ...current, meshEndpoint: outcome.result.endpoint } : current,
+        );
+      }
+    } catch (err) {
+      if (!(err instanceof OperationError && err.code === 'cancelled')) {
+        setError(message(err, 'That could not be changed.'));
+      }
+    }
+  }
+
+  /** Canary or not (§34.2): which servers run a new agent before the rest. */
+  async function setUpdateChannel(channel: 'canary' | 'general') {
+    setError(null);
+    try {
+      const outcome = await stepUp(() =>
+        runOperation<{ channel: 'canary' | 'general' }>('server.set_update_channel', {
+          serverId,
+          channel,
+        }),
+      );
+      if (outcome.status === 'done') {
+        setServer((current) =>
+          current ? { ...current, updateChannel: outcome.result.channel } : current,
         );
       }
     } catch (err) {
@@ -499,7 +539,24 @@ export function ServerDetail({ serverId }: { serverId: string }) {
             <dd>{server.provider ?? 'Not recognised'}</dd>
             <dt className="text-muted-foreground">Last heard from</dt>
             <dd title={server.lastSeenAt ?? undefined}>{ago(server.lastSeenAt)}</dd>
+            <dt className="text-muted-foreground">Updates</dt>
+            <dd>{AGENT_WORDS[server.agent.state]}</dd>
           </dl>
+          {server.agent.error && (
+            <p className="text-sm text-status-warning">
+              The last update did not take: {server.agent.error}. It will be tried again.
+            </p>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={server.updateChannel === 'canary'}
+              onChange={(event) =>
+                void setUpdateChannel(event.target.checked ? 'canary' : 'general')
+              }
+            />
+            Try a new agent here first, before the other servers
+          </label>
         </Card>
       </div>
     </div>

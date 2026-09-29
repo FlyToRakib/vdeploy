@@ -330,6 +330,16 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
    * The address comes from what the control plane already knows the
    * server by, so there is nothing to type and nothing to get wrong.
    */
+  'server.set_update_channel': async ({ deps, actor, args }) => {
+    const channel = args.channel === 'canary' ? 'canary' : 'general';
+    const updated = await deps.db
+      .update(servers)
+      .set({ updateChannel: channel })
+      .where(and(eq(servers.id, String(args.serverId)), eq(servers.orgId, actor.orgId)))
+      .returning({ id: servers.id });
+    if (!updated.length) throw new VDeployError('not_found', 'That server is not one of yours');
+    return { serverId: String(args.serverId), channel };
+  },
   'server.set_private_traffic': async ({ deps, actor, args }) => {
     const serverId = String(args.serverId);
     const [row] = await deps.db

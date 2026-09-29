@@ -233,6 +233,22 @@ export const AgentFrame = z.discriminatedUnion('type', [
     provider: z.string().max(64).optional(),
     /** The agent's X25519 public key: secrets are sealed to it. */
     boxKey: z.base64().length(44).optional(),
+    /** Which build it is, and which desired-state contract it reads (§25). */
+    binarySha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    schemaSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+  }),
+  z.strictObject({
+    ...FrameHeader,
+    type: z.literal('update_result'),
+    sha256: z.string().max(64),
+    /** Why it did not become that build: an agent that did says so by reconnecting. */
+    error: z.string().max(2000),
   }),
   z.strictObject({
     ...FrameHeader,

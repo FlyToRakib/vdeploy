@@ -43,6 +43,23 @@ export const servers = pgTable('servers', {
   /** The agent's X25519 key (from its signed hello): secrets are sealed to it. */
   agentBoxKey: text('agent_box_key'),
   agentVersion: text('agent_version'),
+  /** Which build the agent is, by the SHA-256 of its own binary (§25). */
+  agentBinarySha: text('agent_binary_sha'),
+  /** Which desired-state contract it reads; a different one refuses our states whole. */
+  agentSchemaSha: text('agent_schema_sha'),
+  /**
+   * Which servers take a new agent first (§34.2): canaries now, the rest
+   * once the canaries have run it for a while — never a fleet at once.
+   */
+  updateChannel: text('update_channel', { enum: ['canary', 'general'] })
+    .notNull()
+    .default('general'),
+  /** When this server was last asked to update, until it comes back as that build. */
+  agentUpdateAskedAt: timestamp('agent_update_asked_at', { withTimezone: true }),
+  /** When it last came back as the build we serve: the canary soak starts here. */
+  agentUpdatedAt: timestamp('agent_updated_at', { withTimezone: true }),
+  /** Why the last update did not take, in the agent's words. */
+  agentUpdateError: text('agent_update_error'),
   /**
    * What this machine is for (§13, §15).
    *

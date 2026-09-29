@@ -34,9 +34,11 @@ import (
 	"github.com/FlyToRakib/vdeploy/agent/internal/reconcile"
 	"github.com/FlyToRakib/vdeploy/agent/internal/router"
 	"github.com/FlyToRakib/vdeploy/agent/internal/sealed"
+	"github.com/FlyToRakib/vdeploy/agent/internal/spec"
 	"github.com/FlyToRakib/vdeploy/agent/internal/task"
 	"github.com/FlyToRakib/vdeploy/agent/internal/terminal"
 	"github.com/FlyToRakib/vdeploy/agent/internal/transport"
+	"github.com/FlyToRakib/vdeploy/agent/internal/update"
 )
 
 // version is set at build time with -ldflags "-X main.version=…".
@@ -87,12 +89,34 @@ func run(args []string, log *slog.Logger) error {
 
 func facts(memoryBytes int64) identity.Facts {
 	hostname, _ := os.Hostname()
+	// Which build this is, by its own bytes: the control plane compares it
+	// with the one it serves, and the contract it reads with its own (§25).
+	binary := ""
+	if exe, err := executable(); err == nil {
+		binary, _ = update.FileSHA256(exe)
+	}
 	return identity.Facts{
 		Hostname: hostname, Arch: runtime.GOARCH, OS: runtime.GOOS,
 		AgentVersion: version, CPUs: runtime.NumCPU(), MemoryBytes: memoryBytes,
-		Addresses: publicAddresses(),
-		Provider:  preflight.Provider(),
+		Addresses:    publicAddresses(),
+		Provider:     preflight.Provider(),
+		BinarySHA256: binary,
+		SchemaSHA256: spec.SchemaSHA256(),
 	}
+}
+
+// executable is the running binary's real path, links resolved: the file
+// an update replaces.
+func executable() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("find this binary: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		return "", fmt.Errorf("find this binary: %w", err)
+	}
+	return resolved, nil
 }
 
 // publicAddresses lists the internet-routable IPs on this machine's
@@ -293,6 +317,7 @@ func serve(configPath string, log *slog.Logger) error {
 			Identity: id, Key: key, ControlPlane: cpKey, Facts: facts(policy.MaxMemoryBytes),
 			BoxKey:  sealed.PublicKey(box),
 			Builder: builder,
+			Updater: updater(id.ControlPlaneURL),
 			Backups: backups,
 			Terminals: &terminal.Runner{
 				Engine:   engine,
@@ -353,5 +378,20 @@ func drain(ctx context.Context, reports <-chan reconcile.Report, log *slog.Logge
 				log.Info("reconcile", "kind", e.Kind, "project", e.ProjectID, "container", e.Container)
 			}
 		}
+	}
+}
+
+// updater swaps this agent for the build its control plane serves (§25),
+// fetched from that control plane and nowhere else.
+func updater(controlPlane string) transport.Updater {
+	exe, err := executable()
+	if err != nil {
+		return nil
+	}
+	return &update.Updater{
+		ControlPlane: controlPlane,
+		Executable:   exe,
+		HTTP:         &http.Client{Timeout: 10 * time.Minute},
+		Exec:         syscall.Exec,
 	}
 }

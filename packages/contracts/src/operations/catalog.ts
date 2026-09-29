@@ -1149,6 +1149,16 @@ export const OPERATIONS = [
     }),
     { stepUp: true },
   ),
+  // Which servers try a new agent first (§34.2). A person's decision: it
+  // decides which production machines run an agent nobody else has yet.
+  operation(
+    'server.set_update_channel',
+    'human_only',
+    'server',
+    'Choose whether this server takes a new agent first, as a canary, or after the canaries have run it',
+    obj({ ...S, channel: z.enum(['canary', 'general']) }),
+    { minRole: 'admin' },
+  ),
   operation(
     'server.remove',
     'human_only',
