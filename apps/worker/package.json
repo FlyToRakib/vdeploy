@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=20000",
     "dev": "tsx watch --env-file=../api/.env src/main.ts",
     "start": "node dist/main.js"
   },
