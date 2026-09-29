@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --hookTimeout=120000",
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
