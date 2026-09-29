@@ -4,7 +4,7 @@ import { deliveryContext, engineProfile, sealTo } from '@vdeploy/core';
 import { databasePassword, databasesOn, linksOf } from './databases.js';
 import type { Database } from './client.js';
 import type { Executor } from './audit.js';
-import { certificateHosts, verifiedHosts } from './domains.js';
+import { certificateHosts, verifiedHosts, verifiedTwins } from './domains.js';
 import { meshFor } from './mesh.js';
 import { notifyDesiredState } from './notify.js';
 import { secretsOwner } from './previews.js';
@@ -25,6 +25,7 @@ export async function desiredStateFor(
 ): Promise<DesiredState> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
   const verified = await verifiedHosts(db, serverId);
+  const twins = await verifiedTwins(db, serverId);
   const rows = await db
     // The build a release came from, so the agent can be told when the
     // bytes it is being asked to run were built for another project
@@ -148,7 +149,13 @@ export async function desiredStateFor(
         hosts: {
           instant: project.instantHost,
           redirects: project.instantHost ? project.previousHosts : [],
-          verified: certificateHosts({ ...project, spec }).filter((h) => verified.has(h)),
+          verified: [
+            ...certificateHosts({ ...project, spec }).filter((h) => verified.has(h)),
+            ...twins.filter((t) => t.projectId === project.id).map((t) => t.from),
+          ],
+          twins: twins
+            .filter((t) => t.projectId === project.id)
+            .map((t) => ({ from: t.from, to: t.to })),
         },
         secrets: secrets.get(project.id) ?? [],
       };

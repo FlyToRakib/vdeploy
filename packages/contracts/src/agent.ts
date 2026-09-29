@@ -69,7 +69,16 @@ export const DesiredProject = z.strictObject({
      * Hosts whose DNS was verified to point here (§13): the only ones the
      * agent may request a certificate for. The rest are served on plain HTTP.
      */
-    verified: z.array(Hostname).max(64),
+    // 32 domains, each with a twin, beside the instant URL and its redirects.
+    verified: z.array(Hostname).max(128),
+    /**
+     * The www or bare twin of a domain, sent on to it (§30 ⑤) — only once
+     * the twin's own DNS was verified, so it can have a certificate too.
+     */
+    twins: z
+      .array(z.strictObject({ from: Hostname, to: Hostname }))
+      .max(64)
+      .default([]),
   }),
   /**
    * The secret values this release uses, each sealed to the agent's own

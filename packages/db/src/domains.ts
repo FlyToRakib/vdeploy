@@ -1,5 +1,5 @@
 import type { ApplicationSpec, DomainCheck, DomainStatus } from '@vdeploy/contracts';
-import type { DnsAssessment, DnsObservation } from '@vdeploy/core';
+import { twinOf, type DnsAssessment, type DnsObservation } from '@vdeploy/core';
 import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
 import { frontingServer } from './fronting.js';
@@ -42,6 +42,11 @@ async function bump(tx: Executor, serverIds: Iterable<string>): Promise<void> {
  * Makes the checks match what servers route: new hosts start pending, a host
  * that moved to another project or server starts over, and hosts no longer
  * routed are dropped. Servers that lose a verified host get new state.
+ *
+ * A domain's www or bare twin is checked too, once a look has found the
+ * domain's zone (§30 ⑤) — unless some app routes that name itself, which
+ * always wins: two apps answering one name is refused outright by the
+ * agent, and the explicit one is the one somebody asked for.
  */
 export async function syncDomainChecks(tx: Executor, now: Date): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('domain-checks', 42))`);
@@ -56,7 +61,15 @@ export async function syncDomainChecks(tx: Executor, now: Date): Promise<void> {
     })
     .from(projects)
     .where(and(isNull(projects.deletedAt), isNotNull(projects.currentReleaseId)));
-  const wanted = new Map<string, { serverId: string; projectId: string }>();
+  const existing = await tx.select().from(domainChecks);
+  const zones = new Map(existing.map((c) => [c.host, c.zone]));
+  const explicit = new Set<string>();
+  for (const row of rows) {
+    for (const d of row.spec.network?.domains ?? []) explicit.add(d.host);
+    if (row.instantHost) explicit.add(row.instantHost);
+    for (const h of row.previousHosts) explicit.add(h);
+  }
+  const wanted = new Map<string, { serverId: string; projectId: string; twinOf: string | null }>();
   for (const row of rows) {
     if (!row.serverId) continue;
     // A check asks "does this name point at the machine that will answer
@@ -66,14 +79,23 @@ export async function syncDomainChecks(tx: Executor, now: Date): Promise<void> {
     const edge = await frontingServer(tx, row.orgId);
     const answering = edge && edge.id !== row.serverId ? edge.id : row.serverId;
     for (const host of certificateHosts(row)) {
-      wanted.set(host, { serverId: answering, projectId: row.id });
+      wanted.set(host, { serverId: answering, projectId: row.id, twinOf: null });
+    }
+    for (const d of row.spec.network?.domains ?? []) {
+      const twin = d.twin ? twinOf(d.host, zones.get(d.host) ?? null) : null;
+      if (twin && !explicit.has(twin) && !wanted.has(twin)) {
+        wanted.set(twin, { serverId: answering, projectId: row.id, twinOf: d.host });
+      }
     }
   }
-  const existing = await tx.select().from(domainChecks);
   const lost: string[] = [];
   for (const check of existing) {
     const want = wanted.get(check.host);
-    if (want?.serverId === check.serverId && want.projectId === check.projectId) {
+    if (
+      want?.serverId === check.serverId &&
+      want.projectId === check.projectId &&
+      want.twinOf === check.twinOf
+    ) {
       wanted.delete(check.host);
       continue;
     }
@@ -129,6 +151,7 @@ export async function recordDomainCheck(
       message: result.message,
       seen: { a: seen.a, aaaa: seen.aaaa },
       instructions: result.instructions,
+      zone: seen.zone,
       attempts,
       checkedAt: now,
       verifiedAt: check.verifiedAt ?? (verified ? now : null),
@@ -144,6 +167,24 @@ export async function postponeDomainCheck(db: Executor, host: string, now: Date)
     .update(domainChecks)
     .set({ nextCheckAt: new Date(now.getTime() + FIRST_RETRY_MS) })
     .where(eq(domainChecks.host, host));
+}
+
+/** Twins on this server whose own DNS is verified, each with where it sends visitors. */
+export async function verifiedTwins(
+  db: Executor,
+  serverId: string,
+): Promise<{ projectId: string; from: string; to: string }[]> {
+  const rows = await db
+    .select({ projectId: domainChecks.projectId, from: domainChecks.host, to: domainChecks.twinOf })
+    .from(domainChecks)
+    .where(
+      and(
+        eq(domainChecks.serverId, serverId),
+        isNotNull(domainChecks.verifiedAt),
+        isNotNull(domainChecks.twinOf),
+      ),
+    );
+  return rows.flatMap((r) => (r.to ? [{ projectId: r.projectId, from: r.from, to: r.to }] : []));
 }
 
 /** Hosts on this server cleared for a certificate. */
@@ -183,5 +224,7 @@ export async function domainChecksFor(db: Executor, projectIds: string[]): Promi
     instructions: r.instructions,
     checkedAt: r.checkedAt?.toISOString() ?? null,
     nextCheckAt: r.nextCheckAt.toISOString(),
+    zone: r.zone,
+    twinOf: r.twinOf,
   }));
 }

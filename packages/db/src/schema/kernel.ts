@@ -254,6 +254,10 @@ export const domainChecks = pgTable(
     checkedAt: timestamp('checked_at', { withTimezone: true }),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
     nextCheckAt: timestamp('next_check_at', { withTimezone: true }).notNull().defaultNow(),
+    /** The domain the registrar manages, as the last look found it (its SOA). */
+    zone: text('zone'),
+    /** Set on a www or bare twin: the address it sends visitors to (§30 ⑤). */
+    twinOf: text('twin_of'),
   },
   (t) => [index('domain_checks_due').on(t.nextCheckAt)],
 );

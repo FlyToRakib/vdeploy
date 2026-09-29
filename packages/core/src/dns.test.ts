@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { fetchableOrigin, assessDns, inCidr, recordName, type DnsObservation } from './dns.js';
+import {
+  fetchableOrigin,
+  assessDns,
+  inCidr,
+  recordName,
+  twinOf,
+  type DnsObservation,
+} from './dns.js';
 
 const server = { ipv4: '8.8.4.4', ipv6: null };
 const seen = (overrides: Partial<DnsObservation> = {}): DnsObservation => ({
@@ -24,6 +31,16 @@ describe('inCidr', () => {
     ['1:2:3', '2606:4700::/32', false],
   ])('%s in %s → %s', (ip, cidr, expected) => {
     expect(inCidr(ip, cidr)).toBe(expected);
+  });
+});
+
+describe('twinOf', () => {
+  it('pairs a bare domain with its www, whatever the suffix, and nothing else', () => {
+    expect(twinOf('shop.com', 'shop.com')).toBe('www.shop.com');
+    expect(twinOf('www.shop.com', 'shop.com')).toBe('shop.com');
+    expect(twinOf('shop.co.uk', 'shop.co.uk')).toBe('www.shop.co.uk');
+    expect(twinOf('api.shop.com', 'shop.com')).toBeNull();
+    expect(twinOf('shop.com', null)).toBeNull();
   });
 });
 

@@ -121,6 +121,48 @@ describe('DNS verification before certificates', () => {
     ]);
   });
 
+  it('checks the www twin of a bare domain, and sends it on once its own DNS points here', async () => {
+    const { serverId, projectId } = await seed('twin.test', null);
+    records.set('twin.test', { zone: 'twin.test', a: ['8.8.4.4'] });
+    records.set('www.twin.test', { zone: 'twin.test', a: ['8.8.4.4'] });
+    later(60_000);
+    // The first look finds the zone; only then is there a twin to check.
+    await run();
+    await run();
+    const checks = await domainChecksFor(t.db, [projectId]);
+    expect(checks.find((c) => c.host === 'www.twin.test')?.twinOf).toBe('twin.test');
+    later(60_000);
+    await run();
+    const state = await desiredStateFor(t.db, serverId);
+    expect(state.projects[0]?.hosts.twins).toEqual([{ from: 'www.twin.test', to: 'twin.test' }]);
+    expect(state.projects[0]?.hosts.verified).toContain('www.twin.test');
+  });
+
+  it('never twins a name another app routes itself, and not at all when asked not to', async () => {
+    const { projectId } = await seed('pair.test', null);
+    // Another app answers at www.pair.test on its own.
+    await seed('www.pair.test', null);
+    records.set('pair.test', { zone: 'pair.test', a: ['8.8.4.4'] });
+    later(60_000);
+    await run();
+    await run();
+    const checks = await domainChecksFor(t.db, [projectId]);
+    expect(checks.map((c) => c.host)).toEqual(['pair.test']);
+
+    const { projectId: quiet } = await seed('quiet.test', null);
+    const [row] = await t.db.select().from(projects).where(eq(projects.id, quiet));
+    const spec = ApplicationSpec.parse({
+      ...row!.spec,
+      network: { containerPort: 80, domains: [{ host: 'quiet.test', twin: false }] },
+    });
+    await t.db.update(projects).set({ spec }).where(eq(projects.id, quiet));
+    records.set('quiet.test', { zone: 'quiet.test', a: ['8.8.4.4'] });
+    later(60_000);
+    await run();
+    await run();
+    expect((await domainChecksFor(t.db, [quiet])).map((c) => c.host)).toEqual(['quiet.test']);
+  });
+
   it('gives no verdict when DNS itself fails, and looks again', async () => {
     const { projectId } = await seed('shop.acme.com', null);
     records.set('shop.acme.com', new Error('SERVFAIL'));

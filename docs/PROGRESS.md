@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** `vdeploy up` from a local folder
+**Task:** `vdeploy up` from a local folder, then routing
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -190,7 +190,21 @@ each is one task, one commit.
 - [ ] `vdeploy up` from a local folder (§30 ③)
 
 **Routing (§13)**
-- [ ] redirects: www↔apex on by default, and custom rules
+- [x] **www↔apex, on by default (§30 ⑤)**: every domain also answers at
+  its www or bare twin and sends those visitors to it, because a
+  forgotten www loses half of them. The twin is exact rather than
+  guessed — the zone comes from the domain's own SOA record, so
+  `shop.co.uk` is a bare domain and `api.shop.com` has no twin — and the
+  twin's own DNS is checked like any address, so its certificate is only
+  ever asked for once it points here. A name some app routes itself
+  always wins over a twin, because the agent refuses two apps answering
+  one name. The Config screen shows each twin's status, the record to
+  add if it needs one, and a switch to turn it off. **Consequence for
+  agent updates:** agents refuse any field they do not know (L6), so an
+  agent older than this control plane refuses every desired state now
+  carrying `twin` — which makes the automatic agent update below
+  load-bearing, and it must land before any release ships this
+- [ ] custom redirect rules (§13)
 - [ ] auth in front of an app: basic auth, and forward-auth for OIDC
 - [ ] IP deny lists, and rate limits keyed by a header
 - [ ] HTTP/3, and timeouts that suit SSE and WebSockets
@@ -219,7 +233,10 @@ each is one task, one commit.
 - [ ] `registry.add`: pulling from a private registry (§15, §24)
 - [ ] teams and custom roles (§20, M1)
 - [ ] a server's SSH keys, read like its firewall is (§20, ADR 0016)
-- [ ] agent version, self-update by channel, staged rollout, clean uninstall (§25, §34.2)
+- [ ] agent version, self-update by channel, staged rollout, clean uninstall (§25, §34.2) —
+  **must** handle an agent older than its control plane: it refuses
+  fields it does not know, so the control plane has to update it before
+  sending it a state it cannot read
 - [ ] GitHub and Google sign-in, when configured (§20.2)
 - [ ] a session's approximate location, when a GeoIP database is configured (§20.2)
 - [ ] CAPTCHA after repeated failures, when configured (§20.2)

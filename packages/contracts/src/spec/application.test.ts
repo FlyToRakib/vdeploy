@@ -39,6 +39,8 @@ describe('ApplicationSpec defaults', () => {
       host: 'blog.example.com',
       tls: { provider: 'letsencrypt', challenge: 'http-01' },
       paths: ['/'],
+      // On unless turned off: a forgotten www loses half the visitors (§30 ⑤).
+      twin: true,
     });
     expect(parsed.network?.middleware.headers).toEqual({ hsts: true, frameDeny: true });
   });

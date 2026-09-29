@@ -72,6 +72,19 @@ function sameAddress(x: string, y: string): boolean {
   return a !== null && b !== null && a.bits === b.bits && a.value === b.value;
 }
 
+/**
+ * The other half of a bare domain and its www, which people type
+ * interchangeably (§30 ⑤). The zone is the name with the SOA record, so
+ * shop.co.uk is a bare domain and api.shop.com is not; anything that is
+ * neither the bare domain nor its www has no twin.
+ */
+export function twinOf(host: string, zone: string | null): string | null {
+  if (!zone) return null;
+  if (host === zone) return `www.${zone}`;
+  if (host === `www.${zone}`) return zone;
+  return null;
+}
+
 /** The registrar's "name" for host within zone: `@` for the bare domain, else the labels before it. */
 export function recordName(host: string, zone: string): string {
   if (host === zone) return '@';

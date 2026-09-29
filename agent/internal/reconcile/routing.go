@@ -115,9 +115,17 @@ func routes(project spec.DesiredProject) ([]spec.Domain, []router.Redirect) {
 		hosts = append(hosts, d)
 		own[d.Host] = true
 	}
+	// A domain's twin sends its visitors to the domain, whether or not an
+	// instant URL exists — a name that is routed by the app itself wins.
+	var redirects []router.Redirect
+	for _, twin := range project.Hosts.Twins {
+		if !own[twin.From] {
+			redirects = append(redirects, router.Redirect{From: twin.From, To: twin.To, Secure: verified[twin.From]})
+		}
+	}
 	instant := project.Hosts.Instant
 	if instant == "" {
-		return hosts, nil
+		return hosts, redirects
 	}
 	if !own[instant] {
 		d := spec.Domain{Host: instant, Paths: []string{"/"}}
@@ -127,7 +135,6 @@ func routes(project spec.DesiredProject) ([]spec.Domain, []router.Redirect) {
 		}
 		hosts = append(hosts, d)
 	}
-	var redirects []router.Redirect
 	for _, old := range project.Hosts.Redirects {
 		if old != instant && !own[old] {
 			redirects = append(redirects, router.Redirect{From: old, To: instant, Secure: verified[old]})

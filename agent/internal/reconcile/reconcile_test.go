@@ -586,6 +586,33 @@ func TestInstantHostIsRoutedWithTLSAndOldHostsRedirect(t *testing.T) {
 	}
 }
 
+func TestATwinSendsItsVisitorsToTheDomainEvenWithoutAnInstantURL(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+	p := routedProject(1) // blog.example.com
+	p.Hosts = spec.Hosts{
+		Verified: []string{"blog.example.com", "www.blog.example.com"},
+		Twins:    []spec.Twin{{From: "www.blog.example.com", To: "blog.example.com"}},
+	}
+
+	reconcile(t, r, desired(1, p))
+	file := routing.files[compose.ProjectKey("prj_"+idA)]
+	for _, want := range []string{
+		"Host(`www.blog.example.com`)",
+		"https://blog.example.com${1}",
+	} {
+		if !strings.Contains(file, want) {
+			t.Fatalf("routing lacks %s:\n%s", want, file)
+		}
+	}
+	// Its certificate is asked for: its own DNS was verified.
+	if strings.Count(file, "certResolver") < 2 {
+		t.Fatalf("the twin has no certificate:\n%s", file)
+	}
+}
+
 func TestNoCertificateIsRequestedBeforeDNSIsVerified(t *testing.T) {
 	engine := newFake()
 	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}

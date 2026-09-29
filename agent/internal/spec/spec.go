@@ -163,6 +163,14 @@ type Hosts struct {
 	Redirects []string `json:"redirects"`
 	// Verified hosts point here in DNS: the only ones a certificate may be requested for.
 	Verified []string `json:"verified"`
+	// Twins are a domain's www or bare twin, sent on to it (§30 ⑤).
+	Twins []Twin `json:"twins"`
+}
+
+// Twin is one name that sends its visitors to another the app answers on.
+type Twin struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // Application is the subset of the Application spec the agent acts on.

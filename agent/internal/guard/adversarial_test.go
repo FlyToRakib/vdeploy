@@ -144,8 +144,21 @@ func TestHostileFramesAreRefused(t *testing.T) {
 			twin["projectId"] = "prj_01J9Z3Q8S7M2K4X6V1B5N0C9ZZ"
 			twin["hosts"] = map[string]any{
 				"instant": "evil.8-8-4-4.sslip.io", "redirects": []any{"blog.8-8-4-4.sslip.io"}, "verified": []any{},
+				"twins": []any{},
 			}
 			f["projects"] = append(f["projects"].([]any), twin)
+		}, "already routed"},
+		{"a twin that is another project's hostname", func(f map[string]any) {
+			var other map[string]any
+			raw, _ := json.Marshal(project(f))
+			_ = json.Unmarshal(raw, &other)
+			other["projectId"] = "prj_01J9Z3Q8S7M2K4X6V1B5N0C9ZZ"
+			other["hosts"] = map[string]any{
+				"instant": "other.8-8-4-4.sslip.io", "redirects": []any{}, "verified": []any{},
+				"twins": []any{map[string]any{"from": "blog.example.com", "to": "other.example.com"}},
+			}
+			other["spec"].(map[string]any)["network"].(map[string]any)["domains"] = []any{}
+			f["projects"] = append(f["projects"].([]any), other)
 		}, "already routed"},
 
 		// Protocol.

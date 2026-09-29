@@ -162,6 +162,9 @@ func sharedHosts(projects []spec.DesiredProject) []error {
 	var refusals []error
 	for _, p := range projects {
 		hosts := append([]string{p.Hosts.Instant}, p.Hosts.Redirects...)
+		for _, twin := range p.Hosts.Twins {
+			hosts = append(hosts, twin.From)
+		}
 		if p.Spec.Network != nil {
 			for _, d := range p.Spec.Network.Domains {
 				hosts = append(hosts, d.Host)

@@ -37,5 +37,9 @@ export const DomainCheck = z.strictObject({
   checkedAt: z.iso.datetime().nullable(),
   /** When it will look again: shown as a countdown, never as a retry button. */
   nextCheckAt: z.iso.datetime().nullable(),
+  /** The domain the registrar manages, once a look has found it. */
+  zone: z.string().nullable(),
+  /** For a www or bare twin, the address it sends visitors to (§30 ⑤). */
+  twinOf: z.string().nullable(),
 });
 export type DomainCheck = z.infer<typeof DomainCheck>;

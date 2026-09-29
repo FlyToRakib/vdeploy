@@ -15,6 +15,7 @@ import {
   secretNameFor,
   withChecks,
   withDomains,
+  withTwin,
   withMemory,
   type EditableSpec,
 } from '@/lib/config';
@@ -135,6 +136,8 @@ interface DomainCheck {
   instructions: { type: string; name: string; value: string; zone: string }[];
   /** The certificate the server holds for it, once it has one (§30 ⑦). */
   certificate: { notAfter: string; renewing: boolean } | null;
+  /** Set on a www or bare twin: the address it sends visitors to (§30 ⑤). */
+  twinOf: string | null;
 }
 
 /** "until 3 December 2026", in the reader's own words for dates. */
@@ -186,6 +189,8 @@ export function DomainsSection() {
       <ul className="grid gap-3">
         {hosts.map((host) => {
           const check = checks?.find((c) => c.host === host);
+          const twin = checks?.find((c) => c.twinOf === host);
+          const twinOn = spec.network?.domains.find((d) => d.host === host)?.twin !== false;
           const look = DOMAIN_LOOK[check?.status ?? 'pending'] ?? DOMAIN_LOOK.pending;
           return (
             <li key={host} className="grid gap-2 rounded-md border border-border p-3 text-sm">
@@ -220,6 +225,38 @@ export function DomainsSection() {
                     server, and that nothing in front of it blocks port 80.
                   </p>
                 ))}
+              <label className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={twinOn}
+                  onChange={(event) =>
+                    void act(
+                      'project.update_spec',
+                      { projectId, spec: withTwin(spec, host, event.target.checked) },
+                      event.target.checked
+                        ? `Answering at ${twin?.host ?? 'its twin'} too`
+                        : `No longer answering at ${twin?.host ?? 'its twin'}`,
+                    )
+                  }
+                />
+                {twin
+                  ? `Also answer at ${twin.host}, and send those visitors here`
+                  : 'Also answer at its www or bare address, once its DNS is found'}
+                {twinOn && twin && (
+                  <Status health={twin.status === 'verified' ? 'healthy' : 'neutral'}>
+                    {twin.status === 'verified'
+                      ? 'Sending visitors here'
+                      : 'Needs its own DNS record'}
+                  </Status>
+                )}
+              </label>
+              {twinOn && twin && twin.status !== 'verified' && twin.instructions.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  For {twin.host}, add{' '}
+                  {twin.instructions.map((i) => `${i.type} ${i.name} → ${i.value}`).join(' and ')}{' '}
+                  in {twin.instructions[0]?.zone}.
+                </p>
+              )}
               {check && check.status !== 'verified' && check.instructions.length > 0 && (
                 <table className="w-full text-left text-xs">
                   <caption className="mb-1 text-left text-muted-foreground">

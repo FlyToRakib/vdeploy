@@ -533,12 +533,17 @@
                             "type": "string",
                             "pattern": "^\\/[\\w\\-./]*$"
                           }
+                        },
+                        "twin": {
+                          "default": true,
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "host",
                         "tls",
-                        "paths"
+                        "paths",
+                        "twin"
                       ],
                       "additionalProperties": false
                     }
@@ -1170,19 +1175,45 @@
                 }
               },
               "verified": {
-                "maxItems": 64,
+                "maxItems": 128,
                 "type": "array",
                 "items": {
                   "type": "string",
                   "maxLength": 253,
                   "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
                 }
+              },
+              "twins": {
+                "default": [],
+                "maxItems": 64,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "maxLength": 253,
+                      "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                    },
+                    "to": {
+                      "type": "string",
+                      "maxLength": 253,
+                      "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
               "instant",
               "redirects",
-              "verified"
+              "verified",
+              "twins"
             ],
             "additionalProperties": false
           },
@@ -1574,12 +1605,17 @@
                             "type": "string",
                             "pattern": "^\\/[\\w\\-./]*$"
                           }
+                        },
+                        "twin": {
+                          "default": true,
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "host",
                         "tls",
-                        "paths"
+                        "paths",
+                        "twin"
                       ],
                       "additionalProperties": false
                     }

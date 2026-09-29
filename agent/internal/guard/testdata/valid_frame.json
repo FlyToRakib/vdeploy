@@ -66,7 +66,8 @@
               },
               "paths": [
                 "/"
-              ]
+              ],
+              "twin": true
             }
           ],
           "middleware": {
@@ -103,7 +104,12 @@
           "crons": []
         },
         "placement": {},
-        "preview": { "enabled": false, "fromForks": false, "max": 5, "expireAfterDays": 7 },
+        "preview": {
+          "enabled": false,
+          "fromForks": false,
+          "max": 5,
+          "expireAfterDays": 7
+        },
         "ai": {
           "managed": true,
           "autoApply": [
@@ -119,7 +125,8 @@
         "redirects": [],
         "verified": [
           "blog.8-8-4-4.sslip.io"
-        ]
+        ],
+        "twins": []
       },
       "secrets": []
     }

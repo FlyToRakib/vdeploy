@@ -4,7 +4,7 @@ import { parse, stringify } from 'yaml';
 export interface EditableSpec {
   network?: {
     containerPort: number;
-    domains: { host: string; tls?: unknown }[];
+    domains: { host: string; tls?: unknown; twin?: boolean }[];
     [key: string]: unknown;
   };
   runtime: {
@@ -101,6 +101,18 @@ export function withDomains(spec: EditableSpec, hosts: readonly string[]): Edita
 }
 
 /** A copy of the spec with this memory limit; the request never exceeds it. */
+/** Turns a domain's www or bare twin on or off (§30 ⑤), leaving the rest of it alone. */
+export function withTwin(spec: EditableSpec, host: string, on: boolean): EditableSpec {
+  if (!spec.network) throw new Error('This app has no port, so it cannot have a domain');
+  return {
+    ...spec,
+    network: {
+      ...spec.network,
+      domains: spec.network.domains.map((d) => (d.host === host ? { ...d, twin: on } : d)),
+    },
+  };
+}
+
 export function withMemory(spec: EditableSpec, limit: string): EditableSpec {
   const { memory } = spec.runtime.resources;
   return {

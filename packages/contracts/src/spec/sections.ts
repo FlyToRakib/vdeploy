@@ -132,6 +132,11 @@ export const Network = z.strictObject({
           .min(1)
           .max(16)
           .default(['/']),
+        /**
+         * Also answer at this address's www or bare twin, and send those
+         * visitors here (§30 ⑤: "forgets www — half their visitors 404").
+         */
+        twin: z.boolean().default(true),
       }),
     )
     .max(32)
