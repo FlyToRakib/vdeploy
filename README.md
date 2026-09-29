@@ -153,13 +153,17 @@ to the address people type. Keep a copy of `SECRETS_KEY` somewhere that
 is not that server and not its database backups: without it no stored
 secret can be opened by anybody, including you.
 
+Locked out of your own VDeploy — password and authenticator both gone —
+is solved on the machine, by whoever can open a shell on it:
+`docs/runbooks/lost-access.md`.
+
 ## Reading further
 
 - `docs/vdeploy.md` — the specification this is built from
 - `docs/PROGRESS.md` — what is built, what is not, and what is known to be
   missing, kept honest rather than flattering
 - `docs/adr/` — the decisions that were not obvious, and what each one cost
-- `docs/runbooks/` — losing the control plane, and getting it back
+- `docs/runbooks/` — losing the control plane, or your own way in, and getting it back
 
 ## Licence
 

@@ -638,6 +638,15 @@ async function run() {
   if (!audit.verification.ok)
     throw new Error(`audit chain broken: ${JSON.stringify(audit.verification)}`);
   pass('every action is in the audit log, chain verified', `${audit.entries.length} entries`);
+
+  // The documented way back in (docs/runbooks/lost-access.md), run exactly
+  // as written against the real image: a command in a runbook that nobody
+  // has run is a guess.
+  const who = inTestbed('docker exec cp-api node /app/api/dist/break-glass.js who');
+  if (!who.includes('owner@e2e.invalid\towner')) {
+    throw new Error(`break-glass does not list the owner: ${who}`);
+  }
+  pass('the break-glass command runs in the image, as the runbook says', 'who');
 }
 
 /**

@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** the break-glass command on the control-plane host
+**Task:** one command to install the control plane, one to upgrade it
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -161,7 +161,18 @@ each is one task, one commit.
   to and a new trigger would otherwise reach nobody already here
   (channels somebody pared down are left as they chose). The agent's own
   protocol test caught the new list encoding as null
-- [ ] the break-glass command on the control-plane host (§30 ⑧)
+- [x] **the break-glass command on the control-plane host (§30 ⑧)**,
+  for somebody who has lost both their password and their authenticator.
+  Nothing on the sign-in page can offer that, because anything it offered
+  an attacker could try too; whoever can open a shell on the
+  control-plane host already holds every key, so the way back is there.
+  `break-glass.js who` lists who administers what; `reset <email>`
+  prints a new password **once**, made up rather than typed so no shell
+  history keeps it, turns two-factor sign-in off, signs out every
+  session, and records `auth.break_glass` — never the password. A
+  person who only ever used a passkey gets a password to come back with.
+  `docs/runbooks/lost-access.md` walks through all three ways back in,
+  and the e2e runs the command exactly as the runbook writes it
 - [ ] one command to install the control plane, one to upgrade it with a backup first (§34.1)
 - [ ] `vdeploy up` from a local folder (§30 ③)
 
