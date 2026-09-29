@@ -317,10 +317,8 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
    * this the gate let the request through and found nothing behind it, and
    * no terminal ever opened.
    */
-  'terminal.open': async ({ args }) => ({
-    projectId: String(args.projectId),
-    replica: Number(args.replica ?? 0),
-  }),
+  'terminal.open': ({ args }) =>
+    Promise.resolve({ projectId: String(args.projectId), replica: Number(args.replica ?? 0) }),
   'secret.read_value': async ({ deps, args }) =>
     readSecret(deps.db, deps.secretsKey, String(args.projectId), String(args.secretId)),
   'storage.ignore_path': async ({ deps, args }) => {
