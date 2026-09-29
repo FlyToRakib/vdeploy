@@ -10,12 +10,14 @@ import {
   organization,
   plans,
   projects,
+  readSecret,
   releases,
   secretVersions,
   serverEnrollments,
   servers,
   session,
 } from '@vdeploy/db';
+import { verify as verifyBcrypt } from '@node-rs/bcrypt';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Browser, startTestApp, type TestApp } from '../test-helpers.js';
@@ -410,6 +412,48 @@ describe('source uploads and builds', () => {
     });
     expect(right.statusCode).toBe(200);
     expect(right.rawPayload.equals(archive)).toBe(true);
+  });
+});
+
+describe('passwords in front of an app', () => {
+  it('keeps only hashes, one line per person, in the form the router reads', async () => {
+    const projectId = await seedProject(orgId, 'staging-shop');
+    await stepUp(owner);
+    const res = await op(owner, 'project.basic_auth', {
+      projectId,
+      users: [
+        { name: 'sam', password: 'correct horse staging 1' },
+        { name: 'kim@example.com', password: 'another long passphrase' },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
+    const { secretId } = res.json<{ result: { secretId: string } }>().result;
+    const { value } = await readSecret(
+      t.database.db,
+      Buffer.from('cd'.repeat(32), 'hex'),
+      projectId,
+      secretId,
+      1,
+    );
+    const lines = value.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(value).not.toContain('correct horse');
+    const [name, hash] = lines[0]!.split(/:(.*)/s);
+    expect(name).toBe('sam');
+    expect(hash).toMatch(/^\$2y\$10\$/);
+    // The same bcrypt, whichever prefix spells it.
+    expect(
+      await verifyBcrypt(
+        'correct horse staging 1',
+        hash!.replace(/^\$2y\$/, () => '$2b$'),
+      ),
+    ).toBe(true);
+    // Short passwords are refused before anything is stored.
+    const short = await op(owner, 'project.basic_auth', {
+      projectId,
+      users: [{ name: 'sam', password: 'short' }],
+    });
+    expect(short.statusCode).toBe(400);
   });
 });
 

@@ -129,5 +129,6 @@ func routerFile(
 		hosts,
 		redirects,
 		router.Traffic{Backends: []router.Backend{{Container: "127.0.0.1", Port: route.ListenPort}}},
+		nil,
 	)
 }

@@ -36,7 +36,7 @@ func TestFileRoutesEveryHostToEveryReplica(t *testing.T) {
 	raw, ok := File("abc", network(), []spec.Domain{
 		domain("blog.example.com", "letsencrypt", "/"),
 		domain("blog.203-0-113-42.sslip.io", "none", "/api", "/admin"),
-	}, nil, Traffic{Backends: []Backend{{"vd-abc-v1-r0-0", 3000}, {"vd-abc-v1-r0-1", 3000}}})
+	}, nil, Traffic{Backends: []Backend{{"vd-abc-v1-r0-0", 3000}, {"vd-abc-v1-r0-1", 3000}}}, nil)
 	if !ok {
 		t.Fatal("no routing produced")
 	}
@@ -69,7 +69,7 @@ func TestFileRoutesEveryHostToEveryReplica(t *testing.T) {
 func TestOldHostsRedirectToTheNewOne(t *testing.T) {
 	raw, ok := File("abc", network(), []spec.Domain{domain("blog.apps.example.com", "letsencrypt", "/")},
 		[]Redirect{{From: "blog.8-8-4-4.sslip.io", To: "blog.apps.example.com", Secure: true}},
-		Traffic{Backends: []Backend{{"vd-abc-v1-r0-0", 3000}}})
+		Traffic{Backends: []Backend{{"vd-abc-v1-r0-0", 3000}}}, nil)
 	if !ok {
 		t.Fatal("no routing produced")
 	}
@@ -102,7 +102,7 @@ func TestNoFileWithoutSomethingToRoute(t *testing.T) {
 		"no hosts":    {network(), nil, backends},
 		"no replicas": {network(), hosts, Traffic{}},
 	} {
-		if _, ok := File("k", args.n, args.h, nil, args.b); ok {
+		if _, ok := File("k", args.n, args.h, nil, args.b, nil); ok {
 			t.Errorf("%s: produced a routing file", name)
 		}
 	}

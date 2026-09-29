@@ -278,8 +278,49 @@ type Volume struct {
 type Network struct {
 	ContainerPort int          `json:"containerPort"`
 	Domains       []Domain     `json:"domains"`
+	Redirects     []MovedPath  `json:"redirects"`
 	Middleware    Middleware   `json:"middleware"`
 	LoadBalancer  LoadBalancer `json:"loadBalancer"`
+}
+
+// MovedPath sends a path, and everything under it, somewhere else (§13).
+type MovedPath struct {
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Permanent bool   `json:"permanent"`
+}
+
+// RateLimitBy is whom a rate limit counts: each address ("ip"), or a header.
+type RateLimitBy struct {
+	Header string
+}
+
+// UnmarshalJSON reads "ip" or {"header": "X-Api-Key"}.
+func (b *RateLimitBy) UnmarshalJSON(data []byte) error {
+	if string(data) == `"ip"` {
+		b.Header = ""
+		return nil
+	}
+	var byHeader struct {
+		Header string `json:"header"`
+	}
+	if err := json.Unmarshal(data, &byHeader); err != nil {
+		return fmt.Errorf("rate limit by: %w", err)
+	}
+	b.Header = byHeader.Header
+	return nil
+}
+
+// Auth is basic auth, whose password hashes arrive as a sealed secret, or
+// a forward-auth service that answers for every request (§13).
+type Auth struct {
+	Type               string   `json:"type"`
+	SecretRef          string   `json:"secretRef,omitempty"`
+	Version            int      `json:"version,omitempty"`
+	Realm              string   `json:"realm,omitempty"`
+	Address            string   `json:"address,omitempty"`
+	TrustForwardHeader bool     `json:"trustForwardHeader,omitempty"`
+	ResponseHeaders    []string `json:"responseHeaders,omitempty"`
 }
 
 // Domain is one hostname routed to the application.
@@ -294,12 +335,17 @@ type Domain struct {
 // Middleware shapes traffic on its way in.
 type Middleware struct {
 	RateLimit *struct {
-		Average int `json:"average"`
-		Burst   int `json:"burst"`
+		Average int         `json:"average"`
+		Burst   int         `json:"burst"`
+		By      RateLimitBy `json:"by"`
 	} `json:"rateLimit,omitempty"`
 	Compression bool     `json:"compression"`
 	IPAllowList []string `json:"ipAllowList"`
-	Headers     struct {
+	// IPDenyList is turned away before it matches any route (§13).
+	IPDenyList []string `json:"ipDenyList"`
+	// Auth is who has to prove themselves before the app is reached.
+	Auth    *Auth `json:"auth,omitempty"`
+	Headers struct {
 		HSTS      bool `json:"hsts"`
 		FrameDeny bool `json:"frameDeny"`
 	} `json:"headers"`

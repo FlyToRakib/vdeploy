@@ -1,3 +1,4 @@
+import { hash as hashBcrypt } from '@node-rs/bcrypt';
 import { createHash, randomBytes } from 'node:crypto';
 import { newId, UrlSettings, VDeployError, type OperationName } from '@vdeploy/contracts';
 import {
@@ -239,6 +240,26 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
       await resetDomainChecks(tx, serverId, deps.now());
     });
     return { serverId, ipv4, ipv6, detected: !manual };
+  },
+  'project.basic_auth': async ({ deps, actor, args }) => {
+    const users = args.users as { name: string; password: string }[];
+    // One line per person, as the router reads them. The $2y$ spelling is
+    // the one htpasswd and Traefik document; the algorithm is bcrypt's.
+    const lines = await Promise.all(
+      users.map(
+        async (u) =>
+          `${u.name}:${(await hashBcrypt(u.password, 10)).replace(/^\$2b\$/, () => '$2y$')}`,
+      ),
+    );
+    return deps.db.transaction((tx) =>
+      putSecret(tx, deps.secretsKey, {
+        orgId: actor.orgId,
+        projectId: String(args.projectId),
+        name: 'basic-auth',
+        value: lines.join('\n'),
+        actor: { userId: actor.userId, origin: actor.origin },
+      }),
+    );
   },
   'secret.set': async ({ deps, actor, args }) =>
     deps.db.transaction((tx) =>

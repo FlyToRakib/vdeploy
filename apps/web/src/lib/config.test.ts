@@ -7,6 +7,8 @@ import {
   withDomains,
   withChecks,
   withMemory,
+  withMiddleware,
+  withMovedPaths,
   yamlToSpec,
   type EditableSpec,
 } from './config';
@@ -25,6 +27,33 @@ const spec: EditableSpec = {
 };
 
 describe('config edits', () => {
+  it('changes one part of the middleware and removes one on undefined', () => {
+    const guarded = {
+      ...spec,
+      network: {
+        ...spec.network!,
+        middleware: { compression: true, auth: { type: 'basic' as const, secretRef: 'sec_1' } },
+      },
+    };
+    expect(withMiddleware(guarded, { ipDenyList: ['10.0.0.1'] })).toEqual({
+      compression: true,
+      auth: { type: 'basic', secretRef: 'sec_1' },
+      ipDenyList: ['10.0.0.1'],
+    });
+    expect(withMiddleware(guarded, { auth: undefined })).toEqual({ compression: true });
+  });
+
+  it('keeps moved pages as paths or web addresses, however they were typed', () => {
+    const next = withMovedPaths(spec, [
+      { from: 'old-page', to: 'new-page' },
+      { from: '/docs', to: ' https://docs.example.com ' },
+    ]);
+    expect(next.network?.redirects).toEqual([
+      { from: '/old-page', to: '/new-page' },
+      { from: '/docs', to: 'https://docs.example.com' },
+    ]);
+  });
+
   it('turns a check on with a path and off without one, keeping what the form does not show', () => {
     const startup = { type: 'http' as const, path: '/boot', timeout: '90s' };
     const before = {

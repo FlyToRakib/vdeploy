@@ -76,7 +76,8 @@
             "headers": {
               "hsts": true,
               "frameDeny": true
-            }
+            },
+            "ipDenyList": []
           },
           "loadBalancer": {
             "algorithm": "wrr",
@@ -84,7 +85,8 @@
               "enabled": false,
               "cookie": "vd-sticky"
             }
-          }
+          },
+          "redirects": []
         },
         "health": {},
         "deploy": {

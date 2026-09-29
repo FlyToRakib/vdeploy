@@ -210,9 +210,20 @@ each is one task, one commit.
   agent older than this control plane refuses every desired state now
   carrying `twin` — which makes the automatic agent update below
   load-bearing, and it must land before any release ships this
-- [ ] custom redirect rules (§13)
-- [ ] auth in front of an app: basic auth, and forward-auth for OIDC
-- [ ] IP deny lists, and rate limits keyed by a header
+- [x] **custom redirect rules (§13)**: `network.redirects` moves a
+  path and everything under it — the rest of the address and the query
+  go along — permanently by default, or temporarily. The rule is written for the
+  router exactly, so a path is never read as a pattern
+- [x] **auth in front of an app**: basic auth from a list of people and
+  passwords, of which only bcrypt hashes are kept, as a sealed secret the
+  agent opens for the router; forward-auth to an address for OIDC. Basic
+  auth fails closed: if the agent cannot open the list, the app is not
+  routed at all, rather than routed without it. Setting passwords is a
+  person's act with step-up, never an AI's
+- [x] **IP deny lists, and rate limits keyed by a header**: addresses and
+  ranges the router refuses, and a rate limit counted per client address
+  or per the value of a named header (an API key, say). The end-to-end
+  run checks a moved page and a password against the real router
 - [ ] HTTP/3, and timeouts that suit SSE and WebSockets
 - [ ] the raw Traefik escape hatch (§20)
 - [ ] `network.protocol: tcp`

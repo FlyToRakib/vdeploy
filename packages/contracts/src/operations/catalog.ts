@@ -1060,6 +1060,28 @@ export const OPERATIONS = [
     obj({ ...P, replica: z.number().int().min(0).max(63).default(0) }),
     { minRole: 'developer' },
   ),
+  // Passwords in front of an app (§13). Hashed as they arrive and kept only
+  // as hashes, in a secret like any other; the app's middleware then names
+  // that secret. A person types a password: never the AI.
+  operation(
+    'project.basic_auth',
+    'human_only',
+    'project',
+    'Choose who may sign in with a password before reaching this app; the passwords are kept only as hashes',
+    obj({
+      ...P,
+      users: z
+        .array(
+          z.strictObject({
+            name: z.string().regex(/^[\w.@-]{1,64}$/, 'letters, digits and . @ _ - only'),
+            password: z.string().min(12, 'at least 12 characters').max(128),
+          }),
+        )
+        .min(1)
+        .max(20),
+    }),
+    { stepUp: true },
+  ),
   operation(
     'secret.set',
     'human_only',

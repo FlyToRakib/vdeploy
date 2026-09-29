@@ -273,6 +273,12 @@ async function pinSecrets(deps: StepDeps, projectId: string, spec: ApplicationSp
   const refs = spec.runtime.env.flatMap((e) =>
     'secretRef' in e ? [{ key: e.key, id: e.secretRef, version: e.version }] : [],
   );
+  // The passwords in front of the app are a secret like any setting: the
+  // release pins the version it was made with, and a rollback restores it.
+  const auth = spec.network?.middleware.auth;
+  if (auth?.type === 'basic') {
+    refs.push({ key: 'basic auth', id: auth.secretRef, version: auth.version });
+  }
   const current = await currentSecretVersions(
     deps.db,
     projectId,

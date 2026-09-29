@@ -29,6 +29,9 @@ export const EnvKey = z
 
 const Cidr = z.union([z.cidrv4(), z.cidrv6(), z.ipv4(), z.ipv6()]);
 
+/** An HTTP header name: letters, digits and hyphens. */
+const HeaderName = z.string().regex(/^[A-Za-z0-9-]{1,64}$/, 'must be a header name like X-Api-Key');
+
 export const Source = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('git'),
@@ -141,16 +144,79 @@ export const Network = z.strictObject({
     )
     .max(32)
     .default([]),
+  /**
+   * Addresses that moved (§13, §20 Network): a path, and everything under
+   * it, sent to another path or another site. Matched on whole path
+   * segments, so /blog never catches /blogger; what follows the path and
+   * the query go along.
+   */
+  redirects: z
+    .array(
+      z.strictObject({
+        from: z
+          .string()
+          .max(256)
+          .regex(/^\/[\w\-./~%]*$/, 'must be a path like /old-page'),
+        to: z
+          .string()
+          .max(1024)
+          .regex(
+            /^(\/[^\s]*|https?:\/\/[^\s]+)$/,
+            'must be a path like /new-page or a web address',
+          ),
+        permanent: z.boolean().default(true),
+      }),
+    )
+    .max(50)
+    .default([]),
   middleware: z
     .strictObject({
       rateLimit: z
         .strictObject({
           average: z.number().int().positive(),
           burst: z.number().int().positive(),
+          /**
+           * Whom a limit counts (§13): each visitor's address, or a header
+           * such as an API key — which is what an API behind one proxy needs,
+           * since every request arrives from the proxy's address.
+           */
+          by: z.union([z.literal('ip'), z.strictObject({ header: HeaderName })]).default('ip'),
         })
         .optional(),
       compression: z.boolean().default(true),
       ipAllowList: z.array(Cidr).max(256).default([]),
+      /** Addresses turned away: they match no route of this app at all. */
+      ipDenyList: z.array(Cidr).max(256).default([]),
+      /**
+       * Somebody has to prove who they are before the app is reached (§13).
+       * Basic auth's passwords are hashed on the way in and kept as a
+       * secret, delivered sealed like any other; forward-auth hands every
+       * request to a service that answers yes or no — which is how an OIDC
+       * sign-in (oauth2-proxy and the like) goes in front of an app.
+       */
+      auth: z
+        .discriminatedUnion('type', [
+          z.strictObject({
+            type: z.literal('basic'),
+            secretRef: idSchema('secret'),
+            version: z.number().int().positive().optional(),
+            realm: z
+              .string()
+              .max(64)
+              .regex(/^[\w .-]*$/)
+              .default('Restricted'),
+          }),
+          z.strictObject({
+            type: z.literal('forward'),
+            address: z
+              .url()
+              .max(1024)
+              .refine((u) => /^https?:\/\//.test(u), 'must be an http or https address'),
+            trustForwardHeader: z.boolean().default(false),
+            responseHeaders: z.array(HeaderName).max(16).default([]),
+          }),
+        ])
+        .optional(),
       headers: z
         .strictObject({ hsts: z.boolean().default(true), frameDeny: z.boolean().default(true) })
         .prefault({}),

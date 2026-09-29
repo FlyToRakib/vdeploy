@@ -2,6 +2,7 @@
 
 import { Lock, Trash2 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useStepUp } from '@/components/step-up';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
@@ -15,12 +16,14 @@ import {
   secretNameFor,
   withChecks,
   withDomains,
+  withMiddleware,
+  withMovedPaths,
   withTwin,
   withMemory,
   type EditableSpec,
 } from '@/lib/config';
 import { formText } from '@/lib/forms';
-import { query } from '@/lib/operations';
+import { OperationError, query, runOperation } from '@/lib/operations';
 import { ago, sizeWords, type BackupSummary } from '@/lib/databases';
 import type { ServerSummary } from '@/lib/servers';
 import type { TaskView } from '@vdeploy/contracts';
@@ -362,6 +365,225 @@ export function SizeSection() {
           defaultValue={spec.runtime.replicas}
         />
         <Button type="submit">Save</Button>
+      </form>
+    </Section>
+  );
+}
+
+/**
+ * Who may reach this app (§13): a password in front of it, and addresses
+ * turned away. The passwords are hashed as they arrive and never kept;
+ * turning a password on is two steps — the hashes are stored as a secret,
+ * then the app is told to use it — and the second is an ordinary change
+ * that goes through its plan like any other.
+ */
+export function AccessSection() {
+  const { projectId, act } = useProject();
+  const spec = useSpec();
+  const stepUp = useStepUp();
+  const [people, setPeople] = useState([{ name: '', password: '' }]);
+  const [error, setError] = useState<string | null>(null);
+  if (!spec.network) return null;
+  const middleware = spec.network.middleware ?? {};
+  const guarded = middleware.auth?.type === 'basic';
+
+  async function protect() {
+    setError(null);
+    const users = people.filter((p) => p.name.trim() && p.password);
+    if (users.length === 0) return;
+    try {
+      const outcome = await stepUp(() =>
+        runOperation<{ secretId: string }>('project.basic_auth', { projectId, users }),
+      );
+      if (outcome.status !== 'done') return;
+      await act(
+        'network.middleware',
+        {
+          projectId,
+          middleware: withMiddleware(spec, {
+            auth: { type: 'basic', secretRef: outcome.result.secretId },
+          }),
+        },
+        'Asking for a password before anyone reaches it',
+      );
+      setPeople([{ name: '', password: '' }]);
+    } catch (err) {
+      if (!(err instanceof OperationError && err.code === 'cancelled')) {
+        setError(err instanceof Error ? err.message : 'That did not work.');
+      }
+    }
+  }
+
+  return (
+    <Section
+      title="Who can reach it"
+      hint="Put a password in front of it — a staging copy, a tool only your team uses — and turn away addresses that should never get in."
+    >
+      {guarded ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Status health="healthy">Asks for a password</Status>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              void act(
+                'network.middleware',
+                { projectId, middleware: withMiddleware(spec, { auth: undefined }) },
+                'Letting anyone reach it again',
+              )
+            }
+          >
+            Remove the password
+          </Button>
+        </div>
+      ) : middleware.auth?.type === 'forward' ? (
+        <p className="text-sm text-muted-foreground">
+          Every visit is checked by {middleware.auth.address} first. Change it in the Advanced view.
+        </p>
+      ) : (
+        <form
+          action={() => {
+            void protect();
+          }}
+          className="grid gap-3"
+        >
+          {people.map((person, i) => (
+            <div key={i} className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Name"
+                name={`name-${String(i)}`}
+                value={person.name}
+                onChange={(e) => {
+                  setPeople(people.map((p, j) => (j === i ? { ...p, name: e.target.value } : p)));
+                }}
+                autoComplete="off"
+              />
+              <Field
+                label="Password"
+                name={`password-${String(i)}`}
+                type="password"
+                value={person.password}
+                onChange={(e) => {
+                  setPeople(
+                    people.map((p, j) => (j === i ? { ...p, password: e.target.value } : p)),
+                  );
+                }}
+                autoComplete="new-password"
+                hint="At least 12 characters."
+              />
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setPeople([...people, { name: '', password: '' }]);
+              }}
+            >
+              Add another person
+            </Button>
+            <Button type="submit">Ask for a password</Button>
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-status-failed">
+              {error}
+            </p>
+          )}
+        </form>
+      )}
+      <form
+        action={(form) => {
+          const list = formText(form, 'deny')
+            .split(/[\s,]+/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+          void act(
+            'network.middleware',
+            { projectId, middleware: withMiddleware(spec, { ipDenyList: list }) },
+            list.length ? 'Turning those addresses away' : 'Letting every address in',
+          );
+        }}
+        className="grid gap-2"
+      >
+        <label htmlFor="deny" className="text-sm font-medium">
+          Turned away
+        </label>
+        <textarea
+          id="deny"
+          name="deny"
+          rows={3}
+          defaultValue={(middleware.ipDenyList ?? []).join('\n')}
+          placeholder={'203.0.113.7\n198.51.100.0/24'}
+          className="rounded-md border border-border bg-surface-raised p-3 font-mono text-xs text-foreground"
+        />
+        <p className="text-xs text-muted-foreground">
+          One address or range per line. They reach nothing of this app.
+        </p>
+        <Button type="submit" variant="secondary" className="justify-self-start">
+          Save
+        </Button>
+      </form>
+    </Section>
+  );
+}
+
+/**
+ * Pages that moved (§13): a path, and everything under it, sent on — to
+ * another path here or another site — so old links keep working.
+ */
+export function MovedPagesSection() {
+  const { projectId, act } = useProject();
+  const spec = useSpec();
+  if (!spec.network) return null;
+  const moved = spec.network.redirects ?? [];
+  const save = (next: typeof moved, doing: string) =>
+    act('project.update_spec', { projectId, spec: withMovedPaths(spec, next) }, doing);
+  return (
+    <Section
+      title="Moved pages"
+      hint="Send an old address, and everything under it, somewhere new, so links people saved keep working."
+    >
+      {moved.length > 0 && (
+        <ul className="grid gap-2 text-sm">
+          {moved.map((m) => (
+            <li key={m.from} className="flex flex-wrap items-center gap-2">
+              <span className="font-mono">{m.from}</span>
+              <span aria-hidden>→</span>
+              <span className="font-mono break-all">{m.to}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto"
+                onClick={() =>
+                  void save(
+                    moved.filter((x) => x.from !== m.from),
+                    `No longer sending ${m.from} on`,
+                  )
+                }
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        action={(form) => {
+          const from = formText(form, 'from');
+          const to = formText(form, 'to');
+          if (from && to) {
+            void save(
+              [...moved.filter((x) => x.from !== from), { from, to, permanent: true }],
+              `Sending ${from} to ${to}`,
+            );
+          }
+        }}
+        className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+      >
+        <Field label="From" name="from" required placeholder="/old-page" />
+        <Field label="To" name="to" required placeholder="/new-page or https://…" />
+        <Button type="submit">Add</Button>
       </form>
     </Section>
   );

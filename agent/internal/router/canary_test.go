@@ -12,7 +12,7 @@ func hostsFor() []spec.Domain {
 
 func servicesOf(t *testing.T, traffic Traffic, n *spec.Network) map[string]any {
 	t.Helper()
-	raw, ok := File("abc", n, hostsFor(), nil, traffic)
+	raw, ok := File("abc", n, hostsFor(), nil, traffic, nil)
 	if !ok {
 		t.Fatal("no routing produced")
 	}
@@ -102,7 +102,7 @@ func TestTheBreakerAndRetryReachTheRouterWhenTheSpecAsksForThem(t *testing.T) {
 		Attempts int `json:"attempts"`
 	}{Attempts: 2}
 
-	raw, ok := File("abc", n, hostsFor(), nil, Traffic{Backends: []Backend{{"a", 3000}}})
+	raw, ok := File("abc", n, hostsFor(), nil, Traffic{Backends: []Backend{{"a", 3000}}}, nil)
 	if !ok {
 		t.Fatal("no routing produced")
 	}
@@ -134,7 +134,7 @@ func TestTheBreakerAndRetryReachTheRouterWhenTheSpecAsksForThem(t *testing.T) {
 }
 
 func TestAnAppThatAsksForNeitherGetsNeither(t *testing.T) {
-	raw, _ := File("abc", network(), hostsFor(), nil, Traffic{Backends: []Backend{{"a", 3000}}})
+	raw, _ := File("abc", network(), hostsFor(), nil, Traffic{Backends: []Backend{{"a", 3000}}}, nil)
 	middlewares := decode(t, raw)["middlewares"].(map[string]any)
 	for _, absent := range []string{"abc-breaker", "abc-retry"} {
 		if _, there := middlewares[absent]; there {

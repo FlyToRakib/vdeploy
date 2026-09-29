@@ -7,9 +7,11 @@ import { cn } from '@/lib/cn';
 import { specToYaml, yamlToSpec } from '@/lib/config';
 import { useProject } from '../project-shell';
 import {
+  AccessSection,
   DomainsSection,
   ExportSection,
   HealthSection,
+  MovedPagesSection,
   PreviewsSection,
   ScheduleSection,
   BuildServerSection,
@@ -135,6 +137,8 @@ export function ProjectConfig() {
       </div>
       <SettingsSection />
       <DomainsSection />
+      <MovedPagesSection />
+      <AccessSection />
       <SizeSection />
       <HealthSection />
       <StorageSection />

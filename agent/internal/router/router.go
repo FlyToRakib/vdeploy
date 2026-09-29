@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,7 +82,20 @@ func rule(d spec.Domain) string {
 	return hostRule + " && (" + strings.Join(prefixes, " || ") + ")"
 }
 
-func middlewares(key string, n spec.Network) (object, []string) {
+// denied turns a deny list into a clause of the router's own rule, so an
+// address on it matches no route of this app at all (§13).
+func denied(cidrs []string) string {
+	if len(cidrs) == 0 {
+		return ""
+	}
+	clients := make([]string, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		clients = append(clients, "ClientIP("+quote(cidr)+")")
+	}
+	return " && !(" + strings.Join(clients, " || ") + ")"
+}
+
+func middlewares(key string, n spec.Network, users []string) (object, []string) {
 	defs := object{}
 	var chain []string
 	add := func(name string, def object) {
@@ -89,12 +103,35 @@ func middlewares(key string, n spec.Network) (object, []string) {
 		defs[full] = def
 		chain = append(chain, full)
 	}
+	// Moved paths first: a visitor sent elsewhere never needs the rest.
+	for i, moved := range n.Redirects {
+		add("moved-path-"+strconv.Itoa(i), movedPath(moved))
+	}
 	m := n.Middleware
 	if len(m.IPAllowList) > 0 {
 		add("allow", object{"ipAllowList": object{"sourceRange": m.IPAllowList}})
 	}
+	// Who may come in is settled before anything is counted or answered.
+	if a := m.Auth; a != nil {
+		switch a.Type {
+		case "basic":
+			if len(users) > 0 {
+				add("auth", object{"basicAuth": object{"users": users, "realm": a.Realm, "removeHeader": true}})
+			}
+		case "forward":
+			forward := object{"address": a.Address, "trustForwardHeader": a.TrustForwardHeader}
+			if len(a.ResponseHeaders) > 0 {
+				forward["authResponseHeaders"] = a.ResponseHeaders
+			}
+			add("auth", object{"forwardAuth": forward})
+		}
+	}
 	if m.RateLimit != nil {
-		add("ratelimit", object{"rateLimit": object{"average": m.RateLimit.Average, "burst": m.RateLimit.Burst}})
+		limit := object{"average": m.RateLimit.Average, "burst": m.RateLimit.Burst}
+		if m.RateLimit.By.Header != "" {
+			limit["sourceCriterion"] = object{"requestHeaderName": m.RateLimit.By.Header}
+		}
+		add("ratelimit", object{"rateLimit": limit})
 	}
 	headers := object{"contentTypeNosniff": true, "referrerPolicy": "strict-origin-when-cross-origin"}
 	if m.Headers.HSTS {
@@ -130,6 +167,28 @@ func middlewares(key string, n spec.Network) (object, []string) {
 		add("retry", object{"retry": object{"attempts": lb.Retry.Attempts}})
 	}
 	return defs, chain
+}
+
+/*
+movedPath turns one moved path into Traefik's redirectRegex.
+
+The path is matched on whole segments — /blog is /blog, /blog/, /blog/x
+and /blog?x, never /blogger — and whatever follows it goes along to the
+new place. Both sides come from a person, so both are escaped: the path
+with QuoteMeta so it can only ever be a literal, and the destination's $
+doubled so it can never name a capture group it did not mean to.
+*/
+func movedPath(moved spec.MovedPath) object {
+	from := strings.TrimSuffix(moved.From, "/")
+	regex := "^(https?)://([^/]+)" + regexp.QuoteMeta(from) + "(/.*|\\?.*)?$"
+	to := strings.ReplaceAll(moved.To, "$", "$$")
+	replacement := to + "${3}"
+	if strings.HasPrefix(moved.To, "/") {
+		replacement = "${1}://${2}" + strings.TrimSuffix(to, "/") + "${3}"
+	}
+	return object{"redirectRegex": object{
+		"regex": regex, "replacement": replacement, "permanent": moved.Permanent,
+	}}
 }
 
 // services renders either one service, or a weighted pair sharing traffic.
@@ -173,27 +232,35 @@ func service(n spec.Network, backends []Backend) object {
 
 // File renders one project's routing, or reports that it has none: no
 // network, no hostnames, or no replica ready to take traffic.
-func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Redirect, traffic Traffic) ([]byte, bool) {
+//
+// users are basic auth's htpasswd lines, opened from their sealed secret;
+// nil when the app has none.
+func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Redirect, traffic Traffic, users []string) ([]byte, bool) {
 	if network == nil || len(hosts) == 0 || len(traffic.all()) == 0 {
 		return nil, false
 	}
-	middlewareDefs, chain := middlewares(key, *network)
+	// Fail closed: an app that asked for a password is never routed without one.
+	if a := network.Middleware.Auth; a != nil && a.Type == "basic" && len(users) == 0 {
+		return nil, false
+	}
+	middlewareDefs, chain := middlewares(key, *network, users)
+	deny := denied(network.Middleware.IPDenyList)
 	toHTTPS := key + "-to-https"
 	routers := object{}
 	for i, d := range hosts {
 		name := key + "-" + strconv.Itoa(i)
 		if d.TLS.Provider == "letsencrypt" {
 			routers[name] = object{
-				"rule": rule(d), "service": key, "entryPoints": []string{"websecure"},
+				"rule": rule(d) + deny, "service": key, "entryPoints": []string{"websecure"},
 				"middlewares": chain, "tls": object{"certResolver": CertResolver},
 			}
 			routers[name+"-http"] = object{
-				"rule": rule(d), "service": key, "entryPoints": []string{"web"},
+				"rule": rule(d) + deny, "service": key, "entryPoints": []string{"web"},
 				"middlewares": []string{toHTTPS},
 			}
 			continue
 		}
-		routers[name] = object{"rule": rule(d), "service": key, "entryPoints": []string{"web"}, "middlewares": chain}
+		routers[name] = object{"rule": rule(d) + deny, "service": key, "entryPoints": []string{"web"}, "middlewares": chain}
 	}
 	middlewareDefs[toHTTPS] = object{"redirectScheme": object{"scheme": "https", "permanent": true}}
 	for i, r := range redirects {

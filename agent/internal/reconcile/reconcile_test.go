@@ -978,3 +978,30 @@ func TestNamingAProjectDoesNotRunAnImageThisAgentNeverBuilt(t *testing.T) {
 		t.Fatalf("ran an image it never built: %+v", report.Projects[0])
 	}
 }
+
+func TestBasicAuthIsOpenedForTheRouterAndItsAbsenceWithholdsRouting(t *testing.T) {
+	engine := newFake()
+	routing := &fakeRouting{files: map[string]string{}, joined: map[string]bool{}}
+	r := newReconciler(engine)
+	r.Routing = routing
+	r.Secrets = &fakeSecrets{}
+	p := routedProject(1)
+	p.Spec.Network.Middleware.Auth = &spec.Auth{Type: "basic", SecretRef: "sec_01J9Z3Q8S7M2K4X6V1B5N0C9D9", Realm: "Staging"} // #nosec G101 -- an id, not a credential
+	p.Secrets = []spec.Secret{{ID: "sec_01J9Z3Q8S7M2K4X6V1B5N0C9D9", Version: 1, Sealed: "sealed:sam:$2y$10$hash\n"}}
+	key := compose.ProjectKey("prj_" + idA)
+
+	reconcile(t, r, desired(1, p))
+	if !strings.Contains(routing.files[key], "sam:$2y$10$hash") {
+		t.Fatalf("the password is not in front of the app:\n%s", routing.files[key])
+	}
+
+	// The same app, its password not delivered: it is not routed at all.
+	p.Secrets = nil
+	report := reconcile(t, r, desired(2, p))
+	if _, routed := routing.files[key]; routed {
+		t.Fatalf("routed without its password:\n%s", routing.files[key])
+	}
+	if !slices.ContainsFunc(report.Events, func(e Event) bool { return strings.Contains(e.Message, "not routed: its password") }) {
+		t.Fatalf("no event says why: %v", report.Events)
+	}
+}

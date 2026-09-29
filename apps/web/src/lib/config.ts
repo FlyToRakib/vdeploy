@@ -5,6 +5,8 @@ export interface EditableSpec {
   network?: {
     containerPort: number;
     domains: { host: string; tls?: unknown; twin?: boolean }[];
+    redirects?: MovedPath[];
+    middleware?: Middleware;
     [key: string]: unknown;
   };
   runtime: {
@@ -101,6 +103,46 @@ export function withDomains(spec: EditableSpec, hosts: readonly string[]): Edita
 }
 
 /** A copy of the spec with this memory limit; the request never exceeds it. */
+/** Who may reach the app (§13): the parts of the middleware the screen edits. */
+export interface Middleware {
+  auth?:
+    { type: 'basic'; secretRef: string; realm?: string } | { type: 'forward'; address: string };
+  ipDenyList?: string[];
+  [key: string]: unknown;
+}
+
+/** The middleware with one part changed, the rest kept as it is; undefined removes a part. */
+export function withMiddleware(
+  spec: EditableSpec,
+  change: { [K in keyof Middleware]?: Middleware[K] | undefined },
+): Middleware {
+  const merged = { ...spec.network?.middleware, ...change };
+  return Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined));
+}
+
+export interface MovedPath {
+  from: string;
+  to: string;
+  permanent?: boolean;
+}
+
+/** The app's moved pages, replaced whole (§13); a path given without its slash gets one. */
+export function withMovedPaths(spec: EditableSpec, moved: readonly MovedPath[]): EditableSpec {
+  if (!spec.network) throw new Error('This app has no port, so nothing can be redirected');
+  const path = (p: string) => (p.startsWith('/') ? p : `/${p}`);
+  return {
+    ...spec,
+    network: {
+      ...spec.network,
+      redirects: moved.map((m) => ({
+        ...m,
+        from: path(m.from.trim()),
+        to: /^https?:\/\//.test(m.to.trim()) ? m.to.trim() : path(m.to.trim()),
+      })),
+    },
+  };
+}
+
 /** Turns a domain's www or bare twin on or off (§30 ⑤), leaving the rest of it alone. */
 export function withTwin(spec: EditableSpec, host: string, on: boolean): EditableSpec {
   if (!spec.network) throw new Error('This app has no port, so it cannot have a domain');

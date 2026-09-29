@@ -62,7 +62,7 @@ func (p *pass) edge(ctx context.Context, routes []spec.EdgeRoute) {
 			continue
 		}
 		traffic := router.Traffic{Backends: []router.Backend{{Container: host, Port: number}}}
-		content, ok := router.File(key, &network, hosts, redirects, traffic)
+		content, ok := router.File(key, &network, hosts, redirects, traffic, nil)
 		if !ok {
 			continue
 		}

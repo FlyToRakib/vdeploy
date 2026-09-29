@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"strings"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
@@ -167,7 +168,14 @@ func (p *pass) route(ctx context.Context, state *spec.DesiredState) {
 		key := compose.ProjectKey(project.ProjectID)
 		traffic := p.backends(project, containers)
 		hosts, redirects := routes(project)
-		content, ok := router.File(key, network, hosts, redirects, traffic)
+		users, opened := p.basicAuthUsers(project)
+		if !opened {
+			// Its password could not be opened: no routing at all rather
+			// than routing without it. Nothing keeps the old file either,
+			// since that may be from before the password was asked for.
+			continue
+		}
+		content, ok := router.File(key, network, hosts, redirects, traffic, users)
 		if !ok {
 			if len(containers) > 0 {
 				keep[key] = true // replicas still starting: leave the current routing as it is
@@ -208,4 +216,42 @@ type MeshRunner interface {
 	// RouterAddress is where this machine's router reaches another
 	// server's, or empty while that is not open.
 	RouterAddress(serverID string) string
+}
+
+// basicAuthUsers opens the htpasswd lines a project's basic auth delivers
+// as a sealed secret (§13). It reports false when basic auth is asked for
+// and cannot be opened, so the caller withholds routing: an app that asked
+// for a password is never served without one.
+func (p *pass) basicAuthUsers(project spec.DesiredProject) ([]string, bool) {
+	auth := project.Spec.Network.Middleware.Auth
+	if auth == nil || auth.Type != "basic" {
+		return nil, true
+	}
+	fail := func(why string) ([]string, bool) {
+		p.event("failed", project.ProjectID, "", "not routed: its password "+why)
+		return nil, false
+	}
+	if p.r.Secrets == nil {
+		return fail("cannot be opened on this server")
+	}
+	for _, secret := range project.Secrets {
+		if secret.ID != auth.SecretRef {
+			continue
+		}
+		value, err := p.r.Secrets.Open(project.ProjectID, secret.ID, secret.Version, secret.Sealed)
+		if err != nil {
+			return fail("could not be opened: " + err.Error())
+		}
+		var users []string
+		for _, line := range strings.Split(value, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				users = append(users, line)
+			}
+		}
+		if len(users) == 0 {
+			return fail("list is empty")
+		}
+		return users, true
+	}
+	return fail("was not delivered with this release")
 }

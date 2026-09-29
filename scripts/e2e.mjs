@@ -624,6 +624,7 @@ async function run() {
   await stagingAndPromote(fromGithubId);
   await aPluginKey();
   await vdeployUp();
+  await inFrontOfAnApp();
   await agentUpdatesItself(server.serverId);
   await secondServer(server.serverId);
 
@@ -1869,6 +1870,76 @@ async function aPluginKey() {
   const after = await asPlugin('project.list');
   if (after !== 401) throw new Error(`the key still worked after removal: ${after}`);
   pass('an integration did what it was allowed, and nothing else', 'then its key stopped');
+}
+
+/**
+ * What goes in front of an app (§13), checked against the real router —
+ * which is the only thing that can say whether it accepts the rules the
+ * agent writes: a moved page answers with where it went, and a password
+ * turns away a visit without one and lets in one with it.
+ */
+async function inFrontOfAnApp() {
+  const [app] = (await op('project.list', {})).result.filter((p) => p.name === 'cli-app');
+  if (!app?.url) throw new Error('the cli-app is not online');
+  const host = new URL(app.url).host;
+  const { result: current } = await op('project.get', { projectId: app.id });
+  const change = async (spec) => {
+    const { plan } = await op('project.update_spec', { projectId: app.id, spec });
+    const done = await settled(plan.id);
+    if (done.status !== 'applied') throw new Error(`not applied: ${JSON.stringify(done)}`);
+  };
+  await change({
+    ...current.spec,
+    network: { ...current.spec.network, redirects: [{ from: '/old', to: '/new' }] },
+  });
+  const moved = await until(
+    'the moved page answers',
+    async () => {
+      const answer = overTls(host, '/old/page?x=1');
+      return /^HTTP\/1\.1 30[18]/.test(answer) ? answer : null;
+    },
+    60_000,
+  );
+  if (!new RegExp(`location: https://${host}/new/page\\?x=1`, 'i').test(moved)) {
+    throw new Error(`the moved page went to the wrong place: ${moved.split('\r\n\r\n')[0]}`);
+  }
+  pass(
+    'a moved page sends visitors, and the rest of their address, to where it went',
+    '/old → /new',
+  );
+
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const secret = 'staging passphrase 42';
+  const { result: stored } = await op('project.basic_auth', {
+    projectId: app.id,
+    users: [{ name: 'sam', password: secret }],
+  });
+  const { result: withRedirects } = await op('project.get', { projectId: app.id });
+  const { plan } = await op('network.middleware', {
+    projectId: app.id,
+    middleware: {
+      ...withRedirects.spec.network.middleware,
+      auth: { type: 'basic', secretRef: stored.secretId },
+    },
+  });
+  if ((await settled(plan.id)).status !== 'applied')
+    throw new Error('the password was not applied');
+  const refused = await until(
+    'a visit without the password is turned away',
+    async () => {
+      const answer = overTls(host);
+      return /^HTTP\/1\.1 401/.test(answer) ? answer : null;
+    },
+    60_000,
+  );
+  const token = Buffer.from(`sam:${secret}`).toString('base64');
+  const allowed = overTls(host, '/', `Authorization: Basic ${token}\\r\\n`);
+  if (!allowed.includes('cli ok'))
+    throw new Error(`the right password was refused: ${allowed.slice(0, 200)}`);
+  pass(
+    'a password in front of an app: no password, no app; the right one, the app',
+    refused.split('\r\n')[0],
+  );
 }
 
 /**
