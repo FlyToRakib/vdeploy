@@ -468,6 +468,8 @@ async function until(what, check, timeoutMs = 120_000) {
 }
 
 const results = [];
+// The whole run, for the audit export: a run can take longer than an hour.
+const RUN_STARTED = Date.now();
 function pass(name, detail = '') {
   results.push({ name, ok: true });
   log(`✓ ${name}${detail ? ` — ${detail}` : ''}`);
@@ -611,11 +613,14 @@ async function run() {
   await secrets(hello.id);
   await releaseCommand(hello.id);
   const uploadsProject = await buildFromSource(server.serverId);
+  await staticSite(server.serverId);
   const fromGithubId = await fromGithub(server.serverId);
   await explainsFailure(server.serverId);
   await logsAndHistory(hello.id);
+  await terminalSession(hello.id);
   await managedDatabase(server.serverId, hello.id);
   await objectStorage(server.serverId, hello.id);
+  await managedRedis(server.serverId);
   await filesAndFolders(uploadsProject);
   await healthAndReclaim(server.serverId);
   await fromTemplate(server.serverId);
@@ -629,7 +634,7 @@ async function run() {
   await agentUpdatesItself(server.serverId);
   await secondServer(server.serverId);
 
-  const from = new Date(Date.now() - 3600_000).toISOString();
+  const from = new Date(RUN_STARTED - 60_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
   const { result: audit } = await op('audit.export', { from, to });
   const actions = new Set(audit.entries.map((e) => e.action));
@@ -1234,6 +1239,66 @@ async function objectStorage(serverId, projectId) {
   pass('put a backup of the store back into a copy', inCopy.filter(Boolean).join(', '));
 }
 
+/**
+ * Managed Redis (§17.3–17.5): it asks for its password, its dump is
+ * checked by Redis's own checker, and it goes back into a copy that then
+ * holds the same keys.
+ */
+async function managedRedis(serverId) {
+  const create = await op('database.create', { serverId, name: 'cache', engine: 'redis' });
+  if ((await settled(create.plan.id, 600_000)).status !== 'applied') {
+    throw new Error('Redis was not created');
+  }
+  const find = async (name) => (await op('database.list', {})).result.find((d) => d.name === name);
+  const cache = await find('cache');
+  const container = (id) => `vd-db-${id.replace(/^db_/, '').toLowerCase()}`;
+  const cli = (id, command) =>
+    inTestbed(
+      `docker exec ${container(id)} sh -c 'REDISCLI_AUTH="${'$'}REDIS_PASSWORD" redis-cli ${command}' 2>&1 || true`,
+    ).trim();
+  await until('Redis answers', () => cli(cache.id, 'ping') === 'PONG', 300_000);
+  const open = inTestbed(`docker exec ${container(cache.id)} redis-cli ping 2>&1 || true`).trim();
+  if (!open.includes('NOAUTH')) throw new Error(`Redis answered without its password: ${open}`);
+  cli(cache.id, 'set greeting hello');
+  cli(cache.id, 'set visits 42');
+  pass('managed Redis asks for its password', open);
+
+  const backup = await op('database.backup', { databaseId: cache.id });
+  if ((await settled(backup.plan.id, 600_000)).status !== 'applied') {
+    throw new Error('the Redis backup was not taken');
+  }
+  let kept;
+  await until('the Redis backup is in the store', async () => {
+    const { result: backups } = await op('backup.list', {});
+    kept = backups.find((b) => b.databaseId === cache.id);
+    if (kept?.status === 'failed') throw new Error(`the backup failed: ${kept.error}`);
+    return kept?.status === 'done' && kept.verified;
+  });
+  const restore = await op('database.restore', {
+    databaseId: cache.id,
+    backupId: kept.id,
+    mode: 'new',
+    newName: 'cache-copy',
+  });
+  const restored = await settled(restore.plan.id, 600_000);
+  if (restored.status !== 'applied') {
+    throw new Error(
+      `the Redis restore did not apply: ${JSON.stringify(restored.error ?? restored)}`,
+    );
+  }
+  const copy = await find('cache-copy');
+  let keys = '';
+  await until(
+    'the copy holds the keys',
+    () => {
+      keys = cli(copy.id, 'get visits');
+      return keys === '42';
+    },
+    180_000,
+  );
+  pass('a Redis dump went back into a copy that holds the same keys', `visits = ${keys}`);
+}
+
 const HELLO_HOST = 'hello.vdeploy.test';
 
 /** The version nginx reports through Traefik, or null when the request failed. */
@@ -1788,6 +1853,90 @@ ${files['index.js']}`,
   return archive;
 }
 
+/**
+ * A static site (§15): plain files, built into a minimal server by a
+ * Dockerfile the agent writes itself, and served.
+ */
+async function staticSite(serverId) {
+  const { uploadId } = await uploadArchive(zipOf({ 'public/index.html': '<h1>static ok</h1>\n' }));
+  const created = await op('project.create', {
+    serverId,
+    spec: {
+      apiVersion: 'vdeploy/v1',
+      kind: 'Application',
+      metadata: { name: 'static-site' },
+      source: { type: 'archive', uploadId },
+      build: { strategy: 'static', output: 'public' },
+      runtime: { replicas: 1, resources: { memory: { request: '16Mi', limit: '64Mi' } } },
+      network: { containerPort: 8080, domains: [{ host: STATIC_HOST, tls: { provider: 'none' } }] },
+      health: { startup: { type: 'http', path: '/' } },
+    },
+  });
+  const plan = await settled(created.plan.id, 1_200_000);
+  if (plan.status !== 'applied')
+    throw new Error(`the static site was not built: ${JSON.stringify(plan.error ?? plan)}`);
+  const body = await until(
+    'the static site is served',
+    () => {
+      const out = inTestbed(
+        `wget -q -O - -T 3 --header 'Host: ${STATIC_HOST}' http://127.0.0.1/ 2>/dev/null || true`,
+      );
+      return out.includes('static ok') ? out : null;
+    },
+    60_000,
+  );
+  pass('a static site built into a minimal server and served', body.trim());
+}
+
+/**
+ * The web terminal (§19): through the same gate as any change, into a
+ * running copy of the app, and a command typed there answers.
+ */
+async function terminalSession(projectId) {
+  await call('POST', '/api/v1/auth/step-up', { password });
+  const url = `${API.replace('http', 'ws')}/api/v1/projects/${projectId}/terminal?replica=0`;
+  const socket = new WebSocket(url, { headers: { cookie: cookieHeader(), origin: API } });
+  let output = '';
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`the terminal did not answer: ${output}`));
+    }, 60_000);
+    // Behaves as the dashboard's terminal does: it answers a shell that
+    // asks where the cursor is, and types once the prompt is there.
+    const type = (text) => {
+      socket.send(JSON.stringify({ type: 'input', data: Buffer.from(text).toString('base64') }));
+    };
+    let typed = false;
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.type === 'end') {
+        clearTimeout(timer);
+        reject(new Error(`the terminal ended: ${message.reason}`));
+        return;
+      }
+      if (message.type !== 'output') return;
+      const chunk = Buffer.from(message.data, 'base64').toString('utf8');
+      output += chunk;
+      if (chunk.includes('\x1b[6n')) type('\x1b[24;1R');
+      if (!typed && /[#$] /.test(output)) {
+        typed = true;
+        type('echo "terminal-$((20 + 22))"\r');
+      }
+      if (output.includes('terminal-42')) {
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('the terminal could not be reached'));
+    };
+  });
+  socket.close();
+  pass('a terminal into a running copy of the app, through the gate', 'a typed command answered');
+}
+
+const STATIC_HOST = 'static.vdeploy.test';
 const NODE_HOST = 'node.vdeploy.test';
 const GITHUB_HOST = 'github-app.vdeploy.test';
 
@@ -2336,7 +2485,7 @@ async function drill() {
   if (JSON.stringify(after) !== JSON.stringify(before)) {
     throw new Error(`containers changed across the restore: ${before} → ${after}`);
   }
-  const from = new Date(Date.now() - 3600_000).toISOString();
+  const from = new Date(RUN_STARTED - 60_000).toISOString();
   const { result: audit } = await op('audit.export', { from, to: new Date().toISOString() });
   if (!audit.verification.ok) throw new Error('audit chain broken after restore');
   pass('restored: same session, agent re-attached, same containers, audit chain intact');
