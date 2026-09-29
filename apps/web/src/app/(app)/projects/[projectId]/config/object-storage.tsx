@@ -57,6 +57,10 @@ export function ObjectStorageSection() {
       setProblem('The endpoint is an address like https://s3.example.com.');
       return;
     }
+    if (url.includes('ACCOUNT_ID')) {
+      setProblem('Put your account ID in the endpoint, in place of ACCOUNT_ID.');
+      return;
+    }
     const secretKey = formText(form, 'secretAccessKey');
     const name = secretNameFor(OBJECT_STORAGE_ENV.secretAccessKey);
     // The secret key is stored encrypted first; then every setting goes in

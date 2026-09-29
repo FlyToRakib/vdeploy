@@ -15,7 +15,8 @@ export function EmptyState({
     <div className="grid justify-items-center gap-3 rounded-lg border border-dashed border-border p-10 text-center">
       <Icon aria-hidden className="size-8 text-muted-foreground" />
       <h2 className="font-medium">{title}</h2>
-      <p className="max-w-md text-sm text-muted-foreground">{children}</p>
+      {/* A div, not a p: some empty states carry a button or a form. */}
+      <div className="max-w-md text-sm text-muted-foreground">{children}</div>
     </div>
   );
 }

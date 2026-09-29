@@ -299,6 +299,18 @@ each is one task, one commit.
   you bring is the project's Object storage section — presets for S3, R2,
   B2 and Spaces — storing the key as a secret and the same five settings
   in one deploy. A compose file's `minio/minio` imports as this engine
+- [x] **signing in again reaches the organization** — found by opening
+  the new screens in a real browser: only the session made at first-run
+  setup ever had an organization. Signing in again — after signing out,
+  or once a session expired — made a session in none, so every screen
+  answered "choose an organization first", and the dashboard, with
+  nowhere to choose one, sent the person back to sign in: a loop. The
+  tests had hidden it by choosing one by hand after each sign-in. Every
+  session now starts in the person's organization. The same look found
+  the Domains & certificates screen drawing one card twice, a load that
+  failed showing a skeleton for ever, a bucket endpoint accepted with
+  its placeholder still in it, and the Databases screen's empty state
+  nesting a block inside a paragraph (a hydration error)
 - [x] **agent keys rotate by themselves (§25; ADR 0004 addendum)**: the
   spec has agent credentials rotate automatically, and ADR 0004 left it
   "to build". Every 30 days the agent offers a new key signed with the

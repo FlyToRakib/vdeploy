@@ -26,18 +26,18 @@ const SELECT = 'h-10 rounded-md border border-border bg-surface-raised px-3 text
 /** How projects are reached, and how their certificates are proved (§13, §13.1). */
 export function Domains() {
   const stepUp = useStepUp();
-  const [urls, setUrls] = useState<UrlsView | null>(null);
+  // undefined while loading; a load that failed says so rather than waiting for ever.
+  const [urls, setUrls] = useState<UrlsView | undefined>();
   const [provider, setProvider] = useState<{ provider: DnsProviderKind } | null | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
-    void query<UrlsView>('urls.get').then(setUrls, () => {
-      setUrls(null);
-    });
-    void query<{ provider: DnsProviderKind } | null>('dns_provider.get').then(setProvider, () => {
-      setProvider(null);
-    });
+    const failed = (err: unknown) => {
+      setError(err instanceof Error ? err.message : 'These settings could not be loaded.');
+    };
+    void query<UrlsView>('urls.get').then(setUrls, failed);
+    void query<{ provider: DnsProviderKind } | null>('dns_provider.get').then(setProvider, failed);
   }, [version]);
 
   async function run(name: string, input: Record<string, unknown>, done: string) {
@@ -67,21 +67,21 @@ export function Domains() {
           {error}
         </p>
       )}
-      {urls === null ? (
-        <Skeleton className="h-48" />
+      {urls === undefined ? (
+        !error && <Skeleton className="h-48" />
       ) : (
         <InstantUrls
-          key={version}
+          key={`urls-${String(version)}`}
           settings={urls.settings}
           canProveDns={Boolean(provider)}
           onSave={(settings) => void run('urls.configure', settings, 'Instant URLs updated')}
         />
       )}
       {provider === undefined ? (
-        <Skeleton className="h-48" />
+        !error && <Skeleton className="h-48" />
       ) : (
         <DnsProvider
-          key={version}
+          key={`dns-${String(version)}`}
           current={provider?.provider ?? null}
           onSave={(input) =>
             void run('dns_provider.set', input, 'Saved. Certificates can be proved through DNS.')
