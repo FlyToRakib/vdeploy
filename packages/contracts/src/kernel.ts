@@ -68,7 +68,12 @@ export const PlanStep = z.discriminatedUnion('kind', [
      */
     stagingOf: idSchema('project').optional(),
   }),
-  z.strictObject({ kind: z.literal('create_release') }),
+  /**
+   * A release from the project's spec. It runs the image the current one
+   * runs unless how the app is built changed — or `rebuild` says to build
+   * regardless, which is what new code and "build it again" mean.
+   */
+  z.strictObject({ kind: z.literal('create_release'), rebuild: z.boolean().optional() }),
   /**
    * Gives a new project its own copies of another's secrets (§26 M6). A
    * staging copy owns its keys so that they can be the test ones; a

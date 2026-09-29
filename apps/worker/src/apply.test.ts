@@ -524,6 +524,47 @@ describe('building from uploaded source', () => {
     expect(build).toMatchObject({ kind: 'build', strategy: 'railpack', status: 'succeeded' });
   });
 
+  it('runs the same image after a change that is not about the code, and builds when asked', async () => {
+    const uploadId = await upload();
+    const source = spec({ source: { type: 'archive', uploadId }, build: { strategy: 'nixpacks' } });
+    const create = await plan('project.create', { spec: source, serverId });
+    expect(await applyPlan(deps, create.id)).toBe('applied');
+    const [created] = await t.db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.name, 'blog'), isNull(projects.deletedAt)));
+    const built = async () =>
+      (await t.db.select().from(builds).where(eq(builds.projectId, created!.id))).length;
+    const running = async () => {
+      const { currentReleaseId } = await project(created!.id);
+      const [release] = await t.db
+        .select()
+        .from(releases)
+        .where(eq(releases.id, currentReleaseId!));
+      return release!;
+    };
+    const first = await running();
+    expect(await built()).toBe(1);
+
+    // A health check is a setting: a new release, the same image, no build.
+    const checks = await plan('health.configure', {
+      projectId: created!.id,
+      health: { readiness: { type: 'http', path: '/ready' } },
+    });
+    expect(await applyPlan(deps, checks.id)).toBe('applied');
+    const second = await running();
+    expect(second.id).not.toBe(first.id);
+    expect(second.image).toBe(first.image);
+    expect(second.buildId).toBe(first.buildId);
+    expect(await built()).toBe(1);
+
+    // Asking for a rebuild is asking not to reuse it.
+    const rebuild = await plan('project.rebuild', { projectId: created!.id });
+    expect(await applyPlan(deps, rebuild.id)).toBe('applied');
+    expect(await built()).toBe(2);
+    expect((await running()).buildId).not.toBe(first.buildId);
+  });
+
   it("fails the plan with the build's own reason", async () => {
     const uploadId = await upload();
     buildsFail = true;

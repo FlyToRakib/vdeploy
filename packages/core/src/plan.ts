@@ -666,7 +666,7 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
         specHash: null,
         changes: [],
         steps: [
-          { kind: 'create_release' },
+          { kind: 'create_release', rebuild: true },
           { kind: 'deploy', strategy: project.spec.deploy.strategy },
         ],
         tier: 'sensitive',
@@ -696,25 +696,25 @@ const PLANNERS: { [N in OperationName]?: Planner<N> } = {
    */
   'project.rebuild': (_args, context) => {
     const project = requireProject(context);
-    if (project.spec.build.strategy === 'image') {
-      throw new VDeployError(
-        'conflict',
-        'This app runs an image somebody else built, so there is nothing here to rebuild',
-      );
-    }
+    // An image somebody else built has nothing to compile, but its name may
+    // now point at newer bytes — which is how a CI that pushes the same tag
+    // asks for them (§15): the name is looked up again and pinned afresh.
+    const pulled = project.spec.source.type === 'image';
     return {
       specHash: null,
       changes: [
         {
           path: 'release',
           before: 'the version running now',
-          after: 'the same source, built again',
+          after: pulled
+            ? 'whatever the same image name points at now'
+            : 'the same source, built again',
         },
       ],
-      // A release is created from the current spec, which builds because the
-      // source needs building; then it rolls out health-gated like any other.
+      // Built regardless: a spec that did not change would otherwise reuse
+      // the image it has, and asking for a rebuild is asking not to.
       steps: [
-        { kind: 'create_release' },
+        { kind: 'create_release', rebuild: true },
         { kind: 'deploy', strategy: project.spec.deploy.strategy },
       ],
       tier: 'safe',

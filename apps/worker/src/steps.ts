@@ -22,6 +22,7 @@ import {
   headUrl,
   installationToken,
   readHead,
+  sameBuild,
   SECTION_EDITS,
   specAfter,
   withCopiedSecrets,
@@ -661,12 +662,29 @@ async function buildImage(
   }
 }
 
-async function newRelease(deps: StepDeps, state: ApplyState) {
+/**
+ * A release from the project's spec. It builds only when it has to: a
+ * change to memory, a domain, a setting or a health check runs the image
+ * the current release already runs (§15), and only new code, a change to
+ * how the app is built, or somebody asking for a rebuild compiles again.
+ */
+async function newRelease(deps: StepDeps, state: ApplyState, rebuild: boolean) {
   const row = await project(deps, state);
   const source = row.spec.source;
   let image: string;
   let buildId: string | null = null;
-  if (source.type === 'image') {
+  const [current] =
+    rebuild || !row.currentReleaseId
+      ? []
+      : await deps.db
+          .select({ spec: releases.spec, image: releases.image, buildId: releases.buildId })
+          .from(releases)
+          .where(and(eq(releases.id, row.currentReleaseId), eq(releases.projectId, row.id)));
+  if (current && sameBuild(readSpec(current.spec), row.spec)) {
+    image = current.image;
+    buildId = current.buildId;
+    state.notes.push('Nothing about how it is built changed, so it runs the image it already had.');
+  } else if (source.type === 'image') {
     image = await pinImage(source.image, deps.registry);
   } else if (source.type === 'archive') {
     ({ image, buildId } = await buildImage(deps, state, row, source.uploadId));
@@ -840,7 +858,7 @@ export async function runStep(deps: StepDeps, state: ApplyState, step: PlanStep)
     case 'promote_release':
       return promoteRelease(deps, state, step.from);
     case 'create_release':
-      return newRelease(deps, state);
+      return newRelease(deps, state, step.rebuild === true);
     case 'activate_release':
       return activateRelease(deps, state, step.releaseId);
     case 'deploy':

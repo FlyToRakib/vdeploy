@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** a config change no longer recompiles the app
+**Task:** `build.cache`
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -16,6 +16,23 @@ completeness items (undo, and leaving with everything) and a field the
 spec accepts and the agent silently ignores. The milestones are
 reopened until these are in. Grouped by the harm of leaving them out;
 each is one task, one commit.
+
+**Found while building the first item, and fixed before going on**
+- [x] **a change of settings no longer recompiles the app** (§15). Every
+  spec edit — memory, a domain, an env var, a health check — built a
+  git or uploaded app from source again, because every release was made
+  by building. A build is the heaviest thing a small server does, and
+  §15 says one must never be able to take production down; doing one for
+  a setting is exactly that. A release now runs the image the current
+  one runs unless **how the app is built** changed (where the source is
+  and the build section — not whether a push deploys, which paths wake
+  it, which server builds or which cache it uses). New code and asking
+  for a rebuild build regardless. The same rule stops a settings change
+  on an image app from silently pulling newer bytes under the same tag;
+  getting them is now a deliberate **Pull again**, which is also how a
+  CI that pushes the same tag asks for its image (§15, External CI). The
+  dashboard had no rebuild control at all: it now has **Rebuild** for an
+  uploaded app and **Pull again** for an image
 
 **Accepted by the spec and silently ignored — worst first, because they look configured**
 - [x] **liveness and readiness probes (§5, §18)**. They answer different

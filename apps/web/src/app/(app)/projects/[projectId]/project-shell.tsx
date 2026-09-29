@@ -1,6 +1,6 @@
 'use client';
 
-import { ExternalLink, Play, RefreshCw, RotateCcw, Square, Upload } from 'lucide-react';
+import { ExternalLink, Hammer, Play, RefreshCw, RotateCcw, Square, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -209,6 +209,28 @@ export function ProjectShell({ projectId, children }: { projectId: string; child
               >
                 <RefreshCw aria-hidden className="size-4" />
                 Redeploy
+              </Button>
+            )}
+            {!git && row.currentReleaseId && (
+              // A change of settings runs the image the app already has;
+              // this is the way to ask for new bytes without new code: the
+              // upload compiled again, or the image name looked up again.
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() =>
+                  void act(
+                    'project.rebuild',
+                    { projectId },
+                    row.spec.source.type === 'image'
+                      ? 'Pulling the image again'
+                      : 'Building it again',
+                  )
+                }
+              >
+                <Hammer aria-hidden className="size-4" />
+                {row.spec.source.type === 'image' ? 'Pull again' : 'Rebuild'}
               </Button>
             )}
             <Button
