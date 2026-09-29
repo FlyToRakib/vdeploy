@@ -299,6 +299,14 @@ each is one task, one commit.
   you bring is the project's Object storage section — presets for S3, R2,
   B2 and Spaces — storing the key as a secret and the same five settings
   in one deploy. A compose file's `minio/minio` imports as this engine
+- [x] **uploads no longer fill the database for ever**: every uploaded
+  source and dump was kept in Postgres with no end — the "disk fills"
+  outage §6 guards against, moved into the database. An hourly sweep now
+  clears the bytes of an upload a month old that nothing needs: kept
+  while a live app builds from it (a rebuild needs its source), while a
+  build or restore is using it; the row stays for the builds that name
+  it. Asked for afterwards, it says it was cleared and to upload it again
+  rather than "not there"
 - [x] **every engine backed up, checked and put back (§17.4, §17.5)**:
   found on the way that MongoDB was never backed up (4.2a waited for a
   safe way to pass its password), Redis backups could not be put back
@@ -1112,9 +1120,7 @@ GitHub.
 
 ## Known gaps (tracked, not forgotten)
 
-- `registry.add` waits for the agent to be able to pull with credentials; image resolution is public-only today, so storing credentials nothing uses would be worse than not having them. It is out of the catalog until then rather than answering "not available yet". (`server.drain` came back in 5.3b.)
-
-- Notifications: Slack, Discord and Telegram channels; certificate-renewal and autoscale triggers arrive with the features that produce them; an app that runs but fails its health check (not crashing) is not a trigger yet; uptime is recorded (4.3k) but no notification fires on an outage on its own.
+- Notifications: every trigger §19 names exists; an outage seen only by the uptime record (4.3k), with the agent still connected, is told through `health_failing` rather than a trigger of its own.
 - GitLab and Bitbucket: a push deploys, but nothing reads back — no commit
   status, no merge-request comment, and a repository picker for them
   (GitHub has one) waits until there is a reason to list repositories
@@ -1165,15 +1171,12 @@ GitHub.
   sign-in URL, issuer and certificate rather than reading them out of a
   metadata document (which is accepted and stored, but not parsed).
   `fetchableOrigin` checks what was typed, not what it resolves to.
-- Session list shows IP, not approximate location (needs a GeoIP source).
-- Optional CAPTCHA after repeated failures not implemented (lockout + rate limits are).
 - The worker applies one plan at a time (concurrency 1) — the simplest correct deploy lock; per-project locks when parallelism matters.
-- Liveness/readiness probes after startup (§ health.liveness/readiness) are not run by the agent yet; startup probes gate traffic (2.2). Snapshots before destructive steps are in (4.3a), and the agent deletes a volume only as the second half of a copy it has just proved (4.3h).
 - Instant URLs: settings are per org only (not per server); `{env}`/`{team}` patterns wait for environments and teams; no automatic sslip.io ↔ nip.io failover on Let's Encrypt rate limits (needs ACME outcomes from the agent, 2.12); a custom domain added later is not yet checked against other projects' instant hosts (2.4). The agent reads its interface addresses at start only.
 - Logs: streamed on demand from Docker's own capped log files, not a separate ring buffer; live streams need the viewer's API instance to hold the agent connection (single API instance until pub/sub, §6).
-- Builds: an agent restarted mid-build loses that build (the worker gives up after its timeout and the plan fails with a plain reason); registry cache and a separate builder server wait for multi-server; unused images and build cache are measured and freed on request, keeping the last ten releases of each app; nothing frees them on a schedule yet; uploads are kept in the database with no retention yet.
+- Builds: an agent restarted mid-build loses that build (the worker gives up after its timeout and the plan fails with a plain reason); registry cache and a separate builder server wait for multi-server; unused images and build cache are freed once a day and on request, keeping the last ten releases of each app and anything built in the last day.
 - Governor: the brief blue/green overlap (old and new replicas together) is not counted, disk is not budgeted, and the agent's reserve is a fixed 256 MB.
-- Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); no bulk env import/export yet (2.16); build secrets are stored but used only once builds exist (2.7); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
+- Secrets: a new value from `secret.set` takes effect with the next release (update the spec, or rotate); `SECRETS_KEY` rotation (re-wrapping project keys) is not built yet.
 - DNS checks: a host stays cleared for certificates once verified (later looks only report drift), so a renewal after DNS moved away can still fail validation; the verifier rescans all live projects every 5 s (fine at self-hosted scale).
 
 ## Decisions made

@@ -24,6 +24,7 @@ import {
   uploads,
   urlSettings,
   verifyAuditChain,
+  uploadRefusal,
 } from '@vdeploy/db';
 import { generateSecret, isPublicIpv4 } from '@vdeploy/core';
 import { and, asc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm';
@@ -326,10 +327,11 @@ export const ADMIN: Partial<Record<OperationName, Handler>> = {
   'source.upload': async (context) => storeUpload(context),
   'source.detect': async ({ deps, actor, args }) => {
     const [upload] = await deps.db
-      .select({ id: uploads.id, received: isNotNull(uploads.data) })
+      .select({ id: uploads.id, received: isNotNull(uploads.data), clearedAt: uploads.clearedAt })
       .from(uploads)
       .where(and(eq(uploads.id, String(args.uploadId)), eq(uploads.orgId, actor.orgId)));
-    if (!upload?.received) throw new VDeployError('not_found', 'Upload not found');
+    const refused = uploadRefusal(upload);
+    if (!upload || refused) throw new VDeployError('not_found', refused ?? 'Upload not found');
     const [server] = await deps.db
       .select()
       .from(servers)

@@ -8,6 +8,7 @@ import {
   notifyOfflineServers,
   pruneEvents,
   pruneMetrics,
+  pruneUploads,
   pruneUptime,
   queueConnection,
   type ApplyJob,
@@ -240,6 +241,9 @@ const pruneTimer = setInterval(() => {
   });
   pruneUptime(db, new Date()).catch((err: unknown) => {
     log.error({ err }, 'could not prune old uptime history');
+  });
+  pruneUploads(db, new Date()).catch((err: unknown) => {
+    log.error({ err }, 'could not clear old uploads');
   });
 }, 60 * 60_000);
 

@@ -55,6 +55,7 @@ import {
   uploads,
   type ActorRecord,
   type Database,
+  uploadRefusal,
 } from '@vdeploy/db';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { bumpGeneration, waitForConvergence, type Expectation } from './converge.js';
@@ -624,10 +625,11 @@ async function buildImage(
     );
   }
   const [upload] = await deps.db
-    .select({ id: uploads.id, received: isNotNull(uploads.data) })
+    .select({ id: uploads.id, received: isNotNull(uploads.data), clearedAt: uploads.clearedAt })
     .from(uploads)
     .where(and(eq(uploads.id, uploadId), eq(uploads.orgId, state.orgId)));
-  if (!upload?.received) throw new VDeployError('not_found', 'The uploaded source is not there');
+  const refused = uploadRefusal(upload);
+  if (refused) throw new VDeployError('not_found', refused);
   const named = await deps.db
     .select({ id: secrets.id, name: secrets.name, version: secrets.currentVersion })
     .from(secrets)

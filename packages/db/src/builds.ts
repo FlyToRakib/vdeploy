@@ -1,8 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { newId, type ApplicationSpec, type BuildResult, type BuildView } from '@vdeploy/contracts';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, notInArray, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
-import { builds, observedState, uploads } from './schema/index.js';
+import { builds, observedState, projects, restores, uploads } from './schema/index.js';
 
 /** Channel on which a queued build wakes the gateway holding its server's agent. */
 export const BUILDS_CHANNEL = 'vdeploy_builds';
@@ -291,6 +291,54 @@ export async function getUpload(tx: Executor, uploadId: string) {
     .from(uploads)
     .where(eq(uploads.id, uploadId));
   return row ?? null;
+}
+
+/** How long an upload nothing names any more is kept. */
+export const KEEP_UPLOADS_DAYS = 30;
+
+/**
+ * Clears the bytes of uploads nothing needs any more. Every upload is kept
+ * in the database, so without this the database grows by each one for
+ * ever. An upload stays while a live project builds from it — rebuilding
+ * needs its source — while a build or a restore is using it, and for a
+ * month after it arrived; the row stays too, for the builds that name it.
+ */
+export async function pruneUploads(tx: Executor, now: Date): Promise<number> {
+  const cutoff = new Date(now.getTime() - KEEP_UPLOADS_DAYS * 24 * 60 * 60_000);
+  const named = tx
+    .select({ id: sql<string>`${projects.spec}->'source'->>'uploadId'` })
+    .from(projects)
+    .where(and(isNull(projects.deletedAt), sql`${projects.spec}->'source'->>'type' = 'archive'`));
+  const building = tx
+    .select({ id: builds.uploadId })
+    .from(builds)
+    .where(inArray(builds.status, ['queued', 'running']));
+  const restoring = tx
+    .select({ id: sql<string>`${restores.uploadId}` })
+    .from(restores)
+    .where(and(isNotNull(restores.uploadId), inArray(restores.status, ['queued', 'running'])));
+  const cleared = await tx
+    .update(uploads)
+    .set({ data: null, clearedAt: now })
+    .where(
+      and(
+        isNotNull(uploads.data),
+        lt(uploads.createdAt, cutoff),
+        notInArray(uploads.id, named),
+        notInArray(uploads.id, building),
+        notInArray(uploads.id, restoring),
+      ),
+    )
+    .returning({ id: uploads.id });
+  return cleared.length;
+}
+
+/** Why an upload cannot be used, in words — or null when it can. */
+export function uploadRefusal(upload: { received: unknown; clearedAt: Date | null } | undefined) {
+  if (upload?.clearedAt) {
+    return `That upload was cleared after ${String(KEEP_UPLOADS_DAYS)} days because nothing used it. Upload it again.`;
+  }
+  return upload?.received ? null : 'The upload is not there';
 }
 
 /**

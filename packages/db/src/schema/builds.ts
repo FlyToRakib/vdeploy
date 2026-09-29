@@ -28,10 +28,12 @@ export const uploads = pgTable('uploads', {
     .references(() => organization.id, { onDelete: 'cascade' }),
   sha256: text('sha256').notNull(),
   size: integer('size').notNull(),
-  /** Null until the upload has been received in full. */
+  /** Null until the upload has been received in full, and again once cleared. */
   data: bytea('data'),
   createdBy: jsonb('created_by').$type<ActorRecord>().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** When its bytes were cleared, because nothing needed them any more. */
+  clearedAt: timestamp('cleared_at', { withTimezone: true }),
 });
 
 /**
