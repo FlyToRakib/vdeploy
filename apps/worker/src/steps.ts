@@ -585,6 +585,7 @@ const AGENT_STRATEGY = {
   dockerfile: 'dockerfile',
   railpack: 'railpack',
   nixpacks: 'railpack',
+  static: 'static',
 } as const;
 
 const sleep = (ms: number) =>
@@ -661,6 +662,13 @@ async function buildImage(
         ...(spec.build.dockerfile ? { dockerfile: spec.build.dockerfile } : {}),
         context: spec.build.context,
         ...(spec.build.target ? { target: spec.build.target } : {}),
+        // What a static site is built into, and what builds it (§15).
+        ...(strategy === 'static'
+          ? {
+              output: spec.build.output,
+              ...(spec.build.command ? { command: spec.build.command } : {}),
+            }
+          : {}),
         args: spec.build.args,
         ...(strip ? { strip } : {}),
         // Keep the image on disk afterwards: another server must collect it.

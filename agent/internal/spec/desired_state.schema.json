@@ -213,6 +213,16 @@
                     "type": "string",
                     "maxLength": 128
                   },
+                  "output": {
+                    "default": ".",
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
                   "args": {
                     "default": {},
                     "type": "object",
@@ -251,6 +261,7 @@
                 "required": [
                   "strategy",
                   "context",
+                  "output",
                   "args",
                   "secrets",
                   "cache"

@@ -162,6 +162,13 @@ export const Build = z.strictObject({
   dockerfile: z.string().max(512).optional(),
   context: z.string().max(512).default('.'),
   target: z.string().max(128).optional(),
+  /**
+   * `static` (§15): the folder holding the finished site, inside the build
+   * folder, and what makes it, if anything does — `npm ci && npm run build`
+   * — run in Node. The files are then served by a minimal web server.
+   */
+  output: z.string().max(512).default('.'),
+  command: z.string().min(1).max(4096).optional(),
   args: z.record(EnvKey, z.string().max(4096)).default({}),
   /** Build-time secrets by name, mounted with BuildKit --secret, never in a layer. */
   secrets: z.array(SecretName).max(32).default([]),

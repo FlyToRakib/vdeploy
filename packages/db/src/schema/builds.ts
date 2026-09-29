@@ -56,13 +56,16 @@ export const builds = pgTable(
       .references(() => uploads.id, { onDelete: 'restrict' }),
     kind: text('kind', { enum: ['build', 'detect'] }).notNull(),
     /** What the agent runs: dockerfile or railpack. */
-    strategy: text('strategy', { enum: ['dockerfile', 'railpack'] }).notNull(),
+    strategy: text('strategy', { enum: ['dockerfile', 'railpack', 'static'] }).notNull(),
     /** Everything else the agent needs: dockerfile, context, target, args. */
     options: jsonb('options')
       .$type<{
         dockerfile?: string;
         context: string;
         target?: string;
+        /** A static site's folder, and what builds it (§15). */
+        output?: string;
+        command?: string;
         args: Record<string, string>;
         /** Leading folders to drop: 1 for a GitHub tarball. */
         strip?: number;

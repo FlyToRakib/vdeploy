@@ -299,6 +299,18 @@ each is one task, one commit.
   you bring is the project's Object storage section — presets for S3, R2,
   B2 and Spaces — storing the key as a secret and the same five settings
   in one deploy. A compose file's `minio/minio` imports as this engine
+- [x] **static sites, "built then served by a minimal container" (§15)**:
+  the contract accepted `build.strategy: static` and a deploy answered
+  "not available yet". Now a spec names the folder the finished site is
+  in (`build.output`) and, if anything builds it, what does
+  (`build.command`, run in Node with the app's build settings and build
+  secrets). The agent writes the Dockerfile itself into its own plan
+  folder — a Dockerfile in the source changes nothing — with the folder
+  and the command passed as build arguments, never as text in the file,
+  and the files are served by nginx running as a user that is not root,
+  on 8080, which the spec is held to. `strategy: compose` is refused in
+  words at the spec — a compose file is imported, a project per service —
+  rather than accepted and then failing at deploy
 - [x] **signing in again reaches the organization** — found by opening
   the new screens in a real browser: only the session made at first-run
   setup ever had an organization. Signing in again — after signing out,

@@ -128,6 +128,29 @@ describe('ApplicationSpec rejects', () => {
     ]);
   });
 
+  it('a compose "build", which is an import', () => {
+    const composed = spec({
+      source: { type: 'archive', uploadId: newId('upload') },
+      build: { strategy: 'compose' },
+    });
+    expect(errorsOf(composed)).toEqual([
+      'build.strategy: a compose file is imported, not built: import it, and each service becomes a project',
+    ]);
+  });
+
+  it('a static site on a port its server does not answer on', () => {
+    const site = (containerPort: number) =>
+      spec({
+        source: { type: 'archive', uploadId: newId('upload') },
+        build: { strategy: 'static', output: 'dist', command: 'npm ci && npm run build' },
+        network: { containerPort, domains: [] },
+      });
+    expect(errorsOf(site(3000))).toEqual([
+      'network.containerPort: a static site is served on port 8080',
+    ]);
+    expect(errorsOf(site(8080))).toEqual([]);
+  });
+
   it('a wildcard domain without dns-01', () => {
     expect(
       errorsOf(spec({ network: { containerPort: 80, domains: [{ host: '*.apps.example.com' }] } })),

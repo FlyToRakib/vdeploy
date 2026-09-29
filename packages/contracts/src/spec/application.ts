@@ -183,6 +183,9 @@ function checkTcp(spec: Shape, ctx: z.core.$RefinementCtx): void {
   });
 }
 
+/** Where the web server a static site is built into listens (§15). */
+export const STATIC_PORT = 8080;
+
 function checkConsistency(spec: Shape, ctx: z.core.$RefinementCtx): void {
   const { source, build, scaling, runtime, deploy, network } = spec;
   if (source.type === 'image' && build.strategy !== 'image') {
@@ -196,6 +199,23 @@ function checkConsistency(spec: Shape, ctx: z.core.$RefinementCtx): void {
   // so it is the same strategy, not a different kind of build.
   if (source.type !== 'image' && source.type !== 'template' && build.strategy === 'image') {
     issue(ctx, ['build', 'strategy'], 'the "image" build strategy requires an image source');
+  }
+  // A compose file is imported, not built: each of its services becomes a
+  // project of its own (§15), so no one project is built "from compose".
+  if (build.strategy === 'compose') {
+    issue(
+      ctx,
+      ['build', 'strategy'],
+      'a compose file is imported, not built: import it, and each service becomes a project',
+    );
+  }
+  // The server that serves a static site answers on one port.
+  if (build.strategy === 'static' && network && network.containerPort !== STATIC_PORT) {
+    issue(
+      ctx,
+      ['network', 'containerPort'],
+      `a static site is served on port ${String(STATIC_PORT)}`,
+    );
   }
   if (scaling.min > scaling.max) {
     issue(ctx, ['scaling', 'min'], 'scaling min cannot exceed max');

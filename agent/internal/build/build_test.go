@@ -498,3 +498,68 @@ func TestNoCacheBuildsEveryStepAgainAndTheDefaultReusesThem(t *testing.T) {
 		t.Fatalf("cache: none still used the cache: %v", buildHelper(t, engine).Cmd)
 	}
 }
+
+func TestAStaticSiteIsBuiltIntoAMinimalServerFromADockerfileTheAgentWrote(t *testing.T) {
+	builder, engine, req := setup(t, archive(t,
+		entry{name: "package.json", body: "{}"},
+		// A Dockerfile in the source changes nothing: the agent writes its own.
+		entry{name: "Dockerfile", body: "FROM evil"},
+	))
+	req.Strategy, req.Output, req.Command = "static", "dist", "npm ci && npm run build"
+	req.Secrets = []Secret{{Name: "npm_token", ID: "sec_01J9Z3Q8S7M2K4X6V1B5N0C9D8", Version: 1, Sealed: "x"}}
+	builder.Open = func(_, _ string, _ int, _ string) (string, error) { return "tok", nil }
+	var written string
+	engine.onRun = func(h docker.Helper) {
+		for _, bind := range h.Binds {
+			if host, ok := strings.CutSuffix(bind, ":/plan:ro"); ok {
+				raw, _ := os.ReadFile(filepath.Join(host, "Dockerfile")) // #nosec G304 -- the test's own temp dir
+				written = string(raw)
+			}
+		}
+	}
+	result := builder.Run(context.Background(), req)
+	if !result.OK {
+		t.Fatalf("result = %+v", result)
+	}
+	h := buildHelper(t, engine)
+	for _, want := range []string{
+		"dockerfile=/plan", "filename=Dockerfile", "build-arg:VDEPLOY_OUTPUT=dist",
+		"build-arg:VDEPLOY_BUILD_COMMAND=npm ci && npm run build", "build-arg:NODE_ENV=production",
+	} {
+		if !slices.Contains(h.Cmd, want) {
+			t.Fatalf("builder args lack %s: %v", want, h.Cmd)
+		}
+	}
+	for _, want := range []string{
+		"FROM node:22-alpine AS build", "ARG NODE_ENV", "--mount=type=secret,id=npm_token",
+		`eval \"$VDEPLOY_BUILD_COMMAND\"`, "FROM " + StaticServeImage,
+		"COPY --from=build /site/${VDEPLOY_OUTPUT}/ /usr/share/nginx/html/",
+	} {
+		if !strings.Contains(written, want) {
+			t.Fatalf("the Dockerfile lacks %q:\n%s", want, written)
+		}
+	}
+	// Nothing the person typed is inside the file, only named in it.
+	if strings.Contains(written, "npm ci") || strings.Contains(written, "evil") {
+		t.Fatalf("the Dockerfile carries the person's text:\n%s", written)
+	}
+}
+
+func TestAStaticSiteWithNothingToBuildNeedsItsFolder(t *testing.T) {
+	builder, _, req := setup(t, archive(t, entry{name: "public/index.html", body: "<h1>hi</h1>"}))
+	req.Strategy, req.Output = "static", "site"
+	if result := builder.Run(context.Background(), req); result.OK || !strings.Contains(result.Error, `"site" is not in the source`) {
+		t.Fatalf("result = %+v", result)
+	}
+	req.Output = "../outside"
+	if result := builder.Run(context.Background(), req); result.OK || !strings.Contains(result.Error, "inside the source") {
+		t.Fatalf("result = %+v", result)
+	}
+	req.Output = "public"
+	if result := builder.Run(context.Background(), req); !result.OK {
+		t.Fatalf("result = %+v", result)
+	}
+	if got := staticDockerfile(false, nil, nil); strings.Contains(got, "node") || !strings.Contains(got, "COPY ${VDEPLOY_OUTPUT}/") {
+		t.Fatalf("a site with nothing to build still builds:\n%s", got)
+	}
+}

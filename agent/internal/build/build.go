@@ -41,14 +41,17 @@ const buildkitLock = "/home/user/.local/share/buildkit/buildkitd.lock"
 
 // Request is one build the control plane asked for.
 type Request struct {
-	BuildID    string            `json:"buildId"`
-	ProjectID  string            `json:"projectId"`
-	Strategy   string            `json:"strategy"` // dockerfile | railpack
-	Dockerfile string            `json:"dockerfile,omitempty"`
-	Context    string            `json:"context"`
-	Target     string            `json:"target,omitempty"`
-	Args       map[string]string `json:"args"`
-	Source     Source            `json:"source"`
+	BuildID    string `json:"buildId"`
+	ProjectID  string `json:"projectId"`
+	Strategy   string `json:"strategy"` // dockerfile | railpack | static
+	Dockerfile string `json:"dockerfile,omitempty"`
+	// Output and Command are a static site's folder and what builds it (§15).
+	Output  string            `json:"output,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Context string            `json:"context"`
+	Target  string            `json:"target,omitempty"`
+	Args    map[string]string `json:"args"`
+	Source  Source            `json:"source"`
 	// Strip removes leading folders from every path (1 for a GitHub tarball).
 	Strip int `json:"strip,omitempty"`
 	// DetectOnly runs Railpack's detection and reports it, building nothing.
@@ -182,12 +185,24 @@ func relative(p, what string) (string, error) {
 	return clean, nil
 }
 
+func sortedKeys(args map[string]string) []string {
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func (r Request) validate() error {
 	if !buildID.MatchString(r.BuildID) {
 		return fail("malformed build id")
 	}
-	if r.Strategy != "dockerfile" && r.Strategy != "railpack" {
+	if r.Strategy != "dockerfile" && r.Strategy != "railpack" && r.Strategy != "static" {
 		return fail("unknown build strategy %q", r.Strategy)
+	}
+	if len(r.Command) > 4096 || strings.ContainsRune(r.Command, 0) {
+		return fail("the build command is malformed")
 	}
 	if !hexSHA256.MatchString(r.Source.SHA256) || r.Source.Size <= 0 || r.Source.Size > MaxArchiveBytes {
 		return fail("the source description is malformed")
@@ -287,7 +302,8 @@ func (b *Builder) run(ctx context.Context, req Request) (outcome, error) {
 	// Dockerfile are paths inside it, as a person writes them in the spec.
 	var detection json.RawMessage
 	var frontend []string
-	if req.Strategy == "railpack" {
+	switch req.Strategy {
+	case "railpack":
 		info, log, err := b.prepare(ctx, req.BuildID, buildDir, plan)
 		if err != nil {
 			return outcome{Detection: info, Log: log}, err
@@ -305,7 +321,29 @@ func (b *Builder) run(ctx context.Context, req Request) (outcome, error) {
 			"--frontend", "gateway.v0", "--opt", "source=" + docker.RailpackImage,
 			"--local", "dockerfile=/plan",
 		}
-	} else {
+	case "static":
+		output, err := relative(req.Output, "site folder")
+		if err != nil {
+			return outcome{}, err
+		}
+		if req.Command == "" {
+			if info, err := os.Stat(filepath.Join(buildDir, filepath.FromSlash(output))); err != nil || !info.IsDir() {
+				return outcome{}, fail("the site folder %q is not in the source", output)
+			}
+		}
+		if err := writeStatic(plan, req, sortedKeys(req.Args)); err != nil {
+			return outcome{}, err
+		}
+		frontend = []string{
+			"--frontend", "dockerfile.v0",
+			"--local", "dockerfile=/plan",
+			"--opt", "filename=Dockerfile",
+			"--opt", "build-arg:VDEPLOY_OUTPUT=" + output,
+		}
+		if req.Command != "" {
+			frontend = append(frontend, "--opt", "build-arg:VDEPLOY_BUILD_COMMAND="+req.Command)
+		}
+	default:
 		if dockerfile == "." {
 			dockerfile = path.Join(folder, "Dockerfile")
 		}
@@ -321,12 +359,7 @@ func (b *Builder) run(ctx context.Context, req Request) (outcome, error) {
 			frontend = append(frontend, "--opt", "target="+req.Target)
 		}
 	}
-	keys := make([]string, 0, len(req.Args))
-	for key := range req.Args {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
+	for _, key := range sortedKeys(req.Args) {
 		frontend = append(frontend, "--opt", "build-arg:"+key+"="+req.Args[key])
 	}
 
