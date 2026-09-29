@@ -309,7 +309,10 @@ each is one task, one commit.
   That run found the second half: the shell was "exec bash || exec sh",
   and an exec that fails ends a non-interactive shell on the spot, so on
   any image without bash — every Alpine one — the terminal closed at once
-  (exit 127). Bash is now looked for before it is run
+  (exit 127). Bash is now looked for before it is run. And the page
+  sent what was typed with btoa, which takes only characters up to
+  U+00FF: an é, Bengali, anything else threw and sent nothing. It is sent
+  as UTF-8 now
 - [x] **`health.check` answers**: the AI, CLI and MCP could ask for an
   app's health and were told "not available yet". The agent runs every
   check on its own schedule whether anyone asks or not, so the answer is

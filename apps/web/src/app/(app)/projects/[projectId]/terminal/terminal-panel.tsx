@@ -75,7 +75,10 @@ export function TerminalPanel() {
     };
     shell.onData((data) => {
       if (ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: 'input', data: btoa(data) }));
+      // As UTF-8 bytes: btoa takes only characters up to U+00FF, so typing
+      // an é, or any other script, would throw and send nothing.
+      const bytes = new TextEncoder().encode(data);
+      ws.send(JSON.stringify({ type: 'input', data: btoa(String.fromCharCode(...bytes)) }));
     });
     const resize = () => {
       fit.fit();
