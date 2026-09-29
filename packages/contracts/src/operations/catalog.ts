@@ -76,6 +76,13 @@ export const OPERATIONS = [
     obj({ ...P, deploymentId: idSchema('deployment') }),
   ),
   query('release.list', 'project', 'deployHistory', 'List releases of a project', obj(P)),
+  query(
+    'project.export',
+    'project',
+    'config',
+    'Export an app as files that work without VDeploy: its spec, a Compose file, and its settings with secrets named but never shown',
+    obj(P),
+  ),
   // Undoing it is release.rollback to the release this names: one way back,
   // for the button, the AI and the API alike (§31 #9).
   query(

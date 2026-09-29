@@ -306,6 +306,74 @@ export function SizeSection() {
   );
 }
 
+/** Hands a text file to the browser to save, named as it will be used. */
+function save(name: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Everything about this app, in files that work without VDeploy (§17.7).
+ * Nobody should feel trapped: leaving should cost an afternoon.
+ */
+export function ExportSection() {
+  const { projectId } = useProject();
+  const [files, setFiles] = useState<{ name: string; content: string }[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  return (
+    <Section
+      title="Take it with you"
+      hint="This app as files that run without VDeploy: its settings, a Compose file, and the spec VDeploy keeps. Secrets are named, never written down."
+    >
+      {files === null ? (
+        <Button
+          variant="secondary"
+          className="justify-self-start"
+          onClick={() => {
+            setFailed(false);
+            void query<{ name: string; content: string }[]>('project.export', { projectId }).then(
+              setFiles,
+              () => {
+                setFailed(true);
+              },
+            );
+          }}
+        >
+          Prepare the files
+        </Button>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {files.map((file) => (
+            <Button
+              key={file.name}
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                save(file.name, file.content);
+              }}
+            >
+              {file.name}
+            </Button>
+          ))}
+        </div>
+      )}
+      {failed && (
+        <p role="alert" className="text-sm text-status-failed">
+          The files could not be prepared. Try again in a moment.
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Its permanent folders and databases leave as copies: download them from Backups and from
+        Databases.
+      </p>
+    </Section>
+  );
+}
+
 const EVERY_WORDS: Record<(typeof CHECK_EVERY)[number], string> = {
   '10s': 'every 10 seconds',
   '30s': 'every 30 seconds',

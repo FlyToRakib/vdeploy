@@ -2,6 +2,7 @@ import { readSpec, VDeployError, type LogLine, type OperationName } from '@vdepl
 import {
   changeWords,
   describeCapacity,
+  exportProject,
   diagnoseBuild,
   footprint,
   readCompose,
@@ -11,6 +12,7 @@ import {
 import {
   builds,
   buildView,
+  databases,
   deployments,
   diagnoseProject,
   eventsFor,
@@ -24,6 +26,7 @@ import {
   projectSummaries,
   projects,
   releases,
+  secrets,
   serverBudget,
   metricsOf,
   latestMetric,
@@ -108,6 +111,53 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       );
     if (!row) throw new VDeployError('not_found', 'Release not found');
     return row;
+  },
+  /**
+   * Everything about an app, as files that work without VDeploy (§17.7).
+   * Its folders and databases leave the way they always could: as copies
+   * and dumps, downloaded from their own screens.
+   */
+  'project.export': async ({ deps, actor, args }) => {
+    const projectId = id(args, 'projectId');
+    const [row] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    const spec = readSpec(row.spec);
+    const [release] = row.currentReleaseId
+      ? await deps.db
+          .select({ image: releases.image })
+          .from(releases)
+          .where(eq(releases.id, row.currentReleaseId))
+      : [];
+    const refs = spec.runtime.env.flatMap((e) => ('secretRef' in e ? [e.secretRef] : []));
+    const named = refs.length
+      ? await deps.db
+          .select({ id: secrets.id, name: secrets.name })
+          .from(secrets)
+          .where(and(eq(secrets.orgId, actor.orgId), inArray(secrets.id, refs)))
+      : [];
+    const linked = spec.runtime.links.length
+      ? await deps.db
+          .select({ id: databases.id, name: databases.name, engine: databases.engine })
+          .from(databases)
+          .where(
+            and(
+              eq(databases.orgId, actor.orgId),
+              inArray(
+                databases.id,
+                spec.runtime.links.map((l) => l.service),
+              ),
+            ),
+          )
+      : [];
+    return exportProject({
+      spec,
+      image: release?.image ?? null,
+      secretNames: Object.fromEntries(named.map((s) => [s.id, s.name])),
+      databases: spec.runtime.links.flatMap((link) => {
+        const db = linked.find((d) => d.id === link.service);
+        return db ? [{ name: db.name, engine: db.engine, as: link.as }] : [];
+      }),
+    });
   },
   /**
    * The last change, and the way back from it (§30 ⑦). "Before" is what

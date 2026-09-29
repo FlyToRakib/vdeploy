@@ -614,6 +614,36 @@ describe('server list', () => {
   });
 });
 
+describe('export', () => {
+  it('hands over an app as files, with its secrets named and never written down', async () => {
+    const projectId = await seedProject(orgId, 'leaving');
+    const set = await op(owner, 'secret.set', {
+      projectId,
+      name: 'stripe_key',
+      value: 'sk_live_never_exported',
+    });
+    const { secretId } = set.json<{ result: { secretId: string } }>().result;
+    const withSecret = ApplicationSpec.parse({
+      ...spec,
+      metadata: { name: 'leaving' },
+      runtime: { ...spec.runtime, env: [{ key: 'STRIPE_KEY', secretRef: secretId }] },
+    });
+    await t.database.db
+      .update(projects)
+      .set({ spec: withSecret, specHash: hashOf(withSecret) })
+      .where(eq(projects.id, projectId));
+
+    const res = await op(owner, 'project.export', { projectId });
+    expect(res.statusCode).toBe(200);
+    const files = res.json<{ result: { name: string; content: string }[] }>().result;
+    expect(files.map((f) => f.name)).toEqual(['leaving.vdeploy.yaml', 'compose.yaml', '.env']);
+    expect(files.find((f) => f.name === '.env')?.content).toContain(
+      '# secret: stripe_key\nSTRIPE_KEY=\n',
+    );
+    expect(JSON.stringify(files)).not.toContain('sk_live');
+  });
+});
+
 describe('undo', () => {
   it('says what the last change did, and undoing an undo goes forward again', async () => {
     const projectId = newId('project');

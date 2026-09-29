@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** Export everything
+**Task:** step-up with a passkey or an authenticator code
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -111,7 +111,20 @@ each is one task, one commit.
   `release.rollback`: one way back for the button, the AI and the API,
   through the same plan and approval. The description is
   `project.last_change`, a read, so the AI and the CLI have it too
-- [ ] Export everything: specs, a Compose equivalent, an env template with secret names (§17.7, §31 #11, §35.12)
+- [x] **Export everything (§17.7, §31 #11, §35.12)**: "Take it with
+  you" on a project's Config screen hands over three files that work
+  without VDeploy — the spec as VDeploy keeps it (another VDeploy reads
+  it back as it is), a Compose file that runs the same thing, and a .env
+  with its settings. The Compose file pins an image app to the digest
+  that is **running** rather than a tag that may have moved, builds a
+  Dockerfile repository straight from Git, and says how to build what
+  Railpack built since Compose cannot; permanent folders, limits and
+  copies carry over, and what Compose will not do — route addresses,
+  get certificates, hold the folders' contents — is said at the top. A
+  plain value's `$` is doubled, or Compose would read it as a variable
+  and quietly drop it. **Secrets are named and left empty**: an export
+  is a file that gets emailed and committed. Folders and databases leave
+  as they always could, as copies and dumps from their own screens
 - [ ] step-up with a passkey or an authenticator code (§20.2) — a passkey-only person cannot do anything sensitive
 - [ ] certificate renewal status, and an alert 21 days out (§30 ⑦, §18)
 - [ ] the break-glass command on the control-plane host (§30 ⑧)
