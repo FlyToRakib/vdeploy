@@ -151,6 +151,8 @@ func (f *fakeEngine) EnsureBuildCache(context.Context) error { return nil }
 
 func (f *fakeEngine) ImageWorkdir(context.Context, string) (string, error) { return "/srv/app", nil }
 
+func (f *fakeEngine) ImageSize(context.Context, string) (int64, error) { return 3 << 30, nil }
+
 func (f *fakeEngine) RootDir(context.Context) (string, error) { return "/var/lib/docker", nil }
 
 const testBuild = "bld_01J9Z3Q8S7M2K4X6V1B5N0C9D8"
@@ -190,6 +192,10 @@ func TestADockerfileBuildIsCappedAndRecorded(t *testing.T) {
 	result := builder.Run(context.Background(), req)
 	if !result.OK || result.Image != "sha256:"+strings.Repeat("c", 64) {
 		t.Fatalf("result = %+v", result)
+	}
+	// What it takes on disk, for the warning about images of gigabytes.
+	if result.ImageSizeBytes != 3<<30 {
+		t.Fatalf("image size = %d", result.ImageSizeBytes)
 	}
 	// The unlock step, then the build itself.
 	if len(engine.helpers) != 2 {

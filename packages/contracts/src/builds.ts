@@ -72,12 +72,29 @@ export const BuildResult = z.strictObject({
    * receives before loading them.
    */
   exportSizeBytes: z.number().int().min(0).optional(),
+  /** How much disk the built image takes (§30 ④). */
+  imageSizeBytes: z.number().int().min(0).optional(),
   exportSha256: z
     .string()
     .regex(/^[0-9a-f]{64}$/)
     .optional(),
 });
 export type BuildResult = z.infer<typeof BuildResult>;
+
+/** An image this size is worth a word before it fills a small server (§30 ④). */
+export const LARGE_IMAGE_BYTES = 2 * 1024 ** 3;
+
+/**
+ * What to say about a built image's size, or null when there is nothing
+ * to say. Every deploy keeps one more of these on the server, and the
+ * usual cause — build tools and caches shipped with the app — has a
+ * standard fix.
+ */
+export function imageSizeWarning(bytes: number | null | undefined): string | null {
+  if (!bytes || bytes < LARGE_IMAGE_BYTES) return null;
+  const gb = (bytes / 1024 ** 3).toFixed(1);
+  return `The image is ${gb} GB. Each version kept for going back takes that much disk again, so a small server fills within a few deploys. The usual cause is build tools and caches shipped with the app: a multi-stage Dockerfile that copies only what runs into a slim final image often makes it a tenth of the size.`;
+}
 
 /**
  * An image built on one server, on its way to the one that will run it

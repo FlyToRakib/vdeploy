@@ -101,6 +101,7 @@ export async function finishBuild(
       detection,
       persistence: result.persistence ?? [],
       log: result.log,
+      imageSizeBytes: result.imageSizeBytes ?? null,
       finishedAt: now,
       tokenHash: null,
       tokenExpiresAt: null,

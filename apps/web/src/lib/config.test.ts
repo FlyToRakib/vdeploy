@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanHost,
+  countdownWords,
   memoryWords,
   secretNameFor,
   specToYaml,
@@ -127,6 +128,13 @@ describe('config edits', () => {
       limit: '2Gi',
       request: '256Mi',
     });
+  });
+
+  it('counts down to the next DNS look the way a clock does', () => {
+    expect(countdownWords(83_000)).toBe('in 1:23');
+    expect(countdownWords(4_000)).toBe('in 0:04');
+    expect(countdownWords(2 * 3_600_000)).toBe('in about 2 hours');
+    expect(countdownWords(-5)).toBe('now');
   });
 
   it('names things the way people read them', () => {

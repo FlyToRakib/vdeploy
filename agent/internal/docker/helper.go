@@ -323,6 +323,17 @@ func (c *Client) ImageID(ctx context.Context, ref string) (string, error) {
 	return image.ID, nil
 }
 
+// ImageSize is how much disk a local image takes, as Docker counts it.
+func (c *Client) ImageSize(ctx context.Context, id string) (int64, error) {
+	var image struct {
+		Size int64 `json:"Size"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/images/"+id+"/json", nil, nil, &image); err != nil {
+		return 0, err
+	}
+	return image.Size, nil
+}
+
 // ImageWorkdir is the working directory an image's containers start in.
 func (c *Client) ImageWorkdir(ctx context.Context, id string) (string, error) {
 	var image struct {

@@ -378,7 +378,14 @@ each is one task, one commit.
 - [ ] GitHub and Google sign-in, when configured (§20.2)
 - [ ] a session's approximate location, when a GeoIP database is configured (§20.2)
 - [ ] CAPTCHA after repeated failures, when configured (§20.2)
-- [ ] the 4 GB image warning, and a DNS propagation countdown (§30 ④ ⑤)
+- [x] **the 4 GB image warning, and a DNS propagation countdown (§30 ④ ⑤)**:
+  the agent measures every image it builds, and one of 2 GB or more gets
+  a plain sentence in the deploy's notes and beside its build log — each
+  version kept for going back takes that disk again — with the fix that
+  usually works, a multi-stage build. And a domain whose DNS does not
+  point here yet shows when VDeploy looks again, counting down, instead
+  of a button to ask now: asking Let's Encrypt early is what locks a
+  domain out for an hour. The page keeps itself up to date meanwhile
 
 ## M6 — the ecosystem
 

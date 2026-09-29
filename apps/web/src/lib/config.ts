@@ -41,6 +41,22 @@ export interface LoadBalancer {
   [key: string]: unknown;
 }
 
+/**
+ * Time until the next DNS look, as a countdown a person watches (§30 ⑤):
+ * "1:23" under an hour, "about 2 hours" past it, "now" once it is due.
+ */
+export function countdownWords(ms: number): string {
+  if (ms <= 0) return 'now';
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds >= 3600) {
+    const hours = Math.round(seconds / 3600);
+    return `in about ${String(hours)} hour${hours === 1 ? '' : 's'}`;
+  }
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `in ${String(m)}:${String(s).padStart(2, '0')}`;
+}
+
 /** How long an app may take to start answering, in the choices the form offers. */
 export const WAIT_CHOICES = ['30s', '1m', '5m'] as const;
 

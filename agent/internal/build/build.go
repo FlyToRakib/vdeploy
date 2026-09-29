@@ -97,6 +97,9 @@ type Result struct {
 	// server to collect, measured as it was written (§15).
 	ExportSizeBytes int64  `json:"exportSizeBytes,omitempty"`
 	ExportSHA256    string `json:"exportSha256,omitempty"`
+	// ImageSizeBytes is how much disk the built image takes (§30 ④): an
+	// image of gigabytes fills a small server within a few deploys.
+	ImageSizeBytes int64 `json:"imageSizeBytes,omitempty"`
 }
 
 // outcome is everything one build produced. It is a struct rather than a
@@ -231,6 +234,13 @@ func (b *Builder) Run(ctx context.Context, req Request) Result {
 	}
 	result.OK = true
 	result.Image = built.Image
+	if sizer, ok := b.Engine.(interface {
+		ImageSize(ctx context.Context, id string) (int64, error)
+	}); ok {
+		if size, err := sizer.ImageSize(ctx, built.Image); err == nil {
+			result.ImageSizeBytes = size
+		}
+	}
 	if built.Export != nil {
 		result.ExportSizeBytes = built.Export.SizeBytes
 		result.ExportSHA256 = built.Export.SHA256

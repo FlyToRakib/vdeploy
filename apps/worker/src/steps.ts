@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   durationMs,
+  imageSizeWarning,
   MAX_UPLOAD_BYTES,
   newId,
   readSpec,
@@ -671,7 +672,11 @@ async function buildImage(
   const deadline = Date.now() + (deps.buildTimeoutMs ?? 60 * 60_000);
   for (;;) {
     const build = await getBuild(deps.db, state.orgId, buildId);
-    if (build?.status === 'succeeded' && build.image) return { image: build.image, buildId };
+    if (build?.status === 'succeeded' && build.image) {
+      const large = imageSizeWarning(build.imageSizeBytes);
+      if (large) state.notes.push(large);
+      return { image: build.image, buildId };
+    }
     if (build?.status === 'failed') {
       const cause = diagnoseBuild(build.log);
       throw new VDeployError(

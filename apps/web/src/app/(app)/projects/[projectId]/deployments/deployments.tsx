@@ -36,13 +36,15 @@ const LOOK: Record<Deployment['status'], { health: Health; label: string }> = {
 
 function BuildLog({ projectId, deploymentId }: { projectId: string; deploymentId: string }) {
   const [log, setLog] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   useEffect(() => {
-    void query<{ build: { log: string } | null }>('deployment.logs', {
+    void query<{ build: { log: string; warning: string | null } | null }>('deployment.logs', {
       projectId,
       deploymentId,
     }).then(
       (r) => {
         setLog(r.build?.log ?? 'This version was not built here: it came from an image.');
+        setWarning(r.build?.warning ?? null);
       },
       () => {
         setLog('The build log could not be loaded.');
@@ -51,9 +53,12 @@ function BuildLog({ projectId, deploymentId }: { projectId: string; deploymentId
   }, [projectId, deploymentId]);
   if (log === null) return <Skeleton className="h-24" />;
   return (
-    <pre className="max-h-96 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-xs whitespace-pre-wrap">
-      {log || '(empty)'}
-    </pre>
+    <>
+      {warning && <p className="text-sm text-status-warning">{warning}</p>}
+      <pre className="max-h-96 overflow-auto rounded-md border border-border bg-surface p-3 font-mono text-xs whitespace-pre-wrap">
+        {log || '(empty)'}
+      </pre>
+    </>
   );
 }
 

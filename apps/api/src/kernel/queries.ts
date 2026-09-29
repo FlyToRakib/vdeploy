@@ -1,4 +1,10 @@
-import { readSpec, VDeployError, type LogLine, type OperationName } from '@vdeploy/contracts';
+import {
+  imageSizeWarning,
+  readSpec,
+  VDeployError,
+  type LogLine,
+  type OperationName,
+} from '@vdeploy/contracts';
 import {
   changeWords,
   describeCapacity,
@@ -582,7 +588,15 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
     return {
       status: row.deployment.status,
       error: row.deployment.error,
-      build: build ? { id: build.id, status: build.status, log: build.log } : null,
+      build: build
+        ? {
+            id: build.id,
+            status: build.status,
+            log: build.log,
+            // A word about a large image (§30 ④), beside the log it came from.
+            warning: imageSizeWarning(build.imageSizeBytes),
+          }
+        : null,
     };
   },
   'health.check': notYet,

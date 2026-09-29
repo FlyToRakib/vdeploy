@@ -88,6 +88,8 @@ export const builds = pgTable(
      * must run it can check the bytes before it loads them.
      */
     exportSizeBytes: bigint('export_size_bytes', { mode: 'number' }),
+    /** How much disk the built image takes (§30 ④). */
+    imageSizeBytes: bigint('image_size_bytes', { mode: 'number' }),
     exportSha256: text('export_sha256'),
     detection: jsonb('detection'),
     /** Folders the app will keep lasting data in, found in its source. */

@@ -1,0 +1,1 @@
+ALTER TABLE "builds" ADD COLUMN "image_size_bytes" bigint;

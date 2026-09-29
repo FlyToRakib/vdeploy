@@ -11,6 +11,7 @@ import { Status, type Health } from '@/components/ui/status';
 import {
   CHECK_EVERY,
   cleanHost,
+  countdownWords,
   memoryWords,
   MEMORY_CHOICES,
   secretNameFor,
@@ -227,6 +228,32 @@ interface DomainCheck {
   certificate: { notAfter: string; renewing: boolean } | null;
   /** Set on a www or bare twin: the address it sends visitors to (§30 ⑤). */
   twinOf: string | null;
+  /** When DNS is looked at again. */
+  nextCheckAt: string;
+}
+
+/**
+ * When VDeploy looks at a name's DNS again (§30 ⑤). A countdown rather
+ * than a retry button: asking Let's Encrypt early is what locks a domain
+ * out for an hour, and VDeploy asks only once the name points here.
+ */
+function NextLook({ at }: { at: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      clearInterval(tick);
+    };
+  }, []);
+  return (
+    <p className="text-muted-foreground" aria-live="polite">
+      DNS changes can take a while to reach everyone. VDeploy looks again{' '}
+      {countdownWords(Date.parse(at) - now)}, and asks for the certificate only once it points here
+      — asking early is how a domain gets locked out for an hour.
+    </p>
+  );
 }
 
 /** "until 3 December 2026", in the reader's own words for dates. */
@@ -254,12 +281,22 @@ export function DomainsSection() {
   const spec = useSpec();
   const [checks, setChecks] = useState<DomainCheck[] | null>(null);
   const hosts = spec.network?.domains.map((d) => d.host) ?? [];
+  const waiting = checks?.some((c) => c.status !== 'verified') ?? false;
 
   useEffect(() => {
-    void query<DomainCheck[]>('domain.status', { projectId }).then(setChecks, () => {
-      setChecks([]);
-    });
-  }, [projectId, spec]);
+    const load = () => {
+      void query<DomainCheck[]>('domain.status', { projectId }).then(setChecks, () => {
+        setChecks([]);
+      });
+    };
+    load();
+    // While a name is not verified yet, keep the page up to date by itself.
+    if (!waiting) return;
+    const every = setInterval(load, 15_000);
+    return () => {
+      clearInterval(every);
+    };
+  }, [projectId, spec, waiting]);
 
   if (!spec.network) {
     return (
@@ -301,6 +338,7 @@ export function DomainsSection() {
                 </Button>
               </div>
               {check?.message && <p>{check.message}</p>}
+              {check && check.status !== 'verified' && <NextLook at={check.nextCheckAt} />}
               {check?.certificate &&
                 (check.certificate.renewing ? (
                   <p className="text-muted-foreground">
