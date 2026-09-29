@@ -112,7 +112,11 @@ upgrade() {
 
 rollback() {
   need_docker
-  backup=$(ls -1t "$here"/backups/pre-upgrade-*.dump 2>/dev/null | head -n 1)
+  # The names carry a UTC timestamp, so the last in glob order is the latest.
+  backup=''
+  for file in "$here"/backups/pre-upgrade-*.dump; do
+    [ -e "$file" ] && backup=$file
+  done
   [ -n "$backup" ] || fail 'there is no upgrade to go back from (no pre-upgrade dump in deploy/backups)'
   docker image inspect vdeploy/control-plane:previous >/dev/null 2>&1 || fail 'the previous version is not on this machine any more'
   say "Going back to the version before the last upgrade, and the data in $backup."

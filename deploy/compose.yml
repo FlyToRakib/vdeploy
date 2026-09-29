@@ -6,6 +6,11 @@
 # on **one origin**. They must — cookies, CSRF and the agent's websocket
 # are all bound to it.
 #
+#   ./deploy/vdeploy.sh install --url https://vdeploy.example.com
+#
+# does all of the below for you: it makes the keys, writes deploy/.env,
+# builds and starts this, and waits until it answers. By hand:
+#
 #   cp apps/api/.env.example deploy/.env    # then fill in the four keys
 #   docker compose -f deploy/compose.yml up -d
 #

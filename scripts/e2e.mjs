@@ -12,6 +12,8 @@
 //   driving the testbed's dashboard in an installed Edge or Chrome)
 //   add --screens for the M6 screens in the same browser: previews and
 //   staging on a project's Config screen, and Integrations
+//   add --install for the control plane's own install, upgrade and
+//   rollback (deploy/vdeploy.sh), run as its comments say, on a clean box
 //
 // Build first: the vdeploy-test/control-plane:e2e image, which carries the
 // agent the one-command installer puts on the testbed —
@@ -32,6 +34,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const vps = process.argv.includes('--vps');
 const walkthrough = process.argv.includes('--walkthrough');
 const screens = process.argv.includes('--screens');
+const installing = process.argv.includes('--install');
 const TESTBED = vps ? 'vdeploy-test-testbed' : 'vdeploy-test-dind';
 /**
  * A second machine, for everything M5 is about (§13, §14, §15): placing an
@@ -2118,7 +2121,105 @@ function m6Screens() {
   pass('previews turned on, a staging copy made and an integration allowed, all from the screens');
 }
 
-try {
+/** A clean machine for installing VDeploy itself on: nothing else runs there. */
+const INSTALL_BED = 'vdeploy-test-install';
+
+/**
+ * §34.1: one command installs the control plane, one upgrades it with a
+ * backup first, and one goes back. Run exactly as deploy/vdeploy.sh says,
+ * from a copy of this working tree, on a Docker that has never seen
+ * VDeploy — because the first person to run it will be on exactly that.
+ */
+function installRun() {
+  if (!onHost(`docker ps -q -f name=^${INSTALL_BED}$`)) {
+    log(`creating testbed ${INSTALL_BED}`);
+    onHost(
+      `docker run -d --name ${INSTALL_BED} --privileged --restart=no -v ${INSTALL_BED}-docker:/var/lib/docker docker:27-dind --storage-driver=overlay2`,
+    );
+  }
+  const bed = (command, input) => inBed(INSTALL_BED, command, input);
+  for (let i = 0; ; i++) {
+    try {
+      bed('docker info >/dev/null 2>&1');
+      break;
+    } catch (error) {
+      if (i > 60) throw error;
+      execFileSync(process.execPath, ['-e', 'setTimeout(()=>{},1000)']);
+    }
+  }
+  log('copying the working tree in, as a checkout would be');
+  const tree = execFileSync('sh', ['-c', 'git ls-files -z | tar --null -T - -czf -'], {
+    cwd: root,
+    maxBuffer: 256 << 20,
+  });
+  bed('rm -rf /opt/vdeploy && mkdir -p /opt/vdeploy && tar -xzf - -C /opt/vdeploy', tree);
+
+  const script = 'sh /opt/vdeploy/deploy/vdeploy.sh';
+  const api = (path, body) =>
+    bed(
+      body
+        ? `docker exec vdeploy-proxy-1 wget -qO- --header=content-type:application/json --post-data='${body}' http://127.0.0.1:8080${path}`
+        : `docker exec vdeploy-proxy-1 wget -qO- http://127.0.0.1:8080${path}`,
+    );
+
+  log('install: building and starting it, with keys it makes itself');
+  const installed = bed(`${script} install --url http://127.0.0.1:8080 2>&1`);
+  const env = bed('cat /opt/vdeploy/deploy/.env');
+  for (const key of ['SECRETS_KEY', 'AUTH_SECRET', 'APPROVAL_KEY', 'CONTROL_PLANE_KEY']) {
+    const value = new RegExp(`^${key}=(.+)$`, 'm').exec(env)?.[1] ?? '';
+    if (value.length < 32) throw new Error(`install did not make ${key}`);
+    if (installed.includes(value)) throw new Error(`install printed ${key}`);
+  }
+  if (!api('/api/v1/setup').includes('"needed":true'))
+    throw new Error('not answering after install');
+  pass('installed with one command: every key made, none printed, answering on one origin');
+
+  api(
+    '/api/v1/setup',
+    JSON.stringify({
+      name: 'Owner',
+      email: 'owner@install.invalid',
+      password: 'correct horse battery 42',
+      organization: 'Acme',
+    }),
+  );
+  const again = bed(`${script} install --url http://127.0.0.1:8080 2>&1`);
+  if (!again.includes('keeping it, and every key in it')) {
+    throw new Error(`a second install did not keep the keys: ${again}`);
+  }
+  if (bed('cat /opt/vdeploy/deploy/.env') !== env)
+    throw new Error('a second install changed the keys');
+  pass('installing again keeps every key, and the owner');
+
+  log('upgrade: a checked dump first, then the new version');
+  bed(`${script} upgrade --no-pull 2>&1`);
+  const dumps = bed('ls /opt/vdeploy/deploy/backups');
+  const dump = dumps.split('\n').find((f) => f.startsWith('pre-upgrade-'));
+  if (!dump) throw new Error(`no pre-upgrade dump: ${dumps}`);
+  if (bed(`head -c 5 /opt/vdeploy/deploy/backups/${dump}`) !== 'PGDMP') {
+    throw new Error('the pre-upgrade dump is not a dump');
+  }
+  if (!api('/api/v1/setup').includes('"needed":false'))
+    throw new Error('the upgrade lost the owner');
+  pass('upgraded with one command: a checked dump first, the owner still there', dump);
+
+  log('rollback: the version and the data from before');
+  // Something that happens after the dump, which going back must undo.
+  bed(
+    `docker exec vdeploy-db-1 psql -U vdeploy -d vdeploy -c "update organization set name = 'Changed after'"`,
+  );
+  bed(`${script} rollback 2>&1`);
+  const name = bed(
+    `docker exec vdeploy-db-1 psql -U vdeploy -d vdeploy -tAc "select name from organization"`,
+  );
+  if (name !== 'Acme') throw new Error(`rollback did not put the data back: ${name}`);
+  if (!api('/api/v1/setup').includes('"needed":false'))
+    throw new Error('not answering after rollback');
+  pass('rolled back with one command: the previous version, on the data from before the upgrade');
+}
+
+/** The testbed with the control plane already on it, then whichever run was asked for. */
+async function testbedRun() {
   verifyBaseline();
   ensureTestbed();
   resetTestbed();
@@ -2134,6 +2235,15 @@ try {
     await run();
     await drill();
     log(`M1 exit criteria and restore drill: ${results.length} checks passed`);
+  }
+}
+
+try {
+  if (installing) {
+    installRun();
+    log(`the control plane's own lifecycle: ${results.length} checks passed`);
+  } else {
+    await testbedRun();
   }
 } catch (error) {
   console.error(`[e2e] FAILED: ${error instanceof Error ? error.message : error}`);
@@ -2162,7 +2272,7 @@ try {
   if (process.argv.includes('--teardown')) {
     // Each by name, never by pattern: this runs on a machine with other
     // people's containers on it.
-    for (const bed of [TESTBED3, TESTBED2, TESTBED]) {
+    for (const bed of [INSTALL_BED, TESTBED3, TESTBED2, TESTBED]) {
       if (!onHost(`docker ps -aq -f name=^${bed}$`)) continue;
       log(`removing testbed ${bed} and its volume ${bed}-docker`);
       onHost(`docker rm -f ${bed} >/dev/null && docker volume rm ${bed}-docker >/dev/null`);

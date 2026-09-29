@@ -144,14 +144,19 @@ origin** — which they must, because cookies, CSRF and the agent's
 websocket are all bound to it.
 
 ```bash
-cp apps/api/.env.example deploy/.env    # then fill in the four keys
-docker compose -f deploy/compose.yml up -d
+./deploy/vdeploy.sh install --url https://vdeploy.example.com
 ```
 
-Terminate TLS in front of it, pointed at port 8080, and set `PUBLIC_URL`
-to the address people type. Keep a copy of `SECRETS_KEY` somewhere that
-is not that server and not its database backups: without it no stored
-secret can be opened by anybody, including you.
+makes every key, builds it from this checkout and starts it. Terminate
+TLS in front of it, pointed at port 8080, at the address you gave. Keep
+a copy of `deploy/.env` somewhere that is not that server and not its
+database backups: without `SECRETS_KEY` no stored secret can be opened
+by anybody, including you.
+
+```bash
+./deploy/vdeploy.sh upgrade     # pulls, dumps the database, then builds the new version
+./deploy/vdeploy.sh rollback    # the version before, on the data from before
+```
 
 Locked out of your own VDeploy — password and authenticator both gone —
 is solved on the machine, by whoever can open a shell on it:

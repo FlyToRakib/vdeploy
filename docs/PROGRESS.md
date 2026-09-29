@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** one command to install the control plane, one to upgrade it
+**Task:** `vdeploy up` from a local folder
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -173,7 +173,20 @@ each is one task, one commit.
   person who only ever used a passkey gets a password to come back with.
   `docs/runbooks/lost-access.md` walks through all three ways back in,
   and the e2e runs the command exactly as the runbook writes it
-- [ ] one command to install the control plane, one to upgrade it with a backup first (§34.1)
+- [x] **one command to install the control plane, one to upgrade it,
+  one to go back (§34.1)**: `deploy/vdeploy.sh install --url …` makes
+  every key itself and never prints one, keeps them in `deploy/.env`
+  (made once, never overwritten), builds and starts the stack and waits
+  until the API answers; `upgrade` takes a database dump first, reads it
+  back before believing it, keeps the running version under a name
+  `rollback` knows, then builds the new one; `rollback` puts that
+  version back **with the pre-upgrade data**, because migrations only go
+  forward and the old version knows only the old schema; `backup` takes
+  a checked dump on demand. `node scripts/e2e.mjs --install` runs exactly
+  those commands on a Docker that has never seen VDeploy: install (keys
+  made, none printed, answering), install again (keys and owner kept),
+  upgrade (a real dump first, owner still there), and rollback (a change
+  made after the dump is gone) — 4 checks, passed. ShellCheck is clean
 - [ ] `vdeploy up` from a local folder (§30 ③)
 
 **Routing (§13)**
