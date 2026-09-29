@@ -280,6 +280,9 @@ importers:
 
   packages/contracts:
     dependencies:
+      ignore:
+        specifier: ^7.0.9
+        version: 7.0.9
       zod:
         specifier: ^4.6.5
         version: 4.6.5

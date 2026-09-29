@@ -1,4 +1,4 @@
-import { uploadRule } from '@vdeploy/contracts';
+import { gitignored, uploadRule } from '@vdeploy/contracts';
 import type { Health } from '@/components/ui/status';
 
 export type ProjectHealth = 'live' | 'deploying' | 'failing' | 'down' | 'stopped' | 'new';
@@ -97,15 +97,28 @@ export function describeDetection(detection: unknown): DetectionSummary {
 
 /**
  * Which files of a chosen folder to upload, relative to the folder, by the
- * rule `vdeploy up` follows too.
+ * rule `vdeploy up` follows too — the folder's .gitignore files included,
+ * given by the folder each sits in ("" for the top) and their text.
  */
-export function uploadPlan(paths: readonly string[]): { keep: string[]; secretsLeftOut: string[] } {
+export function uploadPlan(
+  paths: readonly string[],
+  ignoreFiles: readonly { dir: string; text: string }[] = [],
+): { keep: string[]; secretsLeftOut: string[] } {
   const keep: string[] = [];
   const secretsLeftOut: string[] = [];
+  const ignored = gitignored(ignoreFiles);
+  // A folder is left out whole when it is ignored, as git leaves it.
+  const underIgnored = (path: string) => {
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      if (ignored(parts.slice(0, i).join('/'), true)) return true;
+    }
+    return ignored(path, false);
+  };
   for (const full of paths) {
     // The browser gives "folder/sub/file"; the archive holds "sub/file".
     const path = full.split('/').slice(1).join('/');
-    if (!path) continue;
+    if (!path || underIgnored(path)) continue;
     const rule = uploadRule(path);
     if (rule === 'secret') secretsLeftOut.push(path);
     else if (rule === 'keep') keep.push(path);

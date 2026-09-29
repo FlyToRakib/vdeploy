@@ -51,4 +51,31 @@ describe('packFolder', () => {
     expect(packed.archive.toString('latin1')).not.toContain('sk_live');
     expect(packed.files).toBe(4);
   });
+
+  it('leaves out what the folder keeps out of git: local data stays on this computer', () => {
+    const root = folder({
+      '.gitignore': '/data/\n*.db\ndist/\n',
+      'package.json': '{}',
+      'src/app.ts': 'app',
+      'data/app.db': 'my database',
+      'data/profiles/chrome/Cookies': 'saved sign-ins',
+      'dist/index.js': 'build output',
+      'apps/server/cache.db': 'nested database',
+      'apps/server/src/data/schema.ts': 'code named data, not the top data folder',
+      'apps/web/.gitignore': 'generated/\n',
+      'apps/web/generated/big.js': 'generated',
+      'apps/web/src/main.ts': 'web',
+    });
+    const { names } = unpack(packFolder(root).archive);
+    expect(names).toEqual(
+      [
+        '.gitignore',
+        'apps/server/src/data/schema.ts',
+        'apps/web/.gitignore',
+        'apps/web/src/main.ts',
+        'package.json',
+        'src/app.ts',
+      ].sort(),
+    );
+  });
 });

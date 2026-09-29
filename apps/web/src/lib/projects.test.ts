@@ -56,6 +56,32 @@ describe('folder uploads', () => {
     expect(plan.keep).toEqual(['package.json', 'src/index.js', '.env.example']);
     expect(plan.secretsLeftOut).toEqual(['.env', '.env.production']);
   });
+
+  it('leaves out what the folder keeps out of git, as `vdeploy up` does', () => {
+    const plan = uploadPlan(
+      [
+        'site/.gitignore',
+        'site/package.json',
+        'site/data/app.db',
+        'site/data/profiles/Cookies',
+        'site/apps/server/src/data/schema.ts',
+        'site/apps/web/.gitignore',
+        'site/apps/web/generated/big.js',
+        'site/apps/web/src/main.ts',
+      ],
+      [
+        { dir: '', text: '/data/\n*.db\n' },
+        { dir: 'apps/web', text: 'generated/\n' },
+      ],
+    );
+    expect(plan.keep).toEqual([
+      '.gitignore',
+      'package.json',
+      'apps/server/src/data/schema.ts',
+      'apps/web/.gitignore',
+      'apps/web/src/main.ts',
+    ]);
+  });
 });
 
 describe('project order', () => {

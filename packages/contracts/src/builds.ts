@@ -1,3 +1,4 @@
+import ignore from 'ignore';
 import { z } from 'zod';
 import { idSchema } from './ids.js';
 
@@ -22,6 +23,29 @@ export function uploadRule(path: string): 'keep' | 'skip' | 'secret' {
   const file = parts.at(-1) ?? '';
   if (/^\.env(\..+)?$/.test(file) && !file.endsWith('.example')) return 'secret';
   return 'keep';
+}
+
+/**
+ * What a folder's .gitignore files leave out, as git would: each file's
+ * patterns apply below the folder it sits in. A folder is local data as
+ * often as it is code — a database, saved sign-ins, build output — and
+ * what its owner keeps out of git they certainly meant to keep out of an
+ * upload to a server.
+ *
+ * `files` are the .gitignore files found, by the folder each sits in
+ * ("" for the top). The answer takes a path relative to the top, and
+ * whether that path is a folder.
+ */
+export function gitignored(
+  files: readonly { dir: string; text: string }[],
+): (path: string, isDir: boolean) => boolean {
+  const rules = files.map(({ dir, text }) => ({ dir, match: ignore().add(text) }));
+  return (path, isDir) =>
+    rules.some(({ dir, match }) => {
+      if (dir && !path.startsWith(`${dir}/`)) return false;
+      const inner = dir ? path.slice(dir.length + 1) : path;
+      return inner !== '' && match.ignores(isDir ? `${inner}/` : inner);
+    });
 }
 
 /** A folder, repository or image name as a project name: lowercase letters, digits and hyphens. */

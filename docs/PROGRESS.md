@@ -359,6 +359,14 @@ each is one task, one commit.
   case — knows only the old key: the agent keeps it, tries it once when
   refused, and offers its current key again, so a restore never locks a
   server out
+- [x] **an upload leaves out what the folder keeps out of git** — found
+  preparing the first live deploy: `vdeploy up` and the dashboard's folder
+  upload skipped dependencies, git history and .env files, but not what
+  .gitignore names. The app being deployed keeps its database and saved
+  browser sign-ins in a gitignored data/ folder — 577 MB that would have
+  gone to the server. Both now read every .gitignore in the folder, as git
+  does (each applies below its own folder); that app's upload is 229
+  files, 0.4 MB
 - [x] **freeing disk takes only what VDeploy made** — found preparing the
   first live install, on a server shared with other apps: the daily
   freeing removed any image with no name, whoever made it — another

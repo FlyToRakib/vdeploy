@@ -109,7 +109,16 @@ export function UploadSource({
       setPhase({ kind: 'working', label: 'Packing the folder…' });
       const all = [...files];
       const byPath = new Map(all.map((f) => [f.webkitRelativePath, f]));
-      const { keep, secretsLeftOut } = uploadPlan([...byPath.keys()]);
+      // What the folder keeps out of git stays on this computer too.
+      const ignoreFiles = await Promise.all(
+        all
+          .filter((f) => f.name === '.gitignore')
+          .map(async (f) => ({
+            dir: f.webkitRelativePath.split('/').slice(1, -1).join('/'),
+            text: await f.text(),
+          })),
+      );
+      const { keep, secretsLeftOut } = uploadPlan([...byPath.keys()], ignoreFiles);
       if (keep.length === 0) {
         setPhase({ kind: 'error', message: 'That folder is empty.' });
         return;

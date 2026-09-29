@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { MAX_UPLOAD_BYTES, uploadRule } from '@vdeploy/contracts';
+import { gitignored, MAX_UPLOAD_BYTES, uploadRule } from '@vdeploy/contracts';
 
 export interface Packed {
   archive: Buffer;
@@ -47,7 +47,8 @@ function header(path: string, size: number, mode: number, mtime: number): Buffer
 /**
  * A folder as a .tar.gz, by the same rule the dashboard uses when a folder
  * is dropped on it: no dependencies that are installed on the server
- * anyway, no version-control history, and no secrets files.
+ * anyway, no version-control history, no secrets files, and nothing its
+ * .gitignore files leave out.
  */
 export function packFolder(folder: string): Packed {
   const blocks: Buffer[] = [];
@@ -55,14 +56,23 @@ export function packFolder(folder: string): Packed {
   const linksLeftOut: string[] = [];
   let files = 0;
   let total = 0;
+  const ignoreFiles: { dir: string; text: string }[] = [];
+  let ignored = gitignored(ignoreFiles);
   const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+    const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
       a.name.localeCompare(b.name),
-    )) {
+    );
+    // A folder's own .gitignore is read before anything in it is judged.
+    if (entries.some((e) => e.isFile() && e.name === '.gitignore')) {
+      const at = relative(folder, dir).split(sep).join('/');
+      ignoreFiles.push({ dir: at, text: readFileSync(join(dir, '.gitignore'), 'utf8') });
+      ignored = gitignored(ignoreFiles);
+    }
+    for (const entry of entries) {
       const full = join(dir, entry.name);
       const path = relative(folder, full).split(sep).join('/');
       const rule = uploadRule(path);
-      if (rule === 'skip') continue;
+      if (rule === 'skip' || ignored(path, entry.isDirectory())) continue;
       if (entry.isSymbolicLink()) {
         linksLeftOut.push(path);
         continue;
