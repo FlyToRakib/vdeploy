@@ -305,7 +305,11 @@ each is one task, one commit.
   found no handler, and answered "not available yet" — so no terminal
   had ever opened since it was built, and nothing tested the route. The
   gate now completes, with its audit entry, and the route opens the
-  shell; the end-to-end run types a command into one and reads the answer
+  shell; the end-to-end run types a command into one and reads the answer.
+  That run found the second half: the shell was "exec bash || exec sh",
+  and an exec that fails ends a non-interactive shell on the spot, so on
+  any image without bash — every Alpine one — the terminal closed at once
+  (exit 127). Bash is now looked for before it is run
 - [x] **`health.check` answers**: the AI, CLI and MCP could ask for an
   app's health and were told "not available yet". The agent runs every
   check on its own schedule whether anyone asks or not, so the answer is

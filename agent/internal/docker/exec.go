@@ -22,9 +22,14 @@ arbitrary command as root". The control plane cannot widen it, and neither
 can anything that reaches the control plane.
 */
 
-// shell is what a terminal runs: bash where an image has it, sh where it
-// does not. It is fixed here and never comes from a frame.
-var shell = []string{"/bin/sh", "-c", "exec /bin/bash 2>/dev/null || exec /bin/sh"}
+/*
+shell is what a terminal runs: bash where an image has it, sh where it
+does not. It is fixed here and never comes from a frame. Bash is looked
+for before it is run: an exec that fails ends a non-interactive shell on
+the spot, so "exec bash || exec sh" never reaches sh — on an image
+without bash, such as any Alpine one, the terminal ended at once.
+*/
+var shell = []string{"/bin/sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; fi; exec /bin/sh"}
 
 // Exec opens an interactive shell in one container and hands back the raw
 // duplex stream. The caller closes it when the person leaves.
