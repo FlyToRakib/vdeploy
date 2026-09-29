@@ -286,6 +286,7 @@ export async function notifyFromReport(
   now: Date,
 ): Promise<void> {
   await notifyDiskFilling(db, serverId, report, now);
+  await notifyCertificatesNotRenewing(db, serverId, report, now);
   const troubled = (report.projects ?? []).filter((p) =>
     p.evidence?.some((e) => e.oomKilled || e.restarts >= 3),
   );
@@ -330,6 +331,54 @@ export async function notifyFromReport(
             ? `${project.name} needed more than its ${spec.runtime.resources.memory.limit} memory limit and was stopped.`
             : `${project.name} keeps stopping right after it starts. Its logs say why.`,
         projectId: project.id,
+        serverId,
+      },
+      now,
+    );
+  }
+}
+
+/**
+ * Traefik renews a certificate thirty days before it expires. One still
+ * inside twenty-one has been failing to renew for over a week — and saying
+ * so now, rather than on the morning browsers start warning visitors away,
+ * is the whole point of watching (§30 ⑦).
+ */
+export const CERTIFICATE_WARNING_DAYS = 21;
+
+async function notifyCertificatesNotRenewing(
+  db: Executor,
+  serverId: string,
+  report: ObservedReport,
+  now: Date,
+): Promise<void> {
+  const horizon = now.getTime() + CERTIFICATE_WARNING_DAYS * 86_400_000;
+  const expiring = (report.health?.certificates ?? []).filter(
+    (c) => Date.parse(c.notAfter) < horizon,
+  );
+  if (expiring.length === 0) return;
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return;
+  const day = now.toISOString().slice(0, 10);
+  for (const certificate of expiring) {
+    const host = certificate.hosts[0] ?? '';
+    const left = Math.max(
+      0,
+      Math.floor((Date.parse(certificate.notAfter) - now.getTime()) / 86_400_000),
+    );
+    const when = certificate.notAfter.slice(0, 10);
+    await notify(
+      db,
+      server.orgId,
+      {
+        trigger: 'certificate_not_renewing',
+        key: `certificate:${serverId}:${host}:${day}`,
+        title: `The certificate for ${host} has not renewed`,
+        message:
+          `${host} stops being trusted on ${when}, ${left === 0 ? 'today' : `in ${String(left)} day${left === 1 ? '' : 's'}`}. ` +
+          'It should have renewed ten days ago. The usual reasons are that the address no longer points at ' +
+          `${server.name}, or that something in front of it — a firewall, a proxy — keeps the check on port 80 from arriving. ` +
+          "The address's page in VDeploy says what it sees.",
         serverId,
       },
       now,

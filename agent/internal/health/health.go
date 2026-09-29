@@ -81,6 +81,8 @@ type Report struct {
 	Orphans        protocol.List[Orphan] `json:"orphans"`
 	// Firewall is what this server's own firewall lets in (§20 Servers).
 	Firewall firewall.Report `json:"firewall"`
+	// Certificates are what the router serves, and until when (§30 ⑦).
+	Certificates protocol.List[Certificate] `json:"certificates"`
 }
 
 // Engine is what a look needs from Docker.
@@ -98,6 +100,8 @@ type Reader struct {
 	ProcMeminfo string
 	// FirewallRoot is prefixed to the firewall's own config paths, for tests.
 	FirewallRoot string
+	// ACME reads the router's certificate store; nil reports none.
+	ACME func(ctx context.Context) ([]byte, error)
 }
 
 // Read takes one look. `wanted` is every volume the desired state still
@@ -106,9 +110,15 @@ type Reader struct {
 // taken out of an app that is still running.
 func (r *Reader) Read(ctx context.Context, wanted map[string]bool, now time.Time) Report {
 	report := Report{
-		At:      now.UTC().Format(time.RFC3339),
-		Load:    r.load(),
-		Orphans: []Orphan{},
+		At:           now.UTC().Format(time.RFC3339),
+		Load:         r.load(),
+		Orphans:      []Orphan{},
+		Certificates: []Certificate{},
+	}
+	if r.ACME != nil {
+		if store, err := r.ACME(ctx); err == nil {
+			report.Certificates = certificates(store)
+		}
 	}
 	report.Firewall = (&firewall.Reader{Root: r.FirewallRoot}).Read()
 	report.SwapUsedBytes, report.SwapTotalBytes = r.swap()

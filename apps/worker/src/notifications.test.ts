@@ -277,6 +277,60 @@ describe('notifications', () => {
     // The app's own output never leaves in a notification.
     expect(posts[0]!.body).not.toMatch(/hunter2/);
   });
+
+  it('says a certificate has not renewed while there are weeks left, once a day', async () => {
+    await createChannel(
+      t.db,
+      SECRETS,
+      {
+        orgId,
+        name: 'certs',
+        config: { kind: 'webhook', url: 'https://hooks.example.com/c' },
+        triggers: ['certificate_not_renewing'],
+      },
+      clock,
+    );
+    const serverId = newId('server');
+    await t.db.insert(servers).values({ id: serverId, orgId, name: 'web-1', status: 'online' });
+    const inDays = (days: number) => new Date(clock.getTime() + days * 86_400_000).toISOString();
+    const report: ObservedReport = {
+      generation: 1,
+      events: null,
+      projects: [],
+      health: {
+        at: clock.toISOString(),
+        load: { one: 0, five: 0, fifteen: 0, cpus: 1 },
+        swapUsedBytes: 0,
+        swapTotalBytes: 0,
+        inodesUsed: 0,
+        inodesTotal: 0,
+        docker: {
+          imagesBytes: 0,
+          imagesReclaimableBytes: 0,
+          containersBytes: 0,
+          volumesBytes: 0,
+          buildCacheBytes: 0,
+          buildCacheReclaimableBytes: 0,
+          otherBytes: 0,
+        },
+        orphans: [],
+        certificates: [
+          // Inside the window: renewal has been failing for over a week.
+          { hosts: ['shop.example.com', 'www.shop.example.com'], notAfter: inDays(12) },
+          // Renewing on schedule: nothing to say.
+          { hosts: ['blog.example.com'], notAfter: inDays(45) },
+        ],
+      },
+    };
+    await notifyFromReport(t.db, serverId, report, clock);
+    await notifyFromReport(t.db, serverId, report, new Date(clock.getTime() + 3_600_000));
+    await sendDueNotifications(deps());
+    expect(posts).toHaveLength(1);
+    const body = JSON.parse(posts[0]!.body) as { title: string; message: string };
+    expect(body.title).toBe('The certificate for shop.example.com has not renewed');
+    expect(body.message).toMatch(/in 12 days/);
+    expect(body.message).toMatch(/no longer points at web-1/);
+  });
 });
 
 describe('webhook transport', () => {

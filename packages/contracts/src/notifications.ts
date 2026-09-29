@@ -15,6 +15,7 @@ export const NotificationTrigger = z.enum([
   'backup_missed',
   'backup_failed',
   'disk_filling',
+  'certificate_not_renewing',
 ]);
 export type NotificationTrigger = z.infer<typeof NotificationTrigger>;
 
@@ -34,6 +35,7 @@ export const TRIGGER_LABELS: Record<NotificationTrigger, string> = {
   backup_missed: 'A backup did not happen',
   backup_failed: 'A backup did not work',
   disk_filling: 'A server is running out of disk',
+  certificate_not_renewing: 'A certificate is not renewing',
 };
 
 export const ChannelConfig = z.discriminatedUnion('kind', [

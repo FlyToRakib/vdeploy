@@ -133,6 +133,17 @@ interface DomainCheck {
   status: string;
   message: string;
   instructions: { type: string; name: string; value: string; zone: string }[];
+  /** The certificate the server holds for it, once it has one (§30 ⑦). */
+  certificate: { notAfter: string; renewing: boolean } | null;
+}
+
+/** "until 3 December 2026", in the reader's own words for dates. */
+function untilWords(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
 const DOMAIN_LOOK: Record<string, { health: Health; label: string }> = {
@@ -196,6 +207,19 @@ export function DomainsSection() {
                 </Button>
               </div>
               {check?.message && <p>{check.message}</p>}
+              {check?.certificate &&
+                (check.certificate.renewing ? (
+                  <p className="text-muted-foreground">
+                    Certificate valid until {untilWords(check.certificate.notAfter)}. It renews by
+                    itself.
+                  </p>
+                ) : (
+                  <p className="text-status-warning">
+                    The certificate runs out on {untilWords(check.certificate.notAfter)} and has not
+                    renewed. It should have a week ago: check that this address still points at the
+                    server, and that nothing in front of it blocks port 80.
+                  </p>
+                ))}
               {check && check.status !== 'verified' && check.instructions.length > 0 && (
                 <table className="w-full text-left text-xs">
                   <caption className="mb-1 text-left text-muted-foreground">

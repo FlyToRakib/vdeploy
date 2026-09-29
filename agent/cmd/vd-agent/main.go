@@ -224,7 +224,7 @@ func serve(configPath string, log *slog.Logger) error {
 	reconciler.Metrics = &metrics.Reader{Engine: engine, Root: dockerRoot, Traffic: traffic}
 	// And what it is made of (§18): the disk broken down, and folders whose
 	// app is gone. Slower, because asking costs a walk of the filesystem.
-	reconciler.Health = &health.Reader{Engine: engine, Root: dockerRoot}
+	reconciler.Health = &health.Reader{Engine: engine, Root: dockerRoot, ACME: engine.ReadACME}
 	loop := &reconcile.Loop{
 		Reconciler: reconciler,
 		StateDir:   cfg.StateDir,

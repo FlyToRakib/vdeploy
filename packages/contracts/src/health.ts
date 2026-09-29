@@ -92,6 +92,13 @@ export const FirewallReport = z.strictObject({
 });
 export type FirewallReport = z.infer<typeof FirewallReport>;
 
+/** One certificate the router serves, and when it stops being trusted (§30 ⑦). */
+export const ServedCertificate = z.strictObject({
+  hosts: z.array(z.string().min(1).max(253)).min(1).max(100),
+  notAfter: z.iso.datetime({ offset: true }),
+});
+export type ServedCertificate = z.infer<typeof ServedCertificate>;
+
 export const ServerHealth = z.strictObject({
   at: z.iso.datetime({ offset: true }),
   load: LoadAverage,
@@ -111,5 +118,7 @@ export const ServerHealth = z.strictObject({
   orphans: z.array(OrphanVolume).max(100),
   /** What the server's own firewall lets in; absent from older agents. */
   firewall: FirewallReport.optional(),
+  /** The certificates its router serves; absent from older agents. */
+  certificates: z.array(ServedCertificate).max(500).optional(),
 });
 export type ServerHealth = z.infer<typeof ServerHealth>;

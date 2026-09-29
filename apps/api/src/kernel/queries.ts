@@ -12,6 +12,7 @@ import {
 import {
   builds,
   buildView,
+  CERTIFICATE_WARNING_DAYS,
   databases,
   deployments,
   diagnoseProject,
@@ -372,7 +373,35 @@ export const QUERIES: Partial<Record<OperationName, Handler>> = {
       .where(and(eq(projects.orgId, actor.orgId), isNull(projects.deletedAt)))
       .orderBy(projects.name),
   }),
-  'domain.status': async ({ deps, args }) => domainChecksFor(deps.db, [id(args, 'projectId')]),
+  /**
+   * Each address: whether it points here, and — once it does — the
+   * certificate its server's router holds for it and until when (§20
+   * Network, §30 ⑦). `renewing` is false once one is inside the days a
+   * renewal should already have happened in.
+   */
+  'domain.status': async ({ deps, args }) => {
+    const projectId = id(args, 'projectId');
+    const checks = await domainChecksFor(deps.db, [projectId]);
+    const [row] = await deps.db
+      .select({ report: observedState.report })
+      .from(projects)
+      .innerJoin(observedState, eq(observedState.serverId, projects.serverId))
+      .where(eq(projects.id, projectId));
+    const served = row?.report.health?.certificates ?? [];
+    const horizon = deps.now().getTime() + CERTIFICATE_WARNING_DAYS * 86_400_000;
+    return checks.map((check) => {
+      const certificate = served.find((c) => c.hosts.includes(check.host));
+      return {
+        ...check,
+        certificate: certificate
+          ? {
+              notAfter: certificate.notAfter,
+              renewing: Date.parse(certificate.notAfter) >= horizon,
+            }
+          : null,
+      };
+    });
+  },
   'secret.list': async ({ deps, args }) => listSecrets(deps.db, id(args, 'projectId')),
   'build.list': async ({ deps, args }) => listBuilds(deps.db, id(args, 'projectId')),
   'project.diagnose': async ({ deps, args }) => {

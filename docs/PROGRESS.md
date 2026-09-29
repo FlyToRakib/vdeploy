@@ -1,7 +1,7 @@
 # VDeploy Implementation Progress
 
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
-**Task:** certificate renewal status, and an alert 21 days out
+**Task:** the break-glass command on the control-plane host
 **Status:** in progress
 **Updated:** 2026-09-30 12:30 UTC
 
@@ -145,7 +145,22 @@ each is one task, one commit.
   every miss; a confirmation that works clears the misses before it. The
   passkey test signs real P-256 assertions, and refuses one that was
   only tapped, one replayed, and a key that is nobody's
-- [ ] certificate renewal status, and an alert 21 days out (§30 ⑦, §18)
+- [x] **certificate renewal status, and an alert 21 days out (§30 ⑦,
+  §18)**. The agent reads the router's own certificate store out of the
+  running router through Docker's copy endpoint — no host path, nothing
+  started — and reports each certificate's names and expiry, and nothing
+  else: the private keys sit in the same file. Each address on the
+  Config screen says "Certificate valid until 3 December 2026. It renews
+  by itself", or, once one is inside 21 days, that it has not renewed
+  and the two usual reasons. Traefik renews at 30 days, so 21 means it
+  has been failing for over a week — which is when a person can still
+  fix it, rather than the morning browsers start warning visitors away.
+  A new notification, "A certificate is not renewing", says so once a
+  day per address; a data migration adds it to every channel that had
+  taken the default triggers, since a channel lists what it subscribed
+  to and a new trigger would otherwise reach nobody already here
+  (channels somebody pared down are left as they chose). The agent's own
+  protocol test caught the new list encoding as null
 - [ ] the break-glass command on the control-plane host (§30 ⑧)
 - [ ] one command to install the control plane, one to upgrade it with a backup first (§34.1)
 - [ ] `vdeploy up` from a local folder (§30 ③)
