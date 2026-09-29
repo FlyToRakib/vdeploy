@@ -262,8 +262,16 @@ export async function storageStatus(
       ? ('temporary' as const)
       : ('unprotected' as const),
   }));
+  const held = observed?.report.health?.folders ?? [];
   return {
-    folders: volumes.map((v) => ({ name: v.name, path: v.mountPath })),
+    folders: volumes.map((v) => ({
+      name: v.name,
+      path: v.mountPath,
+      // What it holds, as the server last measured it, and what it was given.
+      sizeBytes:
+        held.find((f) => f.projectId === project.id && f.name === v.name)?.sizeBytes ?? null,
+      limit: v.size ?? null,
+    })),
     flagged,
     unsaved,
   };

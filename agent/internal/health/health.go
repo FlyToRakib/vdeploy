@@ -69,6 +69,18 @@ type Orphan struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// Folder is how much one app's permanent folder holds (§17.2): watched on
+// its own, because a full folder and a full disk are different emergencies.
+type Folder struct {
+	ProjectID string `json:"projectId"`
+	// Name is the folder's name in the app's spec.
+	Name      string `json:"name"`
+	SizeBytes int64  `json:"sizeBytes"`
+}
+
+// maxFolders is as many as the control plane reads: 200 apps' worth.
+const maxFolders = 200
+
 // Report is one look at what the server is made of.
 type Report struct {
 	At             string                `json:"at"`
@@ -79,6 +91,7 @@ type Report struct {
 	InodesTotal    int64                 `json:"inodesTotal"`
 	Docker         Docker                `json:"docker"`
 	Orphans        protocol.List[Orphan] `json:"orphans"`
+	Folders        protocol.List[Folder] `json:"folders"`
 	// Firewall is what this server's own firewall lets in (§20 Servers).
 	Firewall firewall.Report `json:"firewall"`
 	// Certificates are what the router serves, and until when (§30 ⑦).
@@ -113,6 +126,7 @@ func (r *Reader) Read(ctx context.Context, wanted map[string]bool, now time.Time
 		At:           now.UTC().Format(time.RFC3339),
 		Load:         r.load(),
 		Orphans:      []Orphan{},
+		Folders:      []Folder{},
 		Certificates: []Certificate{},
 	}
 	if r.ACME != nil {
@@ -155,6 +169,13 @@ func (r *Reader) Read(ctx context.Context, wanted map[string]bool, now time.Time
 		project := volume.Labels[compose.ProjectLabel]
 		// Still asked for, or still held by a container: not an orphan.
 		if project == "" || wanted[volume.Name] || volume.InUse > 0 {
+			if project != "" && len(report.Folders) < maxFolders {
+				report.Folders = append(report.Folders, Folder{
+					ProjectID: project,
+					Name:      strings.TrimPrefix(volume.Name, compose.VolumeName(project, "")),
+					SizeBytes: volume.SizeBytes,
+				})
+			}
 			continue
 		}
 		report.Orphans = append(report.Orphans, Orphan{

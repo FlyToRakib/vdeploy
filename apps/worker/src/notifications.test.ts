@@ -476,6 +476,79 @@ describe('notifications', () => {
     expect(body.message).toMatch(/in 12 days/);
     expect(body.message).toMatch(/no longer points at web-1/);
   });
+
+  it('says a permanent folder is nearly as big as it was given, once a day', async () => {
+    await createChannel(
+      t.db,
+      SECRETS,
+      {
+        orgId,
+        name: 'folders',
+        config: { kind: 'webhook', url: 'https://hooks.example.com/f' },
+        triggers: ['folder_filling'],
+      },
+      clock,
+    );
+    const serverId = newId('server');
+    const projectId = newId('project');
+    await t.db.insert(servers).values({ id: serverId, orgId, name: 'web-1', status: 'online' });
+    await t.db.insert(projects).values({
+      id: projectId,
+      orgId,
+      serverId,
+      name: 'shop',
+      specHash: 'x',
+      spec: {
+        apiVersion: 'vdeploy/v1',
+        kind: 'Application',
+        metadata: { name: 'shop', labels: {} },
+        source: { type: 'image', image: 'nginx:1' },
+        build: { strategy: 'image' },
+        runtime: {
+          volumes: [
+            { name: 'media', mountPath: '/app/media', size: '10Gi' },
+            // No size given: only the disk limits it, and the disk is watched.
+            { name: 'cache', mountPath: '/app/cache' },
+          ],
+        },
+      } as never,
+    });
+    const report: ObservedReport = {
+      generation: 1,
+      events: null,
+      projects: [],
+      health: {
+        at: clock.toISOString(),
+        load: { one: 0, five: 0, fifteen: 0, cpus: 1 },
+        swapUsedBytes: 0,
+        swapTotalBytes: 0,
+        inodesUsed: 0,
+        inodesTotal: 0,
+        docker: {
+          imagesBytes: 0,
+          imagesReclaimableBytes: 0,
+          containersBytes: 0,
+          volumesBytes: 0,
+          buildCacheBytes: 0,
+          buildCacheReclaimableBytes: 0,
+          otherBytes: 0,
+        },
+        orphans: [],
+        certificates: [],
+        folders: [
+          { projectId, name: 'media', sizeBytes: 9 * 1024 ** 3 },
+          { projectId, name: 'cache', sizeBytes: 50 * 1024 ** 3 },
+        ],
+      },
+    };
+    await notifyFromReport(t.db, serverId, report, clock);
+    await notifyFromReport(t.db, serverId, report, new Date(clock.getTime() + 3_600_000));
+    await sendDueNotifications(deps());
+    expect(posts).toHaveLength(1);
+    const body = JSON.parse(posts[0]!.body) as { title: string; message: string };
+    expect(body.title).toBe("shop's /app/media is nearly full");
+    expect(body.message).toMatch(/9\.0 GB of the 10Gi/);
+  });
 });
 
 describe('webhook transport', () => {

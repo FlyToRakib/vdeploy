@@ -13,6 +13,7 @@ export const NotificationTrigger = z.enum([
   'backup_missed',
   'backup_failed',
   'disk_filling',
+  'folder_filling',
   'certificate_not_renewing',
   'autoscaled',
 ]);
@@ -35,6 +36,7 @@ export const TRIGGER_LABELS: Record<NotificationTrigger, string> = {
   backup_missed: 'A backup did not happen',
   backup_failed: 'A backup did not work',
   disk_filling: 'A server is running out of disk',
+  folder_filling: 'A permanent folder is nearly as big as it was given',
   certificate_not_renewing: 'A certificate is not renewing',
   autoscaled: "A rule changed an app's size, or the server had no room for it to grow",
 };

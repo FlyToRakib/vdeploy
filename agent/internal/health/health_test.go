@@ -175,3 +175,28 @@ func TestAServerThatWillNotSayWhatItsDiskHoldsStillReportsTheRest(t *testing.T) 
 		t.Fatalf("something was invented: %+v", report)
 	}
 }
+
+func TestEachAppsFolderIsMeasuredOnItsOwn(t *testing.T) {
+	disk := usage()
+	disk.Volumes = append(disk.Volumes, docker.VolumeUsage{
+		Name: compose.VolumeName(live, "media"), SizeBytes: 7 << 30, Labels: managed(live), InUse: 1,
+	})
+	r := reader(t, &fakeEngine{usage: disk})
+	report := r.Read(context.Background(), map[string]bool{compose.VolumeName(live, "media"): true}, time.Now())
+	var media *Folder
+	for i := range report.Folders {
+		if report.Folders[i].Name == "media" {
+			media = &report.Folders[i]
+		}
+	}
+	// Named as the app's spec names it, so the control plane can hold it
+	// up against the size the app was given.
+	if media == nil || media.ProjectID != live || media.SizeBytes != 7<<30 {
+		t.Fatalf("folders = %+v", report.Folders)
+	}
+	for _, f := range report.Folders {
+		if f.ProjectID == gone {
+			t.Fatalf("an orphan was measured as an app's folder: %+v", f)
+		}
+	}
+}

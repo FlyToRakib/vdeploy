@@ -265,7 +265,14 @@ each is one task, one commit.
   (`SESSION_DRIVER=file`), and as an "if" when it cannot tell. Both are
   plan cautions, shown with the risks in the dashboard and the CLI:
   things worth reading first that lose nothing
-- [ ] per-volume usage, and an alert before one fills (§17.2)
+- [x] **per-volume usage, and an alert before one fills (§17.2)**: the
+  agent's health report measures each app's permanent folder on its own,
+  named as the spec names it, and the Files section says what each holds
+  and the size it was given. A folder at 85% of that size is told once a
+  day (`folder_filling`, added to channels that took every default),
+  apart from the disk: nothing stops a folder growing past its size — the
+  disk is the only real limit, shared by every app — so the warning is
+  about the plan being outgrown, and the disk warning about the machine
 - [x] **scheduled clean-up of unused images and build cache (§19)**: once
   a day each connected server is asked to free disk with the same request
   as the button — every version a person could still roll back to is

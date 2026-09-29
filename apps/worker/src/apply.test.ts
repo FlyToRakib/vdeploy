@@ -788,7 +788,10 @@ describe('building from uploaded source', () => {
       .set({ ignoredPaths: ['/app/cache'] })
       .where(eq(projects.id, created!.id));
     const after = await statusOf();
-    expect(after.folders).toEqual([{ name: 'uploads', path: '/app/uploads' }]);
+    expect(after.folders).toEqual([
+      // Not measured yet: the server reports what a folder holds on its own pace.
+      { name: 'uploads', path: '/app/uploads', sizeBytes: null, limit: null },
+    ]);
     expect(after.flagged.map((f) => [f.path, f.status])).toEqual([
       ['/app/uploads', 'permanent'],
       ['/app/cache', 'temporary'],

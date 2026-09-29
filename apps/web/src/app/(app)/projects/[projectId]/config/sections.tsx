@@ -1159,7 +1159,8 @@ export function ServerSection() {
 }
 
 interface StorageStatus {
-  folders: { name: string; path: string }[];
+  /** What each holds as the server last measured it, and the size it was given. */
+  folders: { name: string; path: string; sizeBytes: number | null; limit: string | null }[];
   flagged: { path: string; why: string; status: 'permanent' | 'temporary' | 'unprotected' }[];
   unsaved: { path: string; files: number; status: 'temporary' | 'unprotected' }[];
 }
@@ -1199,9 +1200,15 @@ export function StorageSection() {
       {status && status.folders.length > 0 && (
         <ul className="grid gap-1 text-sm">
           {status.folders.map((f) => (
-            <li key={f.name} className="flex items-center gap-2">
+            <li key={f.name} className="flex flex-wrap items-center gap-2">
               <Status health="healthy">Permanent</Status>
               <span className="font-mono">{f.path}</span>
+              {f.sizeBytes !== null && (
+                <span className="text-muted-foreground">
+                  {f.sizeBytes > 0 ? `holds ${sizeWords(f.sizeBytes)}` : 'empty'}
+                  {f.limit ? `, given ${memoryWords(f.limit)}` : ''}
+                </span>
+              )}
             </li>
           ))}
         </ul>

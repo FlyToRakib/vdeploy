@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   newId,
+  memoryBytes,
   readSpec,
   VDeployError,
   type ChannelConfig,
@@ -307,6 +308,7 @@ export async function notifyFromReport(
   await notifyDiskFilling(db, serverId, report, now);
   await notifyCertificatesNotRenewing(db, serverId, report, now);
   await notifyHealthFailing(db, serverId, report, now);
+  await notifyFoldersFilling(db, serverId, report, now);
   const troubled = (report.projects ?? []).filter((p) =>
     p.evidence?.some((e) => e.oomKilled || e.restarts >= 3),
   );
@@ -357,6 +359,61 @@ export async function notifyFromReport(
     );
   }
 }
+
+/** A permanent folder at this share of the size it was given is told about. */
+export const FOLDER_WARNING_SHARE = 0.85;
+
+/**
+ * A permanent folder nearly as big as its app said it would be (§17.2).
+ * Told once a day while it lasts, separately from the disk: a folder that
+ * outgrows its plan on a roomy disk is still a surprise worth hearing
+ * about, and one that fills the disk takes every other app with it.
+ */
+async function notifyFoldersFilling(
+  db: Executor,
+  serverId: string,
+  report: ObservedReport,
+  now: Date,
+): Promise<void> {
+  const held = report.health?.folders ?? [];
+  if (held.length === 0) return;
+  const rows = await db
+    .select({ id: projects.id, orgId: projects.orgId, name: projects.name, spec: projects.spec })
+    .from(projects)
+    .where(
+      and(
+        eq(projects.serverId, serverId),
+        inArray(projects.id, [...new Set(held.map((f) => f.projectId))]),
+      ),
+    );
+  const day = now.toISOString().slice(0, 10);
+  for (const project of rows) {
+    for (const volume of readSpec(project.spec).runtime.volumes) {
+      const limit = volume.size ? memoryBytes(volume.size) : NaN;
+      const used = held.find(
+        (f) => f.projectId === project.id && f.name === volume.name,
+      )?.sizeBytes;
+      if (!Number.isFinite(limit) || used === undefined || used < limit * FOLDER_WARNING_SHARE) {
+        continue;
+      }
+      await notify(
+        db,
+        project.orgId,
+        {
+          trigger: 'folder_filling',
+          key: `folder:${project.id}:${volume.name}:${day}`,
+          title: `${project.name}'s ${volume.mountPath} is nearly full`,
+          message: `${volume.mountPath} holds ${gb(used)} of the ${volume.size ?? ''} it was given. Nothing stops it growing past that — the server's disk is the only real limit, and every app on it shares that. Clear out what is not needed, or give the folder more room.`,
+          projectId: project.id,
+          serverId,
+        },
+        now,
+      );
+    }
+  }
+}
+
+const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 
 /**
  * An app that runs and answers nobody (§18): every replica is out of the

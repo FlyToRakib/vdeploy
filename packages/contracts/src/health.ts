@@ -116,6 +116,17 @@ export const ServerHealth = z.strictObject({
   inodesTotal: z.number().int().min(0),
   docker: DockerDisk,
   orphans: z.array(OrphanVolume).max(100),
+  /** How much each app's permanent folder holds (§17.2); absent from older agents. */
+  folders: z
+    .array(
+      z.strictObject({
+        projectId: z.string().max(64),
+        name: z.string().max(128),
+        sizeBytes: z.number().int().min(0),
+      }),
+    )
+    .max(200)
+    .optional(),
   /** What the server's own firewall lets in; absent from older agents. */
   firewall: FirewallReport.optional(),
   /** The certificates its router serves; absent from older agents. */
