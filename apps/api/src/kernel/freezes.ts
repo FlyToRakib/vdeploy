@@ -1,5 +1,13 @@
-import { NewDeployFreeze, VDeployError, type OperationName } from '@vdeploy/contracts';
-import { addFreeze, listFreezes, projects, removeFreeze, user } from '@vdeploy/db';
+import { NewDeployFreeze, readSpec, VDeployError, type OperationName } from '@vdeploy/contracts';
+import {
+  addFreeze,
+  bumpDesiredGeneration,
+  listFreezes,
+  plans,
+  projects,
+  removeFreeze,
+  user,
+} from '@vdeploy/db';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Handler } from './context.js';
 
@@ -43,6 +51,52 @@ export const FREEZE_ADMIN: Partial<Record<OperationName, Handler>> = {
       .returning({ id: projects.id });
     if (!unlocked.length) throw new VDeployError('not_found', 'Project not found');
     return { locked: null };
+  },
+  /**
+   * Stops the change being applied to this app (§20). The worker notices
+   * between steps and while it waits on a build or the server, and puts
+   * the version before back if the new one had begun to go live.
+   */
+  'deploy.cancel': async ({ deps, actor, args }) => {
+    const asked = await deps.db
+      .update(plans)
+      .set({ cancelRequestedAt: deps.now() })
+      .where(
+        and(
+          eq(plans.projectId, String(args.projectId)),
+          eq(plans.orgId, actor.orgId),
+          eq(plans.status, 'applying'),
+        ),
+      )
+      .returning({ id: plans.id });
+    if (!asked.length) throw new VDeployError('conflict', 'Nothing is being applied to this app');
+    return { cancelling: asked.map((p) => p.id) };
+  },
+  /** Ends a canary early: the new version takes every request now (§7). */
+  'canary.promote': async ({ deps, actor, args }) => {
+    const [row] = await deps.db
+      .select()
+      .from(projects)
+      .where(
+        and(
+          eq(projects.id, String(args.projectId)),
+          eq(projects.orgId, actor.orgId),
+          isNull(projects.deletedAt),
+        ),
+      );
+    if (!row) throw new VDeployError('not_found', 'Project not found');
+    if (readSpec(row.spec).deploy.strategy !== 'canary' || !row.currentReleaseId) {
+      throw new VDeployError('conflict', 'This app does not roll out as a canary');
+    }
+    if (row.promotedRelease === row.currentReleaseId) return { promoted: row.currentReleaseId };
+    await deps.db.transaction(async (tx) => {
+      await tx
+        .update(projects)
+        .set({ promotedRelease: row.currentReleaseId })
+        .where(eq(projects.id, row.id));
+      if (row.serverId) await bumpDesiredGeneration(tx, row.serverId);
+    });
+    return { promoted: row.currentReleaseId };
   },
   'freeze.add': async ({ deps, actor, args }) =>
     addFreeze(deps.db, actor.orgId, NewDeployFreeze.parse(args), deps.now()),

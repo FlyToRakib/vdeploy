@@ -1611,6 +1611,9 @@
             "type": "string",
             "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$"
           },
+          "promoted": {
+            "type": "boolean"
+          },
           "running": {
             "type": "boolean"
           },

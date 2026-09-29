@@ -39,6 +39,7 @@ import {
   deployments,
   getBuild,
   installationForRepo,
+  plans,
   projects,
   putSecret,
   queueBuild,
@@ -131,12 +132,27 @@ async function change(
   });
 }
 
-async function converge(deps: StepDeps, spec: ApplicationSpec, expected: Expectation) {
+/** Whether a person asked this plan to stop (§20). */
+export async function cancelRequested(deps: Pick<StepDeps, 'db'>, planId: string) {
+  const [row] = await deps.db
+    .select({ at: plans.cancelRequestedAt })
+    .from(plans)
+    .where(eq(plans.id, planId));
+  return !!row?.at;
+}
+
+async function converge(
+  deps: StepDeps,
+  spec: ApplicationSpec,
+  expected: Expectation,
+  planId?: string,
+) {
   const outcome = await waitForConvergence(
     deps.db,
     expected,
     durationMs(spec.deploy.timeout),
     deps.pollMs,
+    planId ? () => cancelRequested(deps, planId) : undefined,
   );
   if (!outcome.ok) {
     // Say the cause, not the symptom (§32): what the agent saw, run through the rules.
@@ -669,6 +685,10 @@ async function buildImage(
       await abandonBuild(deps.db, buildId, deps.now());
       throw new VDeployError('unavailable', 'The build did not finish in time; try again');
     }
+    if (await cancelRequested(deps, state.planId)) {
+      await abandonBuild(deps.db, buildId, deps.now());
+      throw new VDeployError('conflict', 'Cancelled while it was building; nothing went live');
+    }
     await sleep(deps.pollMs);
   }
 }
@@ -737,9 +757,11 @@ async function activateRelease(deps: StepDeps, state: ApplyState, releaseId: str
     .where(and(eq(releases.id, releaseId), eq(releases.projectId, row.id)));
   if (!release) throw new VDeployError('not_found', 'That release no longer exists');
   const spec = readSpec(release.spec);
+  // Going back is going to something that already ran: it takes every
+  // request at once rather than walking a canary back from the new one.
   await deps.db
     .update(projects)
-    .set({ spec, specHash: hashOf(spec), updatedAt: deps.now() })
+    .set({ spec, specHash: hashOf(spec), promotedRelease: release.id, updatedAt: deps.now() })
     .where(eq(projects.id, row.id));
   state.releaseId = release.id;
 }
@@ -763,7 +785,7 @@ async function deploy(deps: StepDeps, state: ApplyState) {
     status: 'running',
     startedAt: deps.now(),
   });
-  const finish = (status: 'succeeded' | 'failed' | 'rolled_back', message?: string) =>
+  const finish = (status: 'succeeded' | 'failed' | 'rolled_back' | 'cancelled', message?: string) =>
     deps.db
       .update(deployments)
       .set({
@@ -787,15 +809,21 @@ async function deploy(deps: StepDeps, state: ApplyState) {
     replicas: row.spec.runtime.replicas,
   };
   try {
-    await converge(deps, row.spec, expected);
+    await converge(deps, row.spec, expected, state.planId);
     await finish('succeeded');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    if (row.spec.deploy.autoRollback && previous && previous !== releaseId) {
+    // Cancelled means "not this one": the version before it takes over,
+    // whatever auto-rollback says, because nobody asked for half a deploy.
+    const cancelled = await cancelRequested(deps, state.planId);
+    if ((row.spec.deploy.autoRollback || cancelled) && previous && previous !== releaseId) {
       await change(deps, row.serverId, (tx) =>
-        tx.update(projects).set({ currentReleaseId: previous }).where(eq(projects.id, row.id)),
+        tx
+          .update(projects)
+          .set({ currentReleaseId: previous, promotedRelease: previous })
+          .where(eq(projects.id, row.id)),
       );
-      await finish('rolled_back', reason);
+      await finish(cancelled ? 'cancelled' : 'rolled_back', reason);
       // One full stop between sentences, whether or not the reason ends with one.
       const said = /[.!?]$/.test(reason) ? reason : `${reason}.`;
       throw new VDeployError('unavailable', `${said} The previous release was restored.`);

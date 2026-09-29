@@ -3,7 +3,7 @@ import { VDeployError, type OperationName } from '@vdeploy/contracts';
 import { buildPlan } from '@vdeploy/core';
 import { appendAudit, approvals, loadPlanWorld, notify, plans, projects } from '@vdeploy/db';
 import { and, desc, eq } from 'drizzle-orm';
-import { runStep, type ApplyState, type StepDeps } from './steps.js';
+import { cancelRequested, runStep, type ApplyState, type StepDeps } from './steps.js';
 
 export interface WorkerDeps extends StepDeps {
   approvalKey: Buffer;
@@ -160,7 +160,13 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
   };
   try {
     await checkApproval(deps, row, fresh);
-    for (const step of row.plan.steps) await runStep(deps, state, step);
+    for (const step of row.plan.steps) {
+      // Between steps is where stopping is clean: nothing is half done.
+      if (await cancelRequested(deps, row.id)) {
+        throw new VDeployError('conflict', 'Cancelled before it finished');
+      }
+      await runStep(deps, state, step);
+    }
   } catch (error) {
     if (!(error instanceof VDeployError)) deps.logError(error, row.id);
     const code = error instanceof VDeployError ? error.code : 'internal';

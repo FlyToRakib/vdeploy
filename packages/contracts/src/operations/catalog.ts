@@ -801,6 +801,22 @@ export const OPERATIONS = [
     obj({ freezeId: idSchema('deployFreeze') }),
     { minRole: 'admin' },
   ),
+  // Stopping a change half-way and skipping a canary's steps are a person's
+  // calls: each overrides a safeguard somebody set up on purpose.
+  operation(
+    'deploy.cancel',
+    'human_only',
+    'project',
+    'Stop the change being applied to this app; if it had begun to go live, the version before it takes over again',
+    obj(P),
+  ),
+  operation(
+    'canary.promote',
+    'human_only',
+    'project',
+    "Give the new version every request now, without waiting out the canary's steps",
+    obj(P),
+  ),
   // A clone is a new app, made from this one: scoped to the app it copies,
   // and to admins, because it copies the app's keys with it.
   operation(

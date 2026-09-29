@@ -620,6 +620,35 @@ describe('the gate', () => {
     expect((await setting('d')).statusCode).toBe(202);
   });
 
+  it('ends a canary early for a person, and cancels only what is running', async () => {
+    const projectId = await seedProject(orgId, 'walking');
+    const notCanary = await op(owner, 'canary.promote', { projectId });
+    expect(notCanary.statusCode).toBe(409);
+
+    const canary = {
+      ...spec,
+      deploy: {
+        ...spec.deploy,
+        strategy: 'canary' as const,
+        canary: { steps: [10, 50], stepDuration: '10m', autoRollbackErrorRate: 0.05 },
+      },
+    };
+    await t.database.db
+      .update(projects)
+      .set({ spec: canary, specHash: hashOf(canary) })
+      .where(eq(projects.id, projectId));
+    const promoted = await op(owner, 'canary.promote', { projectId });
+    expect(promoted.statusCode).toBe(200);
+    const [row] = await t.database.db.select().from(projects).where(eq(projects.id, projectId));
+    expect(row?.promotedRelease).toBe(row?.currentReleaseId);
+
+    const nothing = await op(owner, 'deploy.cancel', { projectId });
+    expect(nothing.statusCode).toBe(409);
+    expect(nothing.json<{ error: { message: string } }>().error.message).toBe(
+      'Nothing is being applied to this app',
+    );
+  });
+
   it('ends the sessions of someone whose role changes', async () => {
     const developer = await member('developer', 'dev@example.com');
     const [devMember] = await t.database.db

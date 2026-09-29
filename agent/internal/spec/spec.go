@@ -150,7 +150,10 @@ type DesiredProject struct {
 	// different name (ADR 0021). The agent still runs only images it
 	// built itself — this says which of its own records may vouch.
 	ImageFrom string `json:"imageFrom,omitempty"`
-	Running   bool   `json:"running"`
+	// Promoted takes every request at once, whatever the canary says: a
+	// person ended it early, or this is a release gone back to (§7).
+	Promoted bool `json:"promoted,omitempty"`
+	Running  bool `json:"running"`
 	// Revision is bumped to replace every container without a new release.
 	Revision int `json:"revision"`
 	// Hosts the control plane assigned beyond the spec's own domains.

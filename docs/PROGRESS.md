@@ -289,7 +289,19 @@ each is one task, one commit.
   week
 
 **The manual control surface (§20, §24, §25)**
-- [ ] cancel a deploy, and promote a canary early (§7, §20)
+- [x] **cancel a deploy, and promote a canary early (§7, §20)**: a person
+  can stop a change being applied — the worker notices between steps and
+  while it waits on a build or the server, abandons the build, and puts
+  the version before back if the new one had begun to go live, whatever
+  auto-rollback says. And a canary can be given every request at once.
+  Found on the way: the control plane ignored the agent's
+  `canary_failed`, so after the agent sent every visitor back to the old
+  version the dashboard still showed the new one as live and the next
+  change was planned on top of it. It now makes the version before
+  current again and tells whoever hears about failed deploys. A release
+  gone back to — by a failed canary, a rollback or a cancel — takes every
+  request at once (`promoted` in the desired state): walking a canary
+  back from the version that failed would have left most visitors on it
 - [x] **deploy locks and freeze windows (§20)**: a lock holds one app,
   with a reason and the name of whoever set it; a freeze holds the whole
   organization, once between two moments or every week in a window. While

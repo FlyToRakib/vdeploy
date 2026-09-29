@@ -32,11 +32,14 @@ export interface ProjectRow {
   spec: {
     source: { type: string; repo?: string; branch?: string };
     build?: { strategy: string; builder?: string };
+    deploy?: { strategy: string };
     network?: { containerPort: number };
     runtime: { replicas: number; volumes: { name: string; mountPath: string }[] };
   };
   /** Set while nothing new may go live for this app (§20). */
   deployLock: { reason: string; by: string; at: string } | null;
+  /** The release that takes every request at once, when there is one (§7). */
+  promotedRelease: string | null;
 }
 
 interface ProjectContextValue {

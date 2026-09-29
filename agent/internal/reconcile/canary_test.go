@@ -190,3 +190,17 @@ func TestSharesAreWalkedInOrderAndAlwaysEndAtEverything(t *testing.T) {
 		t.Fatalf("shares = %v", got)
 	}
 }
+
+func TestAPromotedReleaseTakesEverythingAtOnce(t *testing.T) {
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	r := canaryReconciler(&fakeTraffic{}, &now)
+	project := canaryProject([]int{10, 50}, "10m", 0.05)
+	if v := r.stepCanary(project, "svc"); v.Percent != 10 {
+		t.Fatalf("first look = %+v", v)
+	}
+	// A person ended it early, or this is a release gone back to: no walk.
+	project.Promoted = true
+	if v := r.stepCanary(project, "svc"); !v.Done || v.Percent != 100 {
+		t.Fatalf("promoted = %+v", v)
+	}
+}

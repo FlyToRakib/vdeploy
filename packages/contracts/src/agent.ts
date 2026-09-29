@@ -51,6 +51,11 @@ export const DesiredProject = z.strictObject({
    * never does is accept an id it has no record of building.
    */
   imageFrom: idSchema('project').optional(),
+  /**
+   * This release takes every request at once, whatever the spec's canary
+   * says (§7): promoted early by a person, or a release gone back to.
+   */
+  promoted: z.boolean().optional(),
   /** False keeps the project defined but stopped (`project.stop`). */
   running: z.boolean(),
   /**

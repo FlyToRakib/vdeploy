@@ -291,6 +291,18 @@ describe('applyPlan', () => {
     expect(placed?.serverId).toBe(serverId);
   });
 
+  it('stops a change a person cancelled, and says so', async () => {
+    const created = await createProject();
+    const row = await plan('env.set', { projectId: created.id, key: 'MODE', value: 'fast' });
+    // Asked while it was applying: the worker looks between steps.
+    await t.db.update(plans).set({ cancelRequestedAt: new Date() }).where(eq(plans.id, row.id));
+    expect(await applyPlan(deps, row.id)).toBe('failed');
+    const [stopped] = await t.db.select().from(plans).where(eq(plans.id, row.id));
+    expect(stopped?.error?.message).toBe('Cancelled before it finished');
+    const [unchanged] = await t.db.select().from(projects).where(eq(projects.id, created.id));
+    expect(unchanged?.currentReleaseId).toBe(created.currentReleaseId);
+  });
+
   it('creates, releases and deploys a new project, pinned by digest', async () => {
     const created = await createProject();
     const [release] = await t.db.select().from(releases).where(eq(releases.projectId, created.id));

@@ -63,6 +63,24 @@ export function Deployments() {
   const [deployments, setDeployments] = useState<Deployment[] | null>(null);
   const [versions, setVersions] = useState(new Map<string, number>());
   const [open, setOpen] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+
+  // A change being applied to this app right now, which a person may stop.
+  useEffect(() => {
+    const live = { current: true };
+    void fetch('/api/v1/plans?status=applying')
+      .then((res) => (res.ok ? (res.json() as Promise<{ projectId: string | null }[]>) : []))
+      .then(
+        (list) => {
+          if (live.current) setApplying(list.some((p) => p.projectId === projectId));
+        },
+        () => undefined,
+      );
+    return () => {
+      live.current = false;
+    };
+  }, [projectId, row.currentReleaseId, deployments]);
+  const walking = row.spec.deploy?.strategy === 'canary';
 
   useEffect(() => {
     void Promise.all([
@@ -89,6 +107,24 @@ export function Deployments() {
   }
   return (
     <ul className="grid gap-3">
+      {applying && (
+        <li>
+          <Card className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm">A change is being applied to this app now.</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                void act('deploy.cancel', { projectId }, 'Cancelling').then(() => {
+                  setApplying(false);
+                })
+              }
+            >
+              Cancel it
+            </Button>
+          </Card>
+        </li>
+      )}
       {deployments.map((d) => {
         const version = d.releaseId ? versions.get(d.releaseId) : undefined;
         const current = d.releaseId === row.currentReleaseId;
@@ -116,6 +152,24 @@ export function Deployments() {
                 >
                   {open === d.id ? 'Hide the build log' : 'Show the build log'}
                 </Button>
+                {current &&
+                  walking &&
+                  d.status === 'succeeded' &&
+                  row.promotedRelease !== d.releaseId && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        void act(
+                          'canary.promote',
+                          { projectId },
+                          'Giving the new version every request',
+                        ).then(reload)
+                      }
+                    >
+                      Give it every request now
+                    </Button>
+                  )}
                 {canReturn && (
                   <Button
                     size="sm"

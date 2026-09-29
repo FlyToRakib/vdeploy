@@ -90,7 +90,7 @@ half-finished belief across the gap.
 */
 func (r *Reconciler) stepCanary(project spec.DesiredProject, service string) CanaryVerdict {
 	shares := canaryShares(project)
-	if len(shares) == 0 {
+	if len(shares) == 0 || project.Promoted {
 		return CanaryVerdict{Percent: 100, Done: true}
 	}
 	state, seen := r.canaries[project.ProjectID]

@@ -162,6 +162,13 @@ export const projects = pgTable(
     ignoredPaths: jsonb('ignored_paths').$type<string[]>().notNull().default([]),
     /** Set while nothing new may go live for this app, and why (§20). */
     deployLock: jsonb('deploy_lock').$type<DeployLock>(),
+    /**
+     * A release that goes live at once, without a canary's steps (§7, §20):
+     * one a person promoted early, or one gone back to — an earlier
+     * version has already proved itself, and walking back to it slowly
+     * would leave most visitors on the one that failed.
+     */
+    promotedRelease: text('promoted_release'),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -238,6 +245,8 @@ export const plans = pgTable(
     tainted: boolean('tainted').notNull().default(false),
     error: jsonb('error').$type<{ code: string; message: string }>(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** A person asked this plan to stop while it was applying (§20). */
+    cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -35,9 +35,11 @@ export async function waitForConvergence(
   expected: Expectation,
   timeoutMs: number,
   pollMs = 500,
+  stopped: () => Promise<boolean> = () => Promise.resolve(false),
 ): Promise<Outcome> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    if (await stopped()) return { ok: false, reason: 'It was cancelled before it finished' };
     const [row] = await db
       .select()
       .from(observedState)

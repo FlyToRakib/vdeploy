@@ -31,3 +31,4 @@ export * from './summaries.js';
 export * from './ai-context.js';
 export * from './ai.js';
 export * from './freezes.js';
+export * from './canary.js';

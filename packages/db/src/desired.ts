@@ -144,6 +144,7 @@ export async function desiredStateFor(
         spec: { ...spec, runtime: { ...spec.runtime, replicas: live.runtime.replicas } },
         image: release.image,
         ...(builtFor && builtFor !== project.id ? { imageFrom: builtFor } : {}),
+        ...(project.promotedRelease === release.id ? { promoted: true } : {}),
         running: project.running,
         revision: project.revision,
         hosts: {

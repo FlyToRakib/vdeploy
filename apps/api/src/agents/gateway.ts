@@ -68,6 +68,7 @@ import {
   observedState,
   readSecret,
   recordEvents,
+  recordFailedCanaries,
   recordUsage,
   recordUptime,
   notifyBackupResult,
@@ -1430,6 +1431,8 @@ export class Gateway
           set: { generation: frame.report.generation, report: frame.report, receivedAt: now() },
         });
       await recordEvents(db, serverId, frame.report.events ?? [], now());
+      // A canary the agent stopped is a release that is no longer live (§7).
+      await recordFailedCanaries(db, serverId, frame.report.events ?? [], now());
       // What the server and its apps are actually using (§27).
       await recordUsage(db, serverId, frame.report, now());
       // And when each one began or stopped serving (§18) — only the changes.
