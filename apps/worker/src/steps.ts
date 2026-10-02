@@ -789,6 +789,16 @@ async function activateRelease(deps: StepDeps, state: ApplyState, releaseId: str
   state.releaseId = release.id;
 }
 
+/** The operations that put new code online, and so start a stopped app. */
+const SHIPS = new Set([
+  'project.create',
+  'project.deploy_upload',
+  'project.deploy_commit',
+  'project.redeploy',
+  'project.rebuild',
+  'staging.promote',
+]);
+
 /**
  * Switches the project to the release and waits until the agent runs it.
  * If it never becomes healthy and auto-rollback is on, the previous release
@@ -796,6 +806,10 @@ async function activateRelease(deps: StepDeps, state: ApplyState, releaseId: str
  */
 async function deploy(deps: StepDeps, state: ApplyState) {
   const row = await project(deps, state);
+  // Seen live: an env var set on a stopped app started it again. Shipping
+  // code is asking for it to run; a change of settings is not, and waits
+  // for the next start.
+  const running = row.running || SHIPS.has(state.operation);
   const previous = row.currentReleaseId;
   const releaseId = state.releaseId ?? previous;
   if (!releaseId) throw new VDeployError('conflict', 'There is no release to deploy');
@@ -821,7 +835,7 @@ async function deploy(deps: StepDeps, state: ApplyState) {
   const generation = await change(deps, row.serverId, (tx) =>
     tx
       .update(projects)
-      .set({ currentReleaseId: releaseId, running: true, updatedAt: deps.now() })
+      .set({ currentReleaseId: releaseId, running, updatedAt: deps.now() })
       .where(eq(projects.id, row.id)),
   );
   const expected = {
@@ -829,7 +843,7 @@ async function deploy(deps: StepDeps, state: ApplyState) {
     projectId: row.id,
     generation,
     releaseId,
-    replicas: row.spec.runtime.replicas,
+    replicas: running ? row.spec.runtime.replicas : 0,
   };
   try {
     await converge(deps, row.spec, expected, state.planId);

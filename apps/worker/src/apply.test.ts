@@ -400,6 +400,13 @@ describe('applyPlan', () => {
     expect(await run('project.scale', { replicas: 1 })).toBe('applied');
     expect(await run('project.stop')).toBe('applied');
     expect((await project(created.id)).running).toBe(false);
+    // A change of settings on a stopped app is kept for its next start,
+    // not a reason to start it; new code is.
+    expect(await run('env.set', { key: 'MODE', value: 'quiet' })).toBe('applied');
+    expect((await project(created.id)).running).toBe(false);
+    expect(await run('project.redeploy')).toBe('applied');
+    expect((await project(created.id)).running).toBe(true);
+    expect(await run('project.stop')).toBe('applied');
     expect(await run('project.start')).toBe('applied');
     expect((await project(created.id)).running).toBe(true);
   });
