@@ -185,7 +185,7 @@ func (p *pass) moving(project spec.DesiredProject) bool {
 
 // stopOld stops an old replica without removing it: its files are still needed.
 func (p *pass) stopOld(ctx context.Context, c docker.Container) {
-	if c.State != "running" {
+	if !live(c.State) {
 		return
 	}
 	if err := p.r.Engine.Stop(ctx, c.ID, 30); err != nil {

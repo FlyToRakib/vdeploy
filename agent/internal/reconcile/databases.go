@@ -60,7 +60,7 @@ func (p *pass) convergeDatabase(ctx context.Context, d spec.DesiredDatabase, c c
 	engine := p.r.Engine
 	existing, running := p.existing[c.Name]
 	if !d.Running {
-		if running && existing.State == "running" {
+		if running && live(existing.State) {
 			if err := engine.Stop(ctx, existing.ID, c.StopTimeout); err != nil {
 				return fmt.Errorf("stop %s: %w", c.Name, err)
 			}

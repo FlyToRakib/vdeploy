@@ -473,7 +473,7 @@ func (p *pass) stopAll(ctx context.Context, projectID string, containers []compo
 	var errs []error
 	for _, c := range containers {
 		existing, ok := p.existing[c.Name]
-		if !ok || existing.State != "running" {
+		if !ok || !live(existing.State) {
 			continue
 		}
 		if err := p.r.Engine.Stop(ctx, existing.ID, c.StopTimeout); err != nil {
@@ -487,13 +487,21 @@ func (p *pass) stopAll(ctx context.Context, projectID string, containers []compo
 	return errors.Join(errs...)
 }
 
+// live is whether a container must be stopped before it is gone. One that
+// keeps crashing under its restart policy is "restarting", not "running" —
+// and Docker refuses to remove it just the same.
+func live(state string) bool {
+	return state == "running" || state == "restarting"
+}
+
 func (p *pass) remove(ctx context.Context, c docker.Container) {
 	projectID := c.Labels[compose.ProjectLabel]
-	if c.State == "running" {
-		if err := p.r.Engine.Stop(ctx, c.ID, 30); err != nil {
-			p.event("failed", projectID, c.Name, "stop: "+err.Error())
-			return
-		}
+	// Always stopped first, whatever the pass saw: a crashing replica is
+	// up again between one look and the next. Stopping a stopped one is a
+	// no-op (304), and without the stop Docker answers 409.
+	if err := p.r.Engine.Stop(ctx, c.ID, 30); err != nil {
+		p.event("failed", projectID, c.Name, "stop: "+err.Error())
+		return
 	}
 	if err := p.r.Engine.Remove(ctx, c.ID); err != nil {
 		p.event("failed", projectID, c.Name, "remove: "+err.Error())

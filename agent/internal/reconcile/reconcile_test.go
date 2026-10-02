@@ -130,6 +130,10 @@ func (f *fakeEngine) Stop(_ context.Context, id string, _ int) error {
 }
 
 func (f *fakeEngine) Remove(_ context.Context, id string) error {
+	// As Docker does: a container still up, or crashing back up, is refused.
+	if state := f.containers[id].State; state == "running" || state == "restarting" {
+		return fmt.Errorf("409 cannot remove container: container is %s", state)
+	}
 	f.calls = append(f.calls, "remove "+f.containers[id].Name)
 	delete(f.containers, id)
 	return nil
@@ -297,6 +301,37 @@ func TestNewReleaseReplacesOldContainersAfterStartingNewOnes(t *testing.T) {
 	stopped := slices.IndexFunc(engine.calls, func(c string) bool { return strings.HasPrefix(c, "stop") })
 	if started < 0 || stopped < 0 || started > stopped {
 		t.Fatalf("the new release must start before the old one stops: %v", engine.calls)
+	}
+}
+
+// Seen live: an app that crashes on start sits in Docker's "restarting"
+// state, and removing it without a stop failed with a 409 — leaving every
+// failed release crash-looping on the server.
+func TestACrashingReplicaIsStoppedBeforeItIsRemoved(t *testing.T) {
+	engine := newFake()
+	r := newReconciler(engine)
+	reconcile(t, r, desired(1, testProject(idA, 1, 1)))
+	for _, c := range engine.containers {
+		c.State = "restarting"
+	}
+	settle(t, r, desired(2, testProject(idA, 2, 1)))
+	for _, c := range engine.containers {
+		if strings.Contains(c.Name, "-v1-") {
+			t.Fatalf("the crashing old release is still there: %v", engine.calls)
+		}
+	}
+
+	// Stopping a project stops a crashing replica too.
+	p := testProject(idA, 2, 1)
+	for _, c := range engine.containers {
+		c.State = "restarting"
+	}
+	p.Running = false
+	reconcile(t, r, desired(3, p))
+	for _, c := range engine.containers {
+		if c.State != "exited" {
+			t.Fatalf("%s is %s after its project was stopped", c.Name, c.State)
+		}
 	}
 }
 
