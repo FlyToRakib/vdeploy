@@ -3,7 +3,54 @@
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
 **Task:** `vdeploy up` from a local folder, then routing
 **Status:** in progress
-**Updated:** 2026-09-30 12:30 UTC
+**Updated:** 2026-10-02 16:15 UTC
+
+## First live deployment — 2026-10-02
+
+VDeploy installed for real on the shared production VPS, next to the
+seventeen containers already serving there, and used to deploy an app
+it had never seen. Every step was done the way a user would do it: the
+installer, the upgrade command, the agent's one-command install, `vdeploy
+up` from a laptop with an API key made in the dashboard.
+
+- **The control plane** runs as its compose project, behind the
+  server's own nginx (one new vhost, its own Let's Encrypt lineage;
+  renewal dry-run passed), on a real domain. Upgraded twice in place
+  with `vdeploy.sh upgrade --no-pull --no-build` from images shipped
+  with `docker save | ssh docker load`; each upgrade took a database
+  backup first.
+- **The agent** enrolled with `--behind-proxy 127.0.0.1:18080`: its router
+  binds loopback only and nginx keeps 80/443. After the second upgrade
+  it **updated itself** to the build the control plane serves, checksum
+  for checksum, and reconnected within a second.
+- **The app** (a pnpm workspace with a desktop-only design) uploaded as
+  233 files — its git-ignored 577 MB data folder left out — built, and
+  was correctly caught failing: it keeps its key in the OS keychain,
+  which a container has not got, and refuses any address but loopback.
+  Neither is VDeploy's to fix; the app's code was not touched.
+- **Production unaffected**, checked against the snapshot taken before:
+  every pre-existing container has the same ID and start time (two
+  were redeployed by their owner in between), every site answers as it
+  did, UFW and the services are unchanged, and the only nginx and
+  certificate changes are the ones asked for.
+
+Found by doing it, each fixed, tested and shipped to the same server:
+
+- [x] no way to run behind an existing web server (`--behind-proxy`);
+- [x] the daily disk reclaim removed other apps' untagged images and the
+  daemon's build cache — now only images the agent built;
+- [x] an upload ignored `.gitignore`, and would have sent the app's
+  private data folder;
+- [x] API keys could not be made from the dashboard;
+- [x] a new installation was owned by whoever opened it first — it now
+  asks for a setup code the installer writes on the server;
+- [x] a crash was explained with pnpm's wrapper lines ("Exit status 1")
+  instead of the app's own fatal log line, and said "exit code ?";
+- [x] a crash-looping replica (Docker's `restarting`) was never stopped,
+  so removing it failed with a 409 and every failed release kept
+  restarting on the server;
+- [x] CI had gone red on three pushes (two stale assertions, a slept-on
+  race, the 5 s default timeout) without it being noticed.
 
 ## v1 completion — what the audit found
 
@@ -1319,7 +1366,6 @@ GitHub.
 
 - **An AI provider key** (Anthropic) to finish the M3 exit: the assistant half of the eval. Put it in `.vdeploy-local/ai.env` as `ANTHROPIC_API_KEY=…`, never in chat. The run costs a few cents and touches nothing outside a throwaway test database.
 - **GitHub App credentials** for the live check of 2.15 (the code is done and tested against a stand-in). Create the app on github.com (webhook URL `<PUBLIC_URL>/api/v1/github/webhook`, content type JSON, callback `<PUBLIC_URL>/api/v1/github/callback`, "Request user authorization (OAuth) during installation" on; permissions: Contents read, Metadata read; events: Push). Then put GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_WEBHOOK_SECRET, GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in `.vdeploy-local/github.env`, and the private key in `.vdeploy-local/github-app.pem`, never in chat.
-- For real HTTPS on the test VPS (2.17): a way to receive ports 80/443 that does not touch production nginx. Until then the testbed uses a local ACME test server (Pebble).
 
 ## Environment
 
