@@ -3,7 +3,7 @@
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
 **Task:** `vdeploy up` from a local folder, then routing
 **Status:** in progress
-**Updated:** 2026-10-02 16:15 UTC
+**Updated:** 2026-10-03 18:10 UTC
 
 ## First live deployment — 2026-10-02
 
@@ -27,7 +27,11 @@ up` from a laptop with an API key made in the dashboard.
   233 files — its git-ignored 577 MB data folder left out — built, and
   was correctly caught failing: it keeps its key in the OS keychain,
   which a container has not got, and refuses any address but loopback.
-  Neither is VDeploy's to fix; the app's code was not touched.
+  Neither is VDeploy's to fix; the app's code was not touched. A copy
+  of it, changed to accept one public address, then went **live behind
+  VDeploy's password middleware**: every path answers 401 without it, the
+  key arrives as a secret, its database sits on a VDeploy volume, and
+  the agent reports it ready with nothing to diagnose.
 - **Production unaffected**, checked against the snapshot taken before:
   every pre-existing container has the same ID and start time (two
   were redeployed by their owner in between), every site answers as it
@@ -50,7 +54,12 @@ Found by doing it, each fixed, tested and shipped to the same server:
   so removing it failed with a 409 and every failed release kept
   restarting on the server;
 - [x] CI had gone red on three pushes (two stale assertions, a slept-on
-  race, the 5 s default timeout) without it being noticed.
+  race, the 5 s default timeout) without it being noticed;
+- [x] a change of settings on a stopped app (an env var, a volume, a
+  password) deployed it and started it again — now only shipping code
+  starts it, so a stopped app can be made ready before it goes live;
+- [x] an uncaught error was reported by the frames under it ("at async
+  onImport… ⏎ Node.js v22") instead of its "Error: …" line.
 
 ## v1 completion — what the audit found
 
