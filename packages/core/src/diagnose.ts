@@ -78,6 +78,35 @@ const OUTPUT_RULES: {
   },
 ];
 
+/**
+ * What a package manager or shell prints around a crash: never the cause.
+ * pnpm's "ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL … Exit status 1" comes after
+ * the app's own last words, and would otherwise be all anyone was shown.
+ */
+const WRAPPER =
+  /^(?:\[?ERR_PNPM_\w+\]?|\[?ELIFECYCLE\]?|Exit status \d+|npm (?:ERR!|error)|error Command failed with exit code|info Visit https:\/\/yarnpkg|\$ |> |\/\S*:$)/;
+
+/** A structured log line read as its message; any other line as it is. */
+function readable(line: string): string {
+  const text = line.trim();
+  if (!text.startsWith('{')) return text;
+  try {
+    const entry = JSON.parse(text) as { msg?: unknown; message?: unknown };
+    const said = entry.msg ?? entry.message;
+    if (typeof said === 'string') return (said.split('\n')[0] ?? said).trim();
+  } catch {
+    // Not JSON after all: shown as it is.
+  }
+  return text;
+}
+
+/** The app's own last words, each once, without its package manager's wrapping. */
+function lastWords(output: string): string {
+  const lines = output.split('\n').map(readable).filter(Boolean);
+  const own = lines.filter((line) => !WRAPPER.test(line));
+  return [...new Set(own.length > 0 ? own : lines)].slice(-3).join(' ⏎ ').slice(0, 400);
+}
+
 /** What the agent's evidence says about why the app is not serving. */
 export function diagnose(input: DiagnosisInput): Diagnosis[] {
   const found: Diagnosis[] = [];
@@ -101,21 +130,23 @@ export function diagnose(input: DiagnosisInput): Diagnosis[] {
     const exited = !RUNNING.has(replica.state) || replica.exitCode !== null;
     if (exited || replica.restarts >= 3) {
       const output = replica.lastOutput;
+      // A container between restarts has no exit code to report yet.
+      const code = replica.exitCode === null ? '' : ` with exit code ${replica.exitCode}`;
       const rule = OUTPUT_RULES.map((r) => ({ r, m: output.match(r.pattern) })).find((x) => x.m);
       if (rule?.m) {
         add({
           condition: rule.r.condition,
-          detected: `the app stopped (exit ${replica.exitCode ?? '?'}) and its last output matches a known cause`,
+          detected: `the app stopped${code} and its last output matches a known cause`,
           plain: rule.r.plain(rule.m),
           fix: rule.r.fix(rule.m),
           confidence: 'high',
           risk: 'none — your app is already stopping',
         });
       } else {
-        const tail = output.trim().split('\n').slice(-3).join(' ⏎ ').slice(0, 400);
+        const tail = lastWords(output);
         add({
           condition: 'crash_loop',
-          detected: `the app stopped with exit code ${replica.exitCode ?? '?'} after ${replica.restarts} restarts`,
+          detected: `the app stopped${code} after ${replica.restarts} restarts`,
           plain: `Your app keeps stopping right after it starts. The last thing it said was: ${tail || '(nothing)'}`,
           fix: 'That last message usually names what is wrong; fix it in the app and deploy again.',
           confidence: 'medium',

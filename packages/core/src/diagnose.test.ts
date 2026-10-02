@@ -100,6 +100,38 @@ describe('diagnose', () => {
     expect(d?.plain).toMatch(/something odd/);
   });
 
+  it("quotes the app's own last words, not its package manager's wrapping", () => {
+    // What sopost-web printed on each restart, live: pnpm's lines come last.
+    const once = [
+      '$ pnpm --filter @sopost/server start',
+      '$ tsx src/index.ts',
+      '{"level":60,"pid":59,"msg":"Couldn\'t access platform storage: PermissionDenied\\n\\nCaused by:\\n    PermissionDenied"}',
+      '/app/apps/server:',
+      '[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @sopost/server@1.0.0 start: `tsx src/index.ts`',
+      'Exit status 1',
+      '[ELIFECYCLE] Command failed with exit code 1.',
+    ].join('\n');
+    const [d] = diagnose({
+      containerPort: 4545,
+      memoryLimit: '512Mi',
+      evidence: [replica({ state: 'restarting', restarts: 8, lastOutput: `${once}\n${once}\n` })],
+    });
+    expect(d?.plain).toBe(
+      "Your app keeps stopping right after it starts. The last thing it said was: Couldn't access platform storage: PermissionDenied",
+    );
+    expect(d?.detected).toBe('the app stopped after 8 restarts');
+  });
+
+  it('shows the wrapping when it is all there is, and names a known exit code', () => {
+    const [d] = diagnose({
+      containerPort: 3000,
+      memoryLimit: '512Mi',
+      evidence: [replica({ state: 'exited', exitCode: 1, lastOutput: 'Exit status 1\n' })],
+    });
+    expect(d?.plain).toMatch(/said was: Exit status 1$/);
+    expect(d?.detected).toBe('the app stopped with exit code 1 after 0 restarts');
+  });
+
   it('reports each cause once across replicas', () => {
     const same = replica({ listening: ['127.0.0.1:3000'] });
     expect(
