@@ -26,7 +26,10 @@ afterAll(async () => {
 describe('first-run setup', () => {
   it('creates the owner and the first organization exactly once', async () => {
     const browser = new Browser(t.app);
-    expect((await browser.request('GET', '/api/v1/setup')).json()).toEqual({ needed: true });
+    expect((await browser.request('GET', '/api/v1/setup')).json()).toEqual({
+      needed: true,
+      codeRequired: false,
+    });
 
     const res = await browser.request('POST', '/api/v1/setup', {
       ...OWNER,
@@ -51,7 +54,10 @@ describe('first-run setup', () => {
       organization: 'Evil',
     });
     expect(again.statusCode).toBe(409);
-    expect((await browser.request('GET', '/api/v1/setup')).json()).toEqual({ needed: false });
+    expect((await browser.request('GET', '/api/v1/setup')).json()).toEqual({
+      needed: false,
+      codeRequired: false,
+    });
   });
 
   it('stores passwords with Argon2id', async () => {

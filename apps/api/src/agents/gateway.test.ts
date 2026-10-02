@@ -369,18 +369,24 @@ describe('agent channel', () => {
       accepted: false,
       error: 'registry not allowed',
     });
-    await new Promise((r) => setTimeout(r, 300));
 
+    // Waited for, not slept on: a slow CI machine took longer than 300 ms.
+    const refusals = () =>
+      t.database.db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.action, 'agent.refused'), eq(auditLog.target, agent.serverId)));
+    let refused = await refusals();
+    for (let i = 0; i < 50 && refused.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      refused = await refusals();
+    }
+    expect(refused[0]?.details).toMatchObject({ error: 'registry not allowed' });
     const [observed] = await t.database.db
       .select()
       .from(observedState)
       .where(eq(observedState.serverId, agent.serverId));
     expect(observed?.generation).toBe(1);
-    const refused = await t.database.db
-      .select()
-      .from(auditLog)
-      .where(and(eq(auditLog.action, 'agent.refused'), eq(auditLog.target, agent.serverId)));
-    expect(refused[0]?.details).toMatchObject({ error: 'registry not allowed' });
 
     fake.close();
     await new Promise((r) => setTimeout(r, 300));
