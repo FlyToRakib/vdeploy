@@ -122,6 +122,31 @@ describe('diagnose', () => {
     expect(d?.detected).toBe('the app stopped after 8 restarts');
   });
 
+  it('quotes the error an uncaught exception names, not the frames under it', () => {
+    // What the same app printed when its own config check threw, live.
+    const output = [
+      'file:///app/apps/server/src/config/env.ts:43',
+      '  throw new Error(`HOST must be a loopback address. Got "${env.HOST}".`);',
+      '        ^',
+      '',
+      'Error: HOST must be a loopback address (127.0.0.1, localhost or ::1). Got "0.0.0.0".',
+      '    at file:///app/apps/server/src/config/env.ts:43:9',
+      '    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)',
+      '    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)',
+      '    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)',
+      '',
+      'Node.js v22.23.2',
+    ].join('\n');
+    const [d] = diagnose({
+      containerPort: 4545,
+      memoryLimit: '512Mi',
+      evidence: [replica({ state: 'restarting', restarts: 4, lastOutput: output })],
+    });
+    expect(d?.plain).toBe(
+      'Your app keeps stopping right after it starts. The last thing it said was: Error: HOST must be a loopback address (127.0.0.1, localhost or ::1). Got "0.0.0.0".',
+    );
+  });
+
   it('shows the wrapping when it is all there is, and names a known exit code', () => {
     const [d] = diagnose({
       containerPort: 3000,

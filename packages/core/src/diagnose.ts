@@ -100,10 +100,22 @@ function readable(line: string): string {
   return text;
 }
 
+/**
+ * The frames under an uncaught error, and the runtime's sign-off after it.
+ * Seen live: "at async onImport… ⏎ Node.js v22.23.2" was all that was shown,
+ * the "Error: …" line saying what was wrong three lines further up.
+ */
+const STACK = /^(?:at |Node\.js v\d|\^+$|Traceback \(most recent call last\)|File ".*", line \d)/;
+
+/** A line that names an error: the one to show when there is one. */
+const NAMES_ERROR = /^(?:Uncaught )?[\w.]*(?:Error|Exception)\b(?::|$)/;
+
 /** The app's own last words, each once, without its package manager's wrapping. */
 function lastWords(output: string): string {
   const lines = output.split('\n').map(readable).filter(Boolean);
-  const own = lines.filter((line) => !WRAPPER.test(line));
+  const own = lines.filter((line) => !WRAPPER.test(line) && !STACK.test(line));
+  const error = own.findLast((line) => NAMES_ERROR.test(line));
+  if (error) return error.slice(0, 400);
   return [...new Set(own.length > 0 ? own : lines)].slice(-3).join(' ⏎ ').slice(0, 400);
 }
 
