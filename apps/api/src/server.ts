@@ -1,7 +1,7 @@
 import { Resolver } from 'node:dns/promises';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { anthropicModel, openAiModel, type ModelClient } from '@vdeploy/ai';
+import { anthropicModel, openAiModel, revoyeModel, type ModelClient } from '@vdeploy/ai';
 import type { Database } from '@vdeploy/db';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -188,8 +188,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
    *
    * An OpenAI-compatible base URL picks that adapter, which covers the
    * hosted services and the runtimes somebody puts on their own server;
-   * otherwise it is Anthropic, and with neither key the assistant is
-   * simply off and the platform works without it.
+   * then a Revoye key, then Anthropic, and with no key at all the
+   * assistant is simply off and the platform works without it.
    */
   const model = config.OPENAI_BASE_URL
     ? openAiModel({
@@ -201,13 +201,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           ? { price: { input: config.OPENAI_PRICE_INPUT, output: config.OPENAI_PRICE_OUTPUT } }
           : {}),
       })
-    : config.ANTHROPIC_API_KEY
-      ? anthropicModel({
-          apiKey: config.ANTHROPIC_API_KEY,
-          model: config.AI_MODEL,
-          ...(config.ANTHROPIC_BASE_URL ? { baseURL: config.ANTHROPIC_BASE_URL } : {}),
+    : config.REVOYE_API_KEY
+      ? revoyeModel({
+          apiKey: config.REVOYE_API_KEY,
+          channel: config.REVOYE_CHANNEL,
+          ...(config.REVOYE_BASE_URL ? { baseUrl: config.REVOYE_BASE_URL } : {}),
+          ...(config.AI_MODEL.startsWith('revoye/') ? { model: config.AI_MODEL } : {}),
         })
-      : deps.model;
+      : config.ANTHROPIC_API_KEY
+        ? anthropicModel({
+            apiKey: config.ANTHROPIC_API_KEY,
+            model: config.AI_MODEL,
+            ...(config.ANTHROPIC_BASE_URL ? { baseURL: config.ANTHROPIC_BASE_URL } : {}),
+          })
+        : deps.model;
 
   const kernel = {
     db,

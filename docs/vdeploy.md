@@ -1011,7 +1011,7 @@ packages/ai
   ├─ policy-engine    L0–L5 gates — provider-agnostic, server-side
   ├─ context-engine   budgeted assembly, taint marking, cache-aware layout
   ├─ proposal         Plan → diff → risk → blast radius → approval
-  └─ providers/  anthropic.ts (primary) · openai.ts · google.ts · ollama.ts
+  └─ providers/  anthropic.ts (primary) · openai.ts · google.ts · ollama.ts · revoye.ts
 ```
 
 | Model | ID | Context | In / Out per MTok | Role |

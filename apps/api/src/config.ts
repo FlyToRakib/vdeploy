@@ -87,6 +87,15 @@ export const ApiConfig = z.object({
    */
   OPENAI_PRICE_INPUT: z.coerce.number().min(0).optional(),
   OPENAI_PRICE_OUTPUT: z.coerce.number().min(0).optional(),
+  /**
+   * Or Revoye, the AI router: Revoye Cloud, or the owner's own machine
+   * through Revoye Desk. Its key chooses it over Anthropic. `AI_MODEL` is
+   * used only when it names a Revoye model (`revoye/…`); otherwise Revoye
+   * chooses.
+   */
+  REVOYE_API_KEY: z.string().min(8).optional(),
+  REVOYE_BASE_URL: z.url().optional(),
+  REVOYE_CHANNEL: z.enum(['auto', 'cloud', 'desk']).default('auto'),
   AI_MODEL: z.string().min(1).default(DEFAULT_MODEL),
   /** Where the agent binaries for the one-command installer are (vd-agent-linux-amd64, -arm64). */
   AGENT_BINARIES_DIR: z.string().default('/app/agent'),

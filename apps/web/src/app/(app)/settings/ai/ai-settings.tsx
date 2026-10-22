@@ -232,7 +232,8 @@ export function AiSettingsPanel() {
           <p className="font-medium">No AI model is connected, so the assistant is off.</p>
           <p className="text-muted-foreground">
             VDeploy works fully without it. To turn it on, put your own provider key in{' '}
-            <code className="font-mono">ANTHROPIC_API_KEY</code> and restart the control plane. The
+            <code className="font-mono">ANTHROPIC_API_KEY</code> (or{' '}
+            <code className="font-mono">REVOYE_API_KEY</code>) and restart the control plane. The
             key stays on your server; VDeploy never has one of its own.
           </p>
         </Card>

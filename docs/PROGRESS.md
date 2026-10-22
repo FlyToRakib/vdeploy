@@ -3,7 +3,29 @@
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
 **Task:** `vdeploy up` from a local folder, then routing
 **Status:** in progress
-**Updated:** 2026-10-03 18:10 UTC
+**Updated:** 2026-10-22 UTC
+
+## Revoye as an AI provider — 2026-10-22
+
+- [x] **Revoye** (an AI router: Revoye Cloud, or the owner's own machine
+  through Revoye Desk) drives the assistant like Anthropic and the
+  OpenAI shape do — `REVOYE_API_KEY`, optional `REVOYE_BASE_URL` and
+  `REVOYE_CHANNEL` (`auto` | `cloud` | `desk`); chosen after
+  `OPENAI_BASE_URL` and before Anthropic. It is its own adapter
+  (`packages/ai/src/model/revoye.ts`), not a base URL for the OpenAI one,
+  because Revoye has **no tool calling** and its chat endpoint has no
+  `tool` role: the tools are described in the prompt and a call comes
+  back as a JSON object. That costs no safety — a call is only ever a
+  request, a name that was not offered is dropped in the adapter, and
+  L2/L6 check the rest as for any model. Two limits shaped it: a request
+  text is at most 100 000 characters, and an owner's full tool array is
+  ~104k as raw JSON Schema, so the bounds the platform checks anyway are
+  left out of what the model reads (~57k, guarded by a test), and the
+  oldest turns go first when a conversation would not fit; and Revoye
+  reports **no tokens**, so its turns cost nothing on the spend cap — the
+  plan's monthly allowance is what limits it. A `JOB_TIMEOUT` is never
+  resent (the job is still running there). Not yet run against the real
+  service: that needs a Revoye key in `.vdeploy-local/ai.env`.
 
 ## First live deployment — 2026-10-02
 
