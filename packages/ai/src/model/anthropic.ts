@@ -25,6 +25,8 @@ export interface AnthropicOptions {
 }
 
 const MAX_TOKENS = 4096;
+/** Models that take neither adaptive thinking nor an effort level. */
+const plain = (model: string) => model.startsWith('claude-haiku-4');
 
 /** Tool results from the platform go back as one user message, as the API expects. */
 function toMessages(request: ModelRequest): Anthropic.MessageParam[] {
@@ -148,8 +150,13 @@ export function anthropicModel(options: AnthropicOptions): ModelClient {
           {
             model,
             max_tokens: request.maxTokens ?? MAX_TOKENS,
-            thinking: { type: 'adaptive' },
-            output_config: { effort: request.effort ?? 'medium' },
+            // Haiku 4.5 refuses both with a 400, so the cheapest model offered would never answer.
+            ...(plain(model)
+              ? {}
+              : {
+                  thinking: { type: 'adaptive' as const },
+                  output_config: { effort: request.effort ?? 'medium' },
+                }),
             // Tools render before the system prompt; one breakpoint caches both.
             system: [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }],
             tools: request.tools.map((tool) => ({

@@ -1,6 +1,6 @@
 # VDeploy Implementation Progress
 
-**Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24; M4, M5 and M6 reopened 2026-09-30, see below)
+**Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, exit met 2026-10-22; M4, M5 and M6 reopened 2026-09-30, see below)
 **Task:** `vdeploy up` from a local folder, then routing
 **Status:** in progress
 **Updated:** 2026-10-22 UTC
@@ -23,9 +23,37 @@
   left out of what the model reads (~57k, guarded by a test), and the
   oldest turns go first when a conversation would not fit; and Revoye
   reports **no tokens**, so its turns cost nothing on the spend cap — the
-  plan's monthly allowance is what limits it. A `JOB_TIMEOUT` is never
-  resent (the job is still running there). Not yet run against the real
-  service: that needs a Revoye key in `.vdeploy-local/ai.env`.
+  plan's monthly allowance is what limits it.
+- [x] **Run against the real service, and three things it took.** The
+  first live eval on Revoye scored 33/60, and every answer was the
+  single word "JSON": Revoye reads some answers out of a chat interface,
+  and a tool call the model put in a fenced block came back as the
+  fence's label alone — the prompt now says plain text, never a code
+  block. Then the proxy in front of Revoye closed held requests at about
+  two minutes (a 524), although Revoye promises ten — so the adapter
+  submits with `wait: false` and polls the job, cancelling it if the
+  caller gives up, since not waiting is not cancelling and a job left
+  running is still charged. And a model that wrote "I'll check the
+  memory" and stopped never checked: a call is now read wherever it sits
+  in the answer, and the prompt says to call rather than announce.
+- [x] **Haiku never answered.** `claude-haiku-4-5` is offered as the
+  cheapest model, and the adapter always sent it adaptive thinking and
+  an effort level, both of which it refuses with a 400 — so choosing it
+  turned the assistant off. Neither is sent to a Haiku model now.
+
+## M3 exit — met 2026-10-22
+
+The assistant half of the eval, against a real model: **50/60 (83%)**
+on `claude-haiku-4-5`, the cheapest model offered, against a pass mark
+of 80% — in two and a half minutes. Seven of
+twelve broken deployments full marks. What it lost is the model's own:
+naming the symptom rather than the cause ("health check failed", "check
+the logs") on an unknown crash and a missing build script, a settings
+change proposed where nothing needed changing (port in use), and the
+memory fix prepared without naming 512Mi; a stronger model is a setting
+away. The eval takes either key, or both — Claude then answers 60% of
+the scenarios and Revoye 40%, so neither key carries a run into its
+rate limit, and a busy moment on one is answered by the other.
 
 ## First live deployment — 2026-10-02
 
@@ -1096,7 +1124,7 @@ verified unchanged before, after, and after testbed teardown.
 
 - [x] 3.5 a scored eval set of deployments that really break (§26 M3, §32): twelve scenarios — the wrong port, localhost only, killed for memory, a missing setting, an unreachable database, an import whose capital letters differ, a runtime too old, a crash no rule knows, nothing listening, and two builds that fail — each scored on five things: the cause named rather than the symptom, the confidence it deserves, the facts a person needs, words free of symptom-speak ("health check failed", "check the logs" are banned), and the right change prepared — or nothing touched when the fix is in the person's own code. The deterministic layer is measured on every test run and scores 60/60, so the floor holds with no model at all; the same set scores the assistant against a real model, which needs a key, so that run is skipped until one is given. The non-coder walkthrough now ends at the assistant: with no key it says so in the panel, the AI screen states what it would be allowed to read and change, and everything before it worked anyway
 
-## M3 — code complete 2026-09-24, exit pending a provider key
+## M3 — code complete 2026-09-24, exit met 2026-10-22 (see above)
 
 Everything in M3 is built, tested and verified in the local testbed: the
 full e2e (30 checks) and the non-coder walkthrough both pass against this
@@ -1395,7 +1423,6 @@ GitHub.
 
 ## Blocked / needs the user
 
-- **An AI provider key** (Anthropic) to finish the M3 exit: the assistant half of the eval. Put it in `.vdeploy-local/ai.env` as `ANTHROPIC_API_KEY=…`, never in chat. The run costs a few cents and touches nothing outside a throwaway test database.
 - **GitHub App credentials** for the live check of 2.15 (the code is done and tested against a stand-in). Create the app on github.com (webhook URL `<PUBLIC_URL>/api/v1/github/webhook`, content type JSON, callback `<PUBLIC_URL>/api/v1/github/callback`, "Request user authorization (OAuth) during installation" on; permissions: Contents read, Metadata read; events: Push). Then put GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_WEBHOOK_SECRET, GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in `.vdeploy-local/github.env`, and the private key in `.vdeploy-local/github-app.pem`, never in chat.
 
 ## Environment

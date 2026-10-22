@@ -57,6 +57,22 @@ function stub(body: unknown, status = 200) {
 }
 
 describe('the Anthropic adapter', () => {
+  /* Seen live: Haiku 4.5 answers both with a 400, so the cheapest model offered never answered. */
+  it('asks Haiku without adaptive thinking or an effort level, and Opus with them', async () => {
+    const haiku = stub(answer);
+    await anthropicModel({ apiKey: 'k', model: 'claude-haiku-4-5', fetch: haiku.fetcher }).reply(
+      request,
+    );
+    expect(haiku.sent[0]?.body).not.toHaveProperty('thinking');
+    expect(haiku.sent[0]?.body).not.toHaveProperty('output_config');
+
+    const opus = stub(answer);
+    await anthropicModel({ apiKey: 'k', model: 'claude-opus-5', fetch: opus.fetcher }).reply(
+      request,
+    );
+    expect(opus.sent[0]?.body).toMatchObject({ thinking: { type: 'adaptive' } });
+  });
+
   it('sends the cached prefix, the tools and the conversation as the API expects', async () => {
     const { fetcher, sent } = stub(answer);
     const model = anthropicModel({ apiKey: 'sk-test', fetch: fetcher });

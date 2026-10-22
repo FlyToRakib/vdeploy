@@ -13,20 +13,42 @@ const request: ModelRequest = {
   ],
 };
 
-/** Revoye, answering whatever the test says, and recording what it was asked. */
-function revoye(answer: unknown, status = 200) {
-  const seen: { url?: string; body?: Record<string, unknown>; headers?: Record<string, string> } =
-    {};
+/**
+ * Revoye, answering whatever the test says — the submission, then each
+ * look at the job in turn — and recording the submission and every URL.
+ */
+function revoye(answer: unknown, status = 200, ...polls: unknown[]) {
+  const seen: {
+    url?: string;
+    urls: string[];
+    body?: Record<string, unknown>;
+    headers?: Record<string, string>;
+  } = { urls: [] };
   const fetcher = ((url: string, init: RequestInit) => {
-    seen.url = url;
-    seen.headers = init.headers as Record<string, string>;
-    seen.body = JSON.parse(init.body as string) as Record<string, unknown>;
+    seen.urls.push(`${init.method ?? 'GET'} ${url}`);
+    let next = answer;
+    if (init.method === 'POST') {
+      seen.url = url;
+      seen.headers = init.headers as Record<string, string>;
+      seen.body = JSON.parse(init.body as string) as Record<string, unknown>;
+    } else {
+      next = polls.shift() ?? answer;
+    }
     return Promise.resolve(
-      new Response(typeof answer === 'string' ? answer : JSON.stringify(answer), { status }),
+      new Response(typeof next === 'string' ? next : JSON.stringify(next), { status }),
     );
   }) as unknown as typeof fetch;
   return { fetcher, seen };
 }
+
+/** What a reply that was meant to fail failed with. */
+const failure = (pending: Promise<unknown>) =>
+  pending.then(
+    () => {
+      throw new Error('expected a failure');
+    },
+    (err: unknown) => err as ModelUnavailable,
+  );
 
 const job = (response: string | null) => ({
   id: 'job_1',
@@ -36,14 +58,14 @@ const job = (response: string | null) => ({
 });
 
 describe('Revoye, the AI router', () => {
-  it('asks the native endpoint to wait, with the key, the channel and an idempotency key', async () => {
+  it('submits to the native endpoint, with the key, the channel and an idempotency key', async () => {
     const { fetcher, seen } = revoye(job('Because it ran out of memory.'));
     const model = revoyeModel({ apiKey: 'revoye_sk_live_x', channel: 'desk', fetch: fetcher });
     const reply = await model.reply(request);
     expect(seen.url).toBe('https://api.revoye.com/v1/completions');
     expect(seen.headers?.authorization).toBe('Bearer revoye_sk_live_x');
     expect(seen.headers?.['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
-    expect(seen.body).toMatchObject({ channel: 'desk', provider: null, wait: true });
+    expect(seen.body).toMatchObject({ channel: 'desk', provider: null, wait: false });
     expect(reply).toMatchObject({ text: 'Because it ran out of memory.', stop: 'end_turn' });
     expect(model.model).toBe('revoye/auto');
   });
@@ -90,6 +112,25 @@ describe('Revoye, the AI router', () => {
     expect(reply.toolCalls).toMatchObject([
       { name: 'project_diagnose', input: { projectId: 'prj_x' } },
     ]);
+  });
+
+  it('reads a tool call that follows a sentence, braces in strings and all', async () => {
+    const { fetcher } = revoye(
+      job(
+        'Let me look.\n{"tool_calls":[{"name":"project_diagnose","input":{"note":"a } in {text}"}}]} ok',
+      ),
+    );
+    const reply = await revoyeModel({ apiKey: 'k', fetch: fetcher }).reply(request);
+    expect(reply.toolCalls).toMatchObject([
+      { name: 'project_diagnose', input: { note: 'a } in {text}' } },
+    ]);
+  });
+
+  it('takes prose that only mentions the protocol as prose', async () => {
+    const { fetcher } = revoye(job('I would answer {"tool_calls": [ but never finish'));
+    const reply = await revoyeModel({ apiKey: 'k', fetch: fetcher }).reply(request);
+    expect(reply.toolCalls).toEqual([]);
+    expect(reply.stop).toBe('end_turn');
   });
 
   /* A name that was not offered is not a tool this person may use; it never reaches the policy engine. */
@@ -175,9 +216,43 @@ describe('Revoye, the AI router', () => {
       expect((await failing(504, 'JOB_TIMEOUT')).retryable).toBe(false);
     });
 
-    it('a request queued instead of answered is a busy moment', async () => {
-      const queued = await failing(202, undefined, { id: 'job_1', status: 'queued' });
-      expect(queued.retryable).toBe(true);
+    it('a job that failed there says so', async () => {
+      const { fetcher } = revoye({ id: 'job_1', status: 'failed', response: null });
+      const error = await failure(revoyeModel({ apiKey: 'k', fetch: fetcher }).reply(request));
+      expect(error).toBeInstanceOf(ModelUnavailable);
+      expect(error.message).toMatch(/could not answer this one \(failed\)/);
     });
+
+    /* Not waiting is not cancelling: a job left running is still charged. */
+    it('gives up when asked to, and cancels the job', async () => {
+      const queued = { id: 'job_1', status: 'queued', response: null };
+      const { fetcher, seen } = revoye(queued, 202);
+      const stop = new AbortController();
+      const pending = failure(
+        revoyeModel({ apiKey: 'k', fetch: fetcher }).reply(request, stop.signal),
+      );
+      setTimeout(() => {
+        stop.abort();
+      }, 100);
+      const error = await pending;
+      expect(error.message).toMatch(/longer than ten minutes/);
+      expect(seen.urls).toContain('DELETE https://api.revoye.com/v1/completions/job_1');
+    });
+  });
+
+  /*
+   * Seen live: the proxy in front of Revoye closes a held request at about
+   * two minutes, so the answer is collected by looking, not by waiting.
+   */
+  it('collects a queued job by looking at it until it is done', async () => {
+    const queued = { id: 'job_1', status: 'queued', response: null };
+    const { fetcher, seen } = revoye(queued, 202, { ...queued, status: 'dispatched' }, job('done'));
+    const reply = await revoyeModel({ apiKey: 'k', fetch: fetcher }).reply(request);
+    expect(reply.text).toBe('done');
+    expect(seen.urls).toEqual([
+      'POST https://api.revoye.com/v1/completions',
+      'GET https://api.revoye.com/v1/completions/job_1',
+      'GET https://api.revoye.com/v1/completions/job_1',
+    ]);
   });
 });

@@ -24,8 +24,12 @@ import {
  * - **It reports no tokens.** `usage` is always null, so a turn costs
  *   nothing on VDeploy's meter; the plan's allowance is Revoye's to count.
  *
- * It uses the native `POST /v1/completions` with `wait: true`: the prompt
- * is VDeploy's own flattening, and the channel can be chosen.
+ * It submits to the native `POST /v1/completions` — the prompt is
+ * VDeploy's own flattening, and the channel can be chosen — and then polls
+ * the job rather than holding the request open with `wait: true`: Revoye
+ * may hold one for ten minutes, but the proxy in front of it closes the
+ * connection at about two (a 524, seen live), and a closed connection
+ * would leave the job running with nobody to collect it.
  */
 
 export interface RevoyeOptions {
@@ -40,11 +44,21 @@ export interface RevoyeOptions {
   fetch?: typeof fetch;
 }
 
-/** Revoye holds a waiting request for up to ten minutes; a shorter client gives up on a healthy job. */
+/** How long a job may take, past Revoye's own ten-minute hold. */
 const WAIT_MS = 660_000;
+/** Between looks at a running job: 40 a minute, well inside 1 200 reads a minute per key. */
+const POLL_MS = 1_500;
+const SETTLED = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
 
+/*
+ * "Plain text, no code block" is not style: Revoye reads some answers out
+ * of a chat interface, and a fenced block comes back as its label alone —
+ * a tool call arrived as the single word "JSON" until this said so.
+ */
 const PROTOCOL = `You can call tools. To call one or more, reply with ONLY this JSON and nothing else:
 {"tool_calls":[{"name":"<tool name>","input":{<arguments matching its input_schema>}}]}
+Write it as plain text on one line: never in a code block, never with backticks or markdown.
+Never say you will check or do something: call the tool for it in this reply.
 Each result comes back as a "Tool result" turn. When you need no tool, answer in plain words.
 Tools:`;
 
@@ -119,20 +133,37 @@ function toPrompt(request: ModelRequest): string {
   return prompt;
 }
 
+/** The balanced `{…}` that starts at `start`, minding strings; null if it never closes. */
+function objectAt(text: string, start: number): string | null {
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') quoted = false;
+    } else if (c === '"') quoted = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
+
 /**
- * The tool calls in an answer, if the whole answer is one.
+ * The tool calls in an answer.
  *
- * A fenced block is unwrapped, since models add one unasked. Anything that
- * is not exactly the protocol's object is prose, and a call to a tool that
- * was not offered, or with arguments that are not an object, is dropped —
- * the same rule the OpenAI adapter applies to malformed arguments.
+ * The protocol's object is found wherever it is — models put a sentence
+ * before it, or a fence around it, however they are asked. A call to a
+ * tool that was not offered, or with arguments that are not an object, is
+ * dropped — the same rule the OpenAI adapter applies to malformed
+ * arguments.
  */
 function readCalls(text: string, offered: Set<string>): ToolCall[] {
-  const body = text
-    .trim()
-    .replace(/^```(?:json)?\s*|\s*```$/g, '')
-    .trim();
-  if (!body.startsWith('{') || !body.includes('"tool_calls"')) return [];
+  const start = text.search(/\{\s*"tool_calls"/);
+  const body = start < 0 ? null : objectAt(text, start);
+  if (!body) return [];
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -195,51 +226,86 @@ function explain(status: number, error: RevoyeError | undefined): ModelUnavailab
   }
 }
 
+interface Job {
+  id?: string;
+  status?: string;
+  response?: string | null;
+  error?: RevoyeError;
+}
+
 export function revoyeModel(options: RevoyeOptions): ModelClient {
   const call = options.fetch ?? fetch;
   const url = (options.baseUrl ?? 'https://api.revoye.com').replace(/\/+$/, '') + '/v1/completions';
   const model = options.model ?? 'revoye/auto';
   const pinned = model === 'revoye/auto' ? null : model.replace(/^revoye\//, '');
+  const auth = { authorization: `Bearer ${options.apiKey}` };
+
+  /** One request; a job back, or why not. */
+  async function send(target: string, init: RequestInit): Promise<Job> {
+    let response: Response;
+    try {
+      response = await call(target, init);
+    } catch (error) {
+      if (init.signal?.aborted) throw error;
+      throw new ModelUnavailable(
+        `VDeploy could not reach Revoye: ${error instanceof Error ? error.message : 'no answer'}`,
+        true,
+      );
+    }
+    const body = (await response.json().catch(() => null)) as Job | null;
+    if (!response.ok) throw explain(response.status, body?.error);
+    return body ?? {};
+  }
 
   return {
     model,
     reply: async (request, signal) => {
       const timeout = AbortSignal.timeout(WAIT_MS);
-      let response: Response;
+      const stop = signal ? AbortSignal.any([signal, timeout]) : timeout;
+      let job: Job = {};
       try {
-        response = await call(url, {
+        job = await send(url, {
           method: 'POST',
           headers: {
+            ...auth,
             'content-type': 'application/json',
-            authorization: `Bearer ${options.apiKey}`,
             'idempotency-key': crypto.randomUUID(),
           },
           body: JSON.stringify({
             prompt: toPrompt(request),
             channel: options.channel ?? 'auto',
             provider: pinned,
-            wait: true,
+            wait: false,
           }),
-          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+          signal: stop,
         });
+        while (!SETTLED.has(job.status ?? '')) {
+          await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+          stop.throwIfAborted();
+          job = await send(`${url}/${encodeURIComponent(job.id ?? '')}`, {
+            headers: auth,
+            signal: stop,
+          });
+        }
       } catch (error) {
+        if (!stop.aborted) throw error;
+        // Not waiting is not cancelling: stop the job, or it runs on and is charged.
+        if (job.id) {
+          void call(`${url}/${encodeURIComponent(job.id)}`, {
+            method: 'DELETE',
+            headers: auth,
+          }).catch(() => undefined);
+        }
+        throw new ModelUnavailable('Revoye took longer than ten minutes to answer.', false);
+      }
+      if (job.status !== 'succeeded') {
         throw new ModelUnavailable(
-          `VDeploy could not reach Revoye: ${error instanceof Error ? error.message : 'no answer'}`,
-          true,
+          `Revoye could not answer this one (${job.status ?? 'unknown'}).`,
+          job.status === 'expired',
         );
       }
-      const body = (await response.json().catch(() => null)) as {
-        status?: string;
-        response?: string | null;
-        error?: RevoyeError;
-      } | null;
-      if (!response.ok) throw explain(response.status, body?.error);
-      // 202: past the account's 100 held requests, Revoye queues instead of waiting.
-      if (body?.status !== 'succeeded') {
-        throw new ModelUnavailable('Revoye is busy with other requests; try again shortly.', true);
-      }
 
-      const text = body.response ?? '';
+      const text = job.response ?? '';
       const toolCalls = readCalls(text, new Set(request.tools.map((t) => t.name)));
       return {
         text: toolCalls.length ? '' : text,
