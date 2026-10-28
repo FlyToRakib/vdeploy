@@ -3,15 +3,37 @@
 #
 # TLS is terminated in front of this, not here: put it behind whatever
 # already does that for you and point it at 8080.
+#
+# Who is asking is worked out here, once. Only the terminator in front can
+# reach this port (compose publishes it on 127.0.0.1), so what it says the
+# visitor's address is, read from the right, is believed; the API and the
+# dashboard are then handed that one address and nothing else. Without
+# this every visitor arrives as Docker's gateway, and one person's failed
+# sign-ins lock everybody out. A terminator on another machine, at a public
+# address, goes in trusted_proxies beside private_ranges.
+{
+	servers {
+		trusted_proxies static private_ranges
+		client_ip_headers X-Forwarded-For
+		trusted_proxies_strict
+	}
+}
+
 :8080 {
 	handle /api/* {
-		reverse_proxy api:8080
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 	# The public status page is served by the API, at the same origin.
 	handle /status/* {
-		reverse_proxy api:8080
+		reverse_proxy api:8080 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 	handle {
-		reverse_proxy web:3100
+		reverse_proxy web:3100 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 }

@@ -353,15 +353,30 @@ function startApiAndWorker() {
 
 // The one origin: /api/* and the public status page to the API (websockets
 // and streams included), the rest to the dashboard.
-const CADDYFILE = `:8080 {
+// The client address as deploy/Caddyfile works it out, so the run
+// exercises the same rate limits a real install has.
+const CADDYFILE = `{
+  servers {
+    trusted_proxies static private_ranges
+    client_ip_headers X-Forwarded-For
+    trusted_proxies_strict
+  }
+}
+:8080 {
   handle /api/* {
-    reverse_proxy cp-api:8080
+    reverse_proxy cp-api:8080 {
+      header_up X-Forwarded-For {client_ip}
+    }
   }
   handle /status/* {
-    reverse_proxy cp-api:8080
+    reverse_proxy cp-api:8080 {
+      header_up X-Forwarded-For {client_ip}
+    }
   }
   handle {
-    reverse_proxy cp-web:3100
+    reverse_proxy cp-web:3100 {
+      header_up X-Forwarded-For {client_ip}
+    }
   }
 }`;
 
@@ -1165,7 +1180,15 @@ async function objectStorage(serverId, projectId) {
       ? inTestbed(`wget -S -q -O /dev/null -T 3 http://${ip}:9000/files/ 2>&1 | head -1 || true`)
       : '';
   };
-  await until('the store answers', () => answer(files.id).includes('HTTP/'), 300_000);
+  // RustFS answers 503 while it is still initializing its folder; ready is anything else.
+  await until(
+    'the store answers',
+    () => {
+      const said = answer(files.id);
+      return said.includes('HTTP/') && !said.includes(' 503');
+    },
+    300_000,
+  );
   // Asked without a key, it refuses: a bucket is never open to its network.
   const anonymous = answer(files.id);
   if (!anonymous.includes('403')) throw new Error(`an anonymous request got: ${anonymous}`);
@@ -2593,15 +2616,27 @@ function installRun() {
     throw new Error('not answering after install');
   pass('installed with one command: every key made, none printed, answering on one origin');
 
-  api(
-    '/api/v1/setup',
-    JSON.stringify({
-      name: 'Owner',
-      email: 'owner@install.invalid',
-      password: 'correct horse battery 42',
-      organization: 'Acme',
-    }),
-  );
+  // The person who installed it reads the setup code from the server, as
+  // the installer told them to; without it the first visitor would own it.
+  const setupCode = /^SETUP_CODE=(.+)$/m.exec(env)?.[1] ?? '';
+  if (!setupCode) throw new Error('install did not make a setup code');
+  const owner = {
+    name: 'Owner',
+    email: 'owner@install.invalid',
+    password: 'correct horse battery 42',
+    organization: 'Acme',
+  };
+  let refused = '';
+  try {
+    api('/api/v1/setup', JSON.stringify(owner));
+  } catch (error) {
+    refused = String(error);
+  }
+  if (!refused || !api('/api/v1/setup').includes('"needed":true')) {
+    throw new Error('setup without the setup code was not refused');
+  }
+  api('/api/v1/setup', JSON.stringify({ ...owner, setupCode }));
+  pass('the first owner needs the setup code from the server');
   const again = bed(`${script} install --url http://127.0.0.1:8080 2>&1`);
   if (!again.includes('keeping it, and every key in it')) {
     throw new Error(`a second install did not keep the keys: ${again}`);
