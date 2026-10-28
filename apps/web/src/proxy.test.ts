@@ -8,10 +8,13 @@ const policy = (path: string) =>
   ) ?? '';
 
 describe('the page policy (§20.2)', () => {
-  it('lets the sign-in page, and only it, show the CAPTCHA frame', () => {
-    expect(policy('/sign-in')).toContain('frame-src https://challenges.cloudflare.com');
-    expect(policy('/')).not.toContain('frame-src');
-    expect(policy('/settings/security')).not.toContain('challenges.cloudflare.com');
+  it('lets the CAPTCHA frame in wherever sign-in can be reached without a reload', () => {
+    // Signing out moves to /sign-in in the page already loaded, under its policy.
+    for (const path of ['/sign-in', '/', '/settings/security']) {
+      expect(policy(path)).toContain('frame-src https://challenges.cloudflare.com');
+    }
+    // That one frame, and nothing else from anywhere else.
+    expect(policy('/')).toContain("default-src 'self'");
   });
 
   it('runs only scripts carrying this page view nonce, everywhere', () => {

@@ -98,11 +98,16 @@ export function ProjectShell({ projectId, children }: { projectId: string; child
           setMissing(true);
           return;
         }
+        setMissing(false);
         setRow(project);
         setSummary(list.find((p) => p.id === projectId) ?? null);
       },
-      () => {
-        if (live.current) setMissing(true);
+      (err: unknown) => {
+        // Only "there is no such project" means that; a dropped connection
+        // keeps what is on screen until the next reading.
+        if (live.current && err instanceof OperationError && err.code === 'not_found') {
+          setMissing(true);
+        }
       },
     );
     return () => {

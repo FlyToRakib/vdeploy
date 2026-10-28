@@ -23,14 +23,17 @@ export function SetupForm({ codeRequired }: { codeRequired: boolean }) {
     }
     setBusy(true);
     setError(null);
+    // The first thing anybody does here, often while the server is still
+    // starting: an unreachable API or a proxy's error page says so in words.
     const res = await fetch('/api/v1/setup', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(parsed.data),
-    });
+    }).catch(() => null);
     setBusy(false);
-    if (!res.ok) {
-      setError(messageOf(await res.json(), 'Setup did not complete. Please try again.'));
+    if (!res?.ok) {
+      const body: unknown = res ? await res.json().catch(() => null) : null;
+      setError(messageOf(body, 'Setup did not complete. Please try again in a moment.'));
       return;
     }
     router.push('/');

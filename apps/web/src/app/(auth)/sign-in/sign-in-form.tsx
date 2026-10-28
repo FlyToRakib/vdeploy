@@ -97,16 +97,16 @@ export function SignInForm({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, callbackURL: '/' }),
-    });
-    const body: unknown = await res.json().catch(() => null);
+    }).catch(() => null);
+    const body: unknown = res ? await res.json().catch(() => null) : null;
     setBusy(false);
-    const url = res.ok ? (body as { url?: string }).url : undefined;
+    const url = res?.ok ? (body as { url?: string } | null)?.url : undefined;
     if (!url) {
       // Nobody has connected that domain. Better Auth says "no provider
       // found for the issuer", which is true and is not a sentence to
       // show somebody who has just typed their work email.
       setError(
-        res.status === 404 || res.status === 400
+        res?.status === 404 || res?.status === 400
           ? 'No company sign-in is set up for that address. Use your email and password instead.'
           : messageOf(body, 'That did not work. Try your email and password instead.'),
       );

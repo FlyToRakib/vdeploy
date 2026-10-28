@@ -24,10 +24,10 @@ export function proxy(request: NextRequest): NextResponse {
     "form-action 'self'",
     "frame-ancestors 'none'",
     // The CAPTCHA after repeated failed sign-ins (§20.2) is Cloudflare's
-    // frame, and only the sign-in page may show it.
-    ...(request.nextUrl.pathname === '/sign-in'
-      ? ['frame-src https://challenges.cloudflare.com']
-      : []),
+    // frame. On every page, not only /sign-in: a policy belongs to the
+    // document that loaded it, and signing out reaches /sign-in without a
+    // new one — where the frame would be refused and nobody could sign in.
+    'frame-src https://challenges.cloudflare.com',
     ...(https ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
 

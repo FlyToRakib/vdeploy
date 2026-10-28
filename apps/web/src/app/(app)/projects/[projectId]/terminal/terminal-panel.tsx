@@ -36,6 +36,9 @@ export function TerminalPanel() {
     if (!holder.current || state === 'opening' || state === 'open') return;
     setEnded(null);
     setState('opening');
+    // Opened again after a session ended: the last one goes, not stacked under the new.
+    term.current?.dispose();
+    holder.current.replaceChildren();
     const shell = new Terminal({
       convertEol: true,
       fontSize: 13,

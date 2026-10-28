@@ -165,8 +165,12 @@ function topHelp(): string {
   return lines.join('\n');
 }
 
-async function call(path: string, body: unknown, method = 'POST'): Promise<unknown> {
-  const settings = readSettings();
+async function call(
+  path: string,
+  body: unknown,
+  method = 'POST',
+  settings = readSettings(),
+): Promise<unknown> {
   if (!settings) {
     fail(
       'This machine is not signed in to a VDeploy yet.\n' +
@@ -192,7 +196,13 @@ async function call(path: string, body: unknown, method = 'POST'): Promise<unkno
     );
   }
   const text = await response.text();
-  const parsed: unknown = text ? JSON.parse(text) : null;
+  let parsed: unknown = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    // Something in front of VDeploy answered — a proxy's error page, say.
+    fail(`${settings.url} did not answer as VDeploy does (HTTP ${String(response.status)}).`, 2);
+  }
   if (!response.ok) {
     const problem = (parsed as { error?: { message?: string; code?: string } } | null)?.error;
     if (response.status === 401) {
@@ -369,10 +379,25 @@ async function main(argv: string[]) {
     if (!argv.includes('--url') || !argv.includes('--key') || !url || !key) {
       fail('vdeploy login --url https://your-vdeploy --key <api key>');
     }
+    // A key sent in the clear is a key anyone on the way can use: only
+    // this machine itself may be spoken to without TLS.
+    let address: URL;
+    try {
+      address = new URL(url);
+    } catch {
+      fail(`${url} is not an address; it starts with https://`);
+    }
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(address.hostname);
+    if (address.protocol !== 'https:' && !(address.protocol === 'http:' && local)) {
+      fail(
+        `Use the https:// address of your VDeploy; the key would travel in the clear to ${url}.`,
+      );
+    }
     // Checked before it is written: a key saved without being tried is a
     // key that fails on the next command instead of this one.
-    const saved = writeSettings({ url: url.replace(/\/$/, ''), key });
-    await call('/api/v1/operations/project.list', { input: {} });
+    const settings = { url: url.replace(/\/$/, ''), key };
+    await call('/api/v1/operations/project.list', { input: {} }, 'POST', settings);
+    const saved = writeSettings(settings);
     process.stdout.write(`Signed in to ${url}, key ${hint(key)}.\n${dim('  ' + saved)}\n`);
     return;
   }
