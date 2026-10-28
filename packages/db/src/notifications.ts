@@ -132,6 +132,22 @@ export async function claimDeliveries(
   return rows;
 }
 
+/**
+ * Drops deliveries that were settled more than a month ago, sent or given
+ * up on. Their keys are per plan or per hour and day, so nothing that old
+ * is still being kept from sending twice.
+ */
+export async function pruneDeliveries(db: Executor, now: Date): Promise<void> {
+  await db
+    .delete(notificationDeliveries)
+    .where(
+      and(
+        inArray(notificationDeliveries.status, ['sent', 'failed']),
+        lt(notificationDeliveries.createdAt, new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)),
+      ),
+    );
+}
+
 export async function deliverySent(db: Executor, id: string, now: Date): Promise<void> {
   await db
     .update(notificationDeliveries)

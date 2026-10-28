@@ -1,5 +1,5 @@
 import { newId, type Id, type TaskResult, type TaskView } from '@vdeploy/contracts';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, max, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
 import { projects, tasks } from './schema/index.js';
 
@@ -91,21 +91,46 @@ export async function tasksOf(tx: Executor, projectId: string, limit = 50): Prom
     .limit(limit);
 }
 
-/** When a scheduled job last fired, by name, for one project. */
+/**
+ * When a scheduled job last fired, by name, for one project. Every job's
+ * own latest, however many runs a busier job has had since: a daily job
+ * whose last run fell out of view would look due again every minute.
+ */
 export async function lastFirings(tx: Executor, projectId: string): Promise<Map<string, Date>> {
   const rows = await tx
-    .select({ name: tasks.name, firedAt: tasks.firedAt })
+    .select({ name: tasks.name, firedAt: max(tasks.firedAt) })
     .from(tasks)
     .where(and(eq(tasks.projectId, projectId), eq(tasks.reason, 'scheduled')))
-    .orderBy(desc(tasks.firedAt))
-    .limit(200);
+    .groupBy(tasks.name);
   const latest = new Map<string, Date>();
   for (const row of rows) {
-    if (!row.name || !row.firedAt) continue;
-    const seen = latest.get(row.name);
-    if (!seen || seen < row.firedAt) latest.set(row.name, row.firedAt);
+    if (row.name && row.firedAt) latest.set(row.name, row.firedAt);
   }
   return latest;
+}
+
+/** How long a finished run, and what it printed, is kept. */
+export const TASK_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Drops finished runs past retention — up to 20 KB of output each, and a
+ * job every minute is 1,440 rows a day. A scheduled job's latest firing is
+ * kept whatever its age: it is what says the job is not due again yet.
+ */
+export async function pruneTasks(tx: Executor, now: Date): Promise<void> {
+  const before = new Date(now.getTime() - TASK_RETENTION_MS);
+  await tx.execute(sql`
+    delete from ${tasks} t
+    where t.finished_at < ${before}
+      and (
+        t.reason <> 'scheduled'
+        or exists (
+          select 1 from ${tasks} later
+          where later.project_id = t.project_id
+            and later.name = t.name
+            and later.fired_at > t.fired_at
+        )
+      )`);
 }
 
 /** Projects that could have a scheduled job due: live, running, on a server. */

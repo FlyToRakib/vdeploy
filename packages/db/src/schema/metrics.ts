@@ -49,5 +49,7 @@ export const metricSamples = pgTable(
   (t) => [
     index('metric_samples_project_at').on(t.projectId, t.at),
     index('metric_samples_server_at').on(t.serverId, t.at),
+    // Pruned by age every hour, across every project.
+    index('metric_samples_at').on(t.at),
   ],
 );

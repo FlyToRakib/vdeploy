@@ -46,6 +46,12 @@ export const publicRegistries: RegistryAccess = {
 };
 
 const RETRY_DELAYS_MS = [1000, 3000, 9000];
+/**
+ * A registry that takes a connection and never answers would otherwise hold
+ * the one apply slot for the platform's whole five-minute default, four
+ * times over; one that answers at all does so within seconds.
+ */
+const ATTEMPT_TIMEOUT_MS = 20_000;
 
 /**
  * Registries and networks fail transiently; a timeout is retried with backoff
@@ -54,7 +60,7 @@ const RETRY_DELAYS_MS = [1000, 3000, 9000];
 async function reach(access: RegistryAccess, image: string, url: string, init?: RequestInit) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await access.fetch(url, init);
+      return await access.fetch(url, { ...init, signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS) });
     } catch (error) {
       const delay = RETRY_DELAYS_MS[attempt];
       if (delay === undefined) {

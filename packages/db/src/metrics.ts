@@ -1,5 +1,5 @@
 import type { ObservedReport } from '@vdeploy/contracts';
-import { and, desc, eq, gte, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import type { Executor } from './audit.js';
 import { auditLog, metricSamples, projects } from './schema/index.js';
 
@@ -171,7 +171,13 @@ export async function lastScaledAt(tx: Executor, projectId: string): Promise<Dat
   const [row] = await tx
     .select({ at: auditLog.occurredAt })
     .from(auditLog)
-    .where(and(eq(auditLog.target, projectId), eq(auditLog.action, 'project.scale')))
+    .where(
+      and(
+        eq(auditLog.target, projectId),
+        // A person's resize, and a rule's own: a rule must wait out its own cooldown too.
+        inArray(auditLog.action, ['project.scale', 'autoscale.applied']),
+      ),
+    )
     .orderBy(desc(auditLog.occurredAt))
     .limit(1);
   return row?.at ?? null;

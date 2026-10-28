@@ -37,7 +37,7 @@ import {
 import { startTestDatabase, type TestDatabase } from '@vdeploy/db/testing';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { applyPlan, type WorkerDeps } from './apply.js';
+import { applyPlan, recoverInterrupted, type WorkerDeps } from './apply.js';
 import type { RegistryAccess } from './registry.js';
 
 let t: TestDatabase;
@@ -453,6 +453,21 @@ describe('applyPlan', () => {
     const restart = await plan('project.restart', { projectId: created.id });
     expect(await applyPlan(deps, restart.id)).toBe('applied');
     expect(await applyPlan(deps, restart.id)).toBe('skipped');
+  });
+
+  it('settles what a worker that stopped half way left behind', async () => {
+    const created = await createProject();
+    const stranded = await plan('project.restart', { projectId: created.id });
+    await t.db.update(plans).set({ status: 'applying' }).where(eq(plans.id, stranded.id));
+    const waiting = await plan('project.restart', { projectId: created.id });
+
+    const approved = await recoverInterrupted(deps);
+    const [row] = await t.db.select().from(plans).where(eq(plans.id, stranded.id));
+    expect(row?.status).toBe('failed');
+    expect(row?.error?.message).toContain('stopped while this was being applied');
+    // Approved and never applied: handed back to be queued again.
+    expect(approved).toContain(waiting.id);
+    expect(approved).not.toContain(stranded.id);
   });
 
   it('refuses a project with nowhere to go before there is a plan at all', async () => {

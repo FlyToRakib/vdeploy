@@ -448,7 +448,11 @@ export const projectEvents = pgTable(
     message: text('message').notNull().default(''),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('project_events_project_at').on(t.projectId, t.at)],
+  (t) => [
+    index('project_events_project_at').on(t.projectId, t.at),
+    // Pruned by age every hour, across every project.
+    index('project_events_at').on(t.at),
+  ],
 );
 
 /** How an org's projects get instant URLs (§13.1); no row means the defaults. */

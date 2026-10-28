@@ -407,6 +407,13 @@
       "when": 1790682225783,
       "tag": "0057_agent-key-rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793172987371,
+      "tag": "0058_lookup-and-prune-indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -22,5 +22,9 @@ export const auditLog = pgTable(
     prevHash: text('prev_hash').notNull(),
     hash: text('hash').notNull(),
   },
-  (t) => [index('audit_log_chain_seq').on(t.chain, t.seq)],
+  (t) => [
+    index('audit_log_chain_seq').on(t.chain, t.seq),
+    // What last happened to one thing: a cooldown, a step-up, a timeline.
+    index('audit_log_target_action').on(t.target, t.action, t.occurredAt),
+  ],
 );

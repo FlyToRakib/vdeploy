@@ -120,6 +120,28 @@ async function checkApproval(deps: WorkerDeps, row: PlanRow, currentHash: string
 }
 
 /**
+ * What a worker that stopped mid-way left behind, settled as it starts
+ * again. There is one worker (§4: it is the deploy lock), so a plan still
+ * applying when it starts is one nobody is applying: it failed, and says
+ * why. A plan approved but never queued — the queue was down at the moment
+ * it was approved — is handed back, for the caller to queue again.
+ */
+export async function recoverInterrupted(deps: WorkerDeps): Promise<string[]> {
+  const stranded = await deps.db.select().from(plans).where(eq(plans.status, 'applying'));
+  for (const row of stranded) {
+    const message =
+      'VDeploy stopped while this was being applied, so it did not finish. Check the app, then make the change again.';
+    await finish(deps, row, 'failed', { notes: [] }, { code: 'internal', message });
+    await tell(deps, row, row.projectId, { message });
+  }
+  const approved = await deps.db
+    .select({ id: plans.id })
+    .from(plans)
+    .where(eq(plans.status, 'approved'));
+  return approved.map((row) => row.id);
+}
+
+/**
  * APPLY (§4). Takes an approved plan, proves it may still run — a valid
  * approval where one was needed, and a world that has not moved since it
  * was planned — then runs its steps in order. Delivered twice, it runs once.
@@ -132,22 +154,6 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
     .returning();
   if (!row) return 'skipped';
 
-  // The organization matters: without it the planner sees no servers to
-  // choose between, so a plan that placed an app "wherever there is room"
-  // re-plans here as a plan that could place it nowhere — and every one of
-  // them goes stale instead of running.
-  const world = await loadPlanWorld(deps.db, row.projectId, row.args, row.orgId);
-  let fresh: string;
-  try {
-    fresh = buildPlan(row.operation as OperationName, row.args, world).planHash;
-  } catch {
-    fresh = '';
-  }
-  if (fresh !== row.planHash) {
-    await finish(deps, row, 'stale', { reason: 'the project changed after this plan was made' });
-    return 'stale';
-  }
-
   const state: ApplyState = {
     planId: row.id,
     orgId: row.orgId,
@@ -159,6 +165,22 @@ export async function applyPlan(deps: WorkerDeps, planId: string): Promise<Apply
     notes: [],
   };
   try {
+    // The organization matters: without it the planner sees no servers to
+    // choose between, so a plan that placed an app "wherever there is room"
+    // re-plans here as a plan that could place it nowhere — and every one of
+    // them goes stale instead of running. Loaded inside the try: a plan this
+    // run has claimed always ends, never left applying for nobody.
+    const world = await loadPlanWorld(deps.db, row.projectId, row.args, row.orgId);
+    let fresh: string;
+    try {
+      fresh = buildPlan(row.operation as OperationName, row.args, world).planHash;
+    } catch {
+      fresh = '';
+    }
+    if (fresh !== row.planHash) {
+      await finish(deps, row, 'stale', { reason: 'the project changed after this plan was made' });
+      return 'stale';
+    }
     await checkApproval(deps, row, fresh);
     for (const step of row.plan.steps) {
       // Between steps is where stopping is clean: nothing is half done.

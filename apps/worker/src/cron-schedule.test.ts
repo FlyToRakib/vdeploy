@@ -140,6 +140,38 @@ describe('jobs that run without anyone remembering them', () => {
     expect(await runDueCrons(deps('2026-09-25T03:00:30Z'))).toBe(0);
   });
 
+  it('keeps a daily job daily beside a job that runs every minute', async () => {
+    const minutely = { ...nightly, name: 'every-minute', expr: '* * * * *' };
+    const spec = specWith([nightly, minutely]);
+    await t.db
+      .update(projects)
+      .set({ spec, specHash: hashOf(spec) })
+      .where(eq(projects.id, projectId));
+    await runDueCrons(deps('2026-09-25T03:00:30Z'));
+    const [daily] = await t.db.select().from(tasks).where(eq(tasks.name, 'nightly-report'));
+    // Hours of the busier job since, far more runs than anyone reads at once.
+    const start = Date.parse('2026-09-25T03:01:00Z');
+    await t.db.insert(tasks).values(
+      Array.from({ length: 400 }, (_, i) => ({
+        id: newId('task'),
+        orgId,
+        projectId,
+        serverId,
+        releaseId: daily!.releaseId,
+        reason: 'scheduled' as const,
+        name: 'every-minute',
+        firedAt: new Date(start + i * 60_000),
+        command: minutely.command,
+        status: 'done' as const,
+      })),
+    );
+    // Long past the six hours a late firing is recognised for.
+    expect(await runDueCrons(deps('2026-09-25T10:00:30Z'))).toBe(1);
+    expect(await runDueCrons(deps('2026-09-25T10:01:30Z'))).toBe(1);
+    const dailies = await t.db.select().from(tasks).where(eq(tasks.name, 'nightly-report'));
+    expect(dailies).toHaveLength(1);
+  });
+
   it('hands each run to the server the app is on, once', async () => {
     await runDueCrons(deps('2026-09-25T03:00:30Z'));
     const claimed = await claimTasks(t.db, serverId, new Date());

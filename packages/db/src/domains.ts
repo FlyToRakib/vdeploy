@@ -70,13 +70,16 @@ export async function syncDomainChecks(tx: Executor, now: Date): Promise<void> {
     for (const h of row.previousHosts) explicit.add(h);
   }
   const wanted = new Map<string, { serverId: string; projectId: string; twinOf: string | null }>();
+  // Asked once per organization, not once per app: this runs every few seconds.
+  const edges = new Map<string, ReturnType<typeof frontingServer>>();
   for (const row of rows) {
     if (!row.serverId) continue;
     // A check asks "does this name point at the machine that will answer
     // for it", so with an edge server it is asked of the edge — and the
     // edge is therefore the machine that may request the certificate. The
     // app servers behind it never ask for one.
-    const edge = await frontingServer(tx, row.orgId);
+    if (!edges.has(row.orgId)) edges.set(row.orgId, frontingServer(tx, row.orgId));
+    const edge = await edges.get(row.orgId);
     const answering = edge && edge.id !== row.serverId ? edge.id : row.serverId;
     for (const host of certificateHosts(row)) {
       wanted.set(host, { serverId: answering, projectId: row.id, twinOf: null });

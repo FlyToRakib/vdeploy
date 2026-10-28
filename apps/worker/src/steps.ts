@@ -650,6 +650,15 @@ async function buildImage(
   const builder = spec.build.builder;
   const elsewhere = builder !== undefined && builder !== row.serverId;
   const on = elsewhere ? builder : row.serverId;
+  // A spec can name any id; only this organization's own machines build its code.
+  if (elsewhere) {
+    const [own] = await deps.db
+      .select({ id: servers.id })
+      .from(servers)
+      .where(and(eq(servers.id, builder), eq(servers.orgId, state.orgId)));
+    if (!own)
+      throw new VDeployError('not_found', 'The server named to build on is not one of yours');
+  }
   const buildId = await deps.db.transaction((tx) =>
     queueBuild(tx, {
       orgId: state.orgId,

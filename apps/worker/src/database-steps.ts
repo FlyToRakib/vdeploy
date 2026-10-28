@@ -65,6 +65,21 @@ export interface DatabaseStepDeps {
   now: () => Date;
 }
 
+/**
+ * A database of the organization this plan belongs to, or none. Every id a
+ * step is handed came from somebody's input, and an id from another
+ * organization must read as one that does not exist — never as a database
+ * to link, back up, restore or delete.
+ */
+async function ownDatabase(
+  deps: DatabaseStepDeps,
+  state: ApplyState,
+  databaseId: string,
+): Promise<DatabaseRow | null> {
+  const row = await getDatabase(deps.db, databaseId);
+  return row?.orgId === state.orgId ? row : null;
+}
+
 function arg(state: ApplyState, key: string): string {
   const value = state.args[key];
   if (typeof value !== 'string') throw new VDeployError('internal', `the plan has no ${key}`);
@@ -114,7 +129,7 @@ export async function setDatabaseRunning(
   databaseId: string,
   running: boolean,
 ): Promise<void> {
-  const row = await getDatabase(deps.db, databaseId);
+  const row = await ownDatabase(deps, state, databaseId);
   if (!row) throw new VDeployError('not_found', 'The database no longer exists');
   await deps.db.transaction(async (tx) => {
     await tx
@@ -137,7 +152,7 @@ export async function linkDatabaseStep(
   databaseId: string,
 ): Promise<void> {
   if (!state.projectId) throw new VDeployError('internal', 'The plan has no project');
-  const row = await getDatabase(deps.db, databaseId);
+  const row = await ownDatabase(deps, state, databaseId);
   if (!row) throw new VDeployError('not_found', 'The database no longer exists');
   const [app] = await deps.db.select().from(projects).where(eq(projects.id, state.projectId));
   if (!app) throw new VDeployError('not_found', 'The project no longer exists');
@@ -262,7 +277,7 @@ export async function unlinkDatabaseStep(
     .where(and(eq(databaseLinks.databaseId, databaseId), eq(databaseLinks.projectId, projectId)));
   if (!link) return;
   const [app] = await deps.db.select().from(projects).where(eq(projects.id, projectId));
-  const row = await getDatabase(deps.db, databaseId);
+  const row = await ownDatabase(deps, state, databaseId);
   await deps.db.transaction(async (tx) => {
     await tx
       .delete(databaseLinks)
@@ -297,7 +312,7 @@ export async function deleteDatabaseStep(
   databaseId: string,
   keepData: boolean,
 ): Promise<void> {
-  const row = await getDatabase(deps.db, databaseId);
+  const row = await ownDatabase(deps, state, databaseId);
   if (!row) return;
   await deps.db.transaction(async (tx) => {
     await markDatabaseDeleted(tx, databaseId, deps.now());
@@ -340,7 +355,7 @@ export async function takeBackupStep(
   databaseId: string,
   reason: 'manual' | 'scheduled' | 'pre_deploy' | 'pre_destructive' = 'manual',
 ): Promise<void> {
-  const row = await getDatabase(deps.db, databaseId);
+  const row = await ownDatabase(deps, state, databaseId);
   if (!row) throw new VDeployError('not_found', 'The database no longer exists');
   if (!row.running) {
     // Never silently skip: a database that is off cannot be backed up (§17.4).
@@ -460,14 +475,22 @@ export async function restoreBackupStep(
   mode: 'new' | 'in_place',
 ): Promise<void> {
   const backup = await getBackup(deps.db, backupId);
-  if (!backup) throw new VDeployError('not_found', 'That backup no longer exists');
+  // Another organization's backup, or (for database.restore) another
+  // database's, is not one this plan may put back anywhere.
+  const named = typeof state.args.databaseId === 'string' ? state.args.databaseId : null;
+  if (
+    backup?.orgId !== state.orgId ||
+    (state.operation === 'database.restore' && backup.databaseId !== named)
+  ) {
+    throw new VDeployError('not_found', 'That backup no longer exists');
+  }
   if (backup.status !== 'done' || !backup.verified) {
     throw new VDeployError(
       'conflict',
       'That backup was never checked, so it cannot be restored. Take a new one first.',
     );
   }
-  const source = backup.databaseId ? await getDatabase(deps.db, backup.databaseId) : null;
+  const source = backup.databaseId ? await ownDatabase(deps, state, backup.databaseId) : null;
   if (!source) throw new VDeployError('not_found', 'The database that backup came from is gone');
   await loadInto(deps, state, {
     source,
@@ -500,7 +523,7 @@ export async function importDumpStep(
   uploadId: string,
   mode: 'new' | 'in_place',
 ): Promise<void> {
-  const source = await getDatabase(deps.db, arg(state, 'databaseId'));
+  const source = await ownDatabase(deps, state, arg(state, 'databaseId'));
   if (!source) throw new VDeployError('not_found', 'The database no longer exists');
   const upload = await getUpload(deps.db, uploadId);
   if (upload?.orgId !== state.orgId) {
@@ -627,7 +650,7 @@ export async function setBackupPolicyStep(
       keepOffsite: state.args.keepOffsite,
     },
   );
-  const row = await getDatabase(deps.db, databaseId);
+  const row = await ownDatabase(deps, state, databaseId);
   if (!row) throw new VDeployError('not_found', 'The database no longer exists');
   await deps.db.transaction((tx) => setBackupPolicy(tx, databaseId, policy, deps.now()));
   state.notes.push(
@@ -720,7 +743,7 @@ export async function arriveDatabasesStep(
   const moved = state.movedDatabaseIds ?? [];
   if (moved.length === 0) return;
   for (const databaseId of moved) {
-    const row = await getDatabase(deps.db, databaseId);
+    const row = await ownDatabase(deps, state, databaseId);
     if (!row) continue;
     const copy = await newestGoodBackup(deps.db, databaseId);
     if (!copy) {

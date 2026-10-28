@@ -5,9 +5,12 @@ import {
   APPLY_QUEUE,
   connect,
   createApplyQueue,
+  enqueuePlan,
   notifyOfflineServers,
+  pruneDeliveries,
   pruneEvents,
   pruneMetrics,
+  pruneTasks,
   pruneUploads,
   pruneUptime,
   queueConnection,
@@ -16,7 +19,7 @@ import {
 import { createPostgresBackend, Worker } from 'bullmq';
 import { createTransport } from 'nodemailer';
 import { pino } from 'pino';
-import { applyPlan } from './apply.js';
+import { applyPlan, recoverInterrupted } from './apply.js';
 import { runAutoscaling } from './autoscale-loop.js';
 import { closeStalePreviews } from './preview-expiry.js';
 import { watchProvisioning } from './provisioning.js';
@@ -72,6 +75,15 @@ const worker = new Worker(
 worker.on('failed', (job, err) => {
   log.error({ job: job?.id, err }, 'plan job failed');
 });
+
+// What a stop in the middle left behind: a plan applying for nobody ends as
+// failed, and one approved but never queued is queued now (once: the job id
+// is the plan id).
+recoverInterrupted(deps)
+  .then((approved) => Promise.all(approved.map((planId) => enqueuePlan(applyQueue, planId))))
+  .catch((err: unknown) => {
+    log.error({ err }, 'could not settle plans left by the last run');
+  });
 
 // DNS verification before any certificate request (§13): a few seconds
 // between rounds, never two rounds at once.
@@ -244,6 +256,12 @@ const pruneTimer = setInterval(() => {
   });
   pruneUploads(db, new Date()).catch((err: unknown) => {
     log.error({ err }, 'could not clear old uploads');
+  });
+  pruneTasks(db, new Date()).catch((err: unknown) => {
+    log.error({ err }, 'could not prune old job runs');
+  });
+  pruneDeliveries(db, new Date()).catch((err: unknown) => {
+    log.error({ err }, 'could not prune old notifications');
   });
 }, 60 * 60_000);
 

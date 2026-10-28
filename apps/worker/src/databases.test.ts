@@ -495,6 +495,52 @@ describe('managed databases', () => {
     expect(plan?.error?.message).toContain('never checked');
   });
 
+  it("puts back only this organization's backup, of the database it names", async () => {
+    const row = await theDatabase();
+    const databaseId = row?.id ?? '';
+    const [own] = await t.db
+      .select()
+      .from(backups)
+      .where(and(eq(backups.databaseId, databaseId), eq(backups.status, 'done')));
+    const [copy] = await t.db
+      .select()
+      .from(databases)
+      .where(and(eq(databases.name, 'blog-db-copy'), isNull(databases.deletedAt)));
+    // A backup of one database, named as if it were another's.
+    const crossed = await run('database.restore', {
+      databaseId: copy?.id ?? '',
+      backupId: own?.id ?? '',
+      mode: 'in_place',
+    });
+    expect(crossed.outcome).toBe('failed');
+
+    // Another organization's backup, by its id.
+    const elsewhere = newId('organization');
+    await t.db
+      .insert(organization)
+      .values({ id: elsewhere, name: 'Other', slug: elsewhere.toLowerCase() });
+    const [foreign] = await t.db
+      .insert(backups)
+      .values({
+        id: newId('backup'),
+        orgId: elsewhere,
+        databaseId,
+        serverId,
+        fileName: 'theirs.dump',
+        status: 'done',
+        verified: true,
+      })
+      .returning();
+    const taken = await run('database.restore', {
+      databaseId,
+      backupId: foreign?.id ?? '',
+      mode: 'new',
+    });
+    expect(taken.outcome).toBe('failed');
+    const [plan] = await t.db.select().from(plans).where(eq(plans.id, taken.planId));
+    expect(plan?.error?.message).toContain('no longer exists');
+  });
+
   /** A dump somebody exported from another host, already uploaded here. */
   async function uploaded(body: string) {
     const [row] = await t.db
