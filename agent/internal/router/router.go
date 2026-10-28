@@ -98,6 +98,20 @@ func hostMatch(matcher, host string) string {
 	return matcher + "(" + quote(host) + ")"
 }
 
+// namedHostPriority lifts every router for a named host above any router
+// for a wildcard. Traefik otherwise ranks routers by the length of their
+// rule, and a wildcard's regexp is longer than most names it covers, so
+// *.example.com on one app would take shop.example.com from another on the
+// same server. Within each kind the longer rule still wins, as before.
+const namedHostPriority = 100_000
+
+func priority(host, rule string) int {
+	if strings.HasPrefix(host, "*.") {
+		return len(rule)
+	}
+	return len(rule) + namedHostPriority
+}
+
 // denied turns a deny list into a clause of the router's own rule, so an
 // address on it matches no route of this app at all (§13).
 func denied(cidrs []string) string {
@@ -310,18 +324,19 @@ func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Re
 	routers := object{}
 	for i, d := range hosts {
 		name := key + "-" + strconv.Itoa(i)
+		r := rule(d) + deny
 		if d.TLS.Provider == "letsencrypt" {
 			routers[name] = object{
-				"rule": rule(d) + deny, "service": key, "entryPoints": []string{"websecure"},
+				"rule": r, "priority": priority(d.Host, r), "service": key, "entryPoints": []string{"websecure"},
 				"middlewares": chain, "tls": tlsFor(d),
 			}
 			routers[name+"-http"] = object{
-				"rule": rule(d) + deny, "service": key, "entryPoints": []string{"web"},
+				"rule": r, "priority": priority(d.Host, r), "service": key, "entryPoints": []string{"web"},
 				"middlewares": []string{toHTTPS},
 			}
 			continue
 		}
-		routers[name] = object{"rule": rule(d) + deny, "service": key, "entryPoints": []string{"web"}, "middlewares": chain}
+		routers[name] = object{"rule": r, "priority": priority(d.Host, r), "service": key, "entryPoints": []string{"web"}, "middlewares": chain}
 	}
 	middlewareDefs[toHTTPS] = object{"redirectScheme": object{"scheme": "https", "permanent": true}}
 	for i, r := range redirects {
@@ -332,12 +347,12 @@ func File(key string, network *spec.Network, hosts []spec.Domain, redirects []Re
 		old := "Host(" + quote(r.From) + ")"
 		if r.Secure {
 			routers[name] = object{
-				"rule": old, "service": key, "entryPoints": []string{"websecure"},
+				"rule": old, "priority": priority(r.From, old), "service": key, "entryPoints": []string{"websecure"},
 				"middlewares": []string{name}, "tls": object{"certResolver": CertResolver},
 			}
 		}
 		routers[name+"-http"] = object{
-			"rule": old, "service": key, "entryPoints": []string{"web"}, "middlewares": []string{name},
+			"rule": old, "priority": priority(r.From, old), "service": key, "entryPoints": []string{"web"}, "middlewares": []string{name},
 		}
 	}
 	dynamic := object{

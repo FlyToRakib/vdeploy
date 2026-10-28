@@ -113,7 +113,8 @@ type Client struct {
 	taskResults     chan task.Result
 
 	terminalMu sync.Mutex
-	terminals  map[string]*terminal.Session // by session id, while a shell is open
+	terminals  map[string]*terminal.Session // by session id, while a shell is open; nil while it opens
+	idle       map[string]*time.Timer       // by session id: closes a shell nobody has typed into
 
 	artifactMu sync.Mutex
 	artifacts  map[string]*artifactSend // by request id, while a download is running
@@ -1692,16 +1693,37 @@ func (c *Client) openTerminal(ctx context.Context, k *conn, req terminal.Request
 		c.endTerminal(ctx, k, req.SessionID, "too many terminals are open on this server already")
 		return
 	}
+	// Held for this session while it starts: a second open of the same id,
+	// or one past the limit, is refused rather than racing it.
+	c.terminals[req.SessionID] = nil
 	c.terminalMu.Unlock()
 
 	session, err := c.Terminals.Open(ctx, req)
 	if err != nil {
+		c.terminalMu.Lock()
+		delete(c.terminals, req.SessionID)
+		c.terminalMu.Unlock()
 		c.endTerminal(ctx, k, req.SessionID, err.Error())
 		return
 	}
 	c.terminalMu.Lock()
-	c.terminals[req.SessionID] = session
+	_, held := c.terminals[req.SessionID]
+	if held {
+		c.terminals[req.SessionID] = session
+		if c.idle == nil {
+			c.idle = map[string]*time.Timer{}
+		}
+		c.idle[req.SessionID] = time.AfterFunc(terminal.Idle(), func() {
+			c.closeTerminal(context.WithoutCancel(ctx), k, req.SessionID,
+				"closed after "+terminal.Idle().String()+" with nothing typed")
+		})
+	}
 	c.terminalMu.Unlock()
+	if !held {
+		// The connection went while it was starting: nobody can reach this shell.
+		session.Close()
+		return
+	}
 
 	go func() {
 		defer c.closeTerminal(context.WithoutCancel(ctx), k, req.SessionID, "")
@@ -1731,7 +1753,13 @@ func (c *Client) openTerminal(ctx context.Context, k *conn, req terminal.Request
 func (c *Client) closeTerminal(ctx context.Context, k *conn, sessionID, reason string) {
 	c.terminalMu.Lock()
 	session := c.terminals[sessionID]
-	delete(c.terminals, sessionID)
+	if session != nil {
+		delete(c.terminals, sessionID)
+	}
+	if timer := c.idle[sessionID]; timer != nil && session != nil {
+		timer.Stop()
+		delete(c.idle, sessionID)
+	}
 	c.terminalMu.Unlock()
 	if session == nil {
 		return
@@ -1762,6 +1790,9 @@ func (c *Client) endTerminal(ctx context.Context, k *conn, sessionID, reason str
 func (c *Client) typed(sessionID string, data []byte) {
 	c.terminalMu.Lock()
 	session := c.terminals[sessionID]
+	if timer := c.idle[sessionID]; timer != nil {
+		timer.Reset(terminal.Idle())
+	}
 	c.terminalMu.Unlock()
 	if session == nil {
 		return
@@ -1789,8 +1820,15 @@ func (c *Client) closeTerminals() {
 	c.terminalMu.Lock()
 	open := c.terminals
 	c.terminals = map[string]*terminal.Session{}
+	for _, timer := range c.idle {
+		timer.Stop()
+	}
+	c.idle = map[string]*time.Timer{}
 	c.terminalMu.Unlock()
 	for _, session := range open {
-		session.Close()
+		// One still starting has no session yet; it closes itself on arrival.
+		if session != nil {
+			session.Close()
+		}
 	}
 }

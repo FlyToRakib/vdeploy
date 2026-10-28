@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/docker"
 )
@@ -190,6 +192,29 @@ func TestAFolderCannotBeDownloadedAsIfItWereAFile(t *testing.T) {
 	}
 	if _, _, err := r.Send(context.Background(), request("gone.txt"), discard); !errors.Is(err, ErrNoFile) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A pipe the app made in its own folder is neither listed into nor read: an
+// open of one would wait for a writer forever, and a device node opened by
+// the agent would be the host's device, not the container's.
+func TestAPipeInTheFolderIsNeverOpened(t *testing.T) {
+	r, _, dir := reader(t)
+	if err := syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o600); err != nil {
+		t.Skipf("no pipes here: %v", err)
+	}
+	done := make(chan Result, 1)
+	go func() { done <- r.List(context.Background(), request("pipe")) }()
+	select {
+	case got := <-done:
+		if got.Error == "" {
+			t.Fatal("a pipe was listed as a folder")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("listing a pipe hung")
+	}
+	if _, _, err := r.Send(context.Background(), request("pipe"), discard); err == nil {
+		t.Fatal("a pipe was downloaded")
 	}
 }
 

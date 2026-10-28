@@ -240,8 +240,10 @@ func CreateRequest(ct compose.Container) CreateBody {
 			PidsLimit:   ct.PidsLimit,
 			OomScoreAdj: compose.OomScoreAdj,
 			SecurityOpt: []string{"no-new-privileges:true"},
-			CapDrop:     []string{"NET_RAW"},
-			Init:        true,
+			// No raw sockets, and no device nodes: an app has no use for
+			// mknod, and a node in a volume is a door to the host's devices.
+			CapDrop: []string{"NET_RAW", "MKNOD"},
+			Init:    true,
 			LogConfig: logConfig{Type: "json-file", Config: map[string]string{
 				"max-size": compose.LogMaxSize, "max-file": compose.LogMaxFiles,
 			}},

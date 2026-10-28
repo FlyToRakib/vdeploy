@@ -35,7 +35,7 @@ func tcpFile(key string, network *spec.Network, hosts []spec.Domain, traffic Tra
 		if deny != "" {
 			rule = "(" + rule + ")" + deny
 		}
-		r := object{"rule": rule, "service": key, "entryPoints": []string{"websecure"}, "tls": tlsFor(d)}
+		r := object{"rule": rule, "priority": priority(d.Host, rule), "service": key, "entryPoints": []string{"websecure"}, "tls": tlsFor(d)}
 		if len(allow) > 0 {
 			r["middlewares"] = []string{allowName}
 		}

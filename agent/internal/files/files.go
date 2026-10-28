@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/FlyToRakib/vdeploy/agent/internal/compose"
@@ -103,7 +104,14 @@ func (r *Reader) List(ctx context.Context, req Request) Result {
 	if where == "" {
 		where = "."
 	}
-	dir, err := root.Open(where)
+	// Only ever a folder: the app owns what is in its volume, and a pipe or
+	// a device node it made there must not be opened by this agent, which
+	// is root on the host — O_DIRECTORY refuses them before they are opened,
+	// and O_NONBLOCK keeps anything else from holding the call.
+	dir, err := root.OpenFile(where, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ENOTDIR) {
+		return fail("that is a file, not a folder")
+	}
 	if err != nil {
 		return fail(reason(err, "that folder"))
 	}
@@ -157,11 +165,17 @@ func (r *Reader) Send(
 	if !info.Mode().IsRegular() {
 		return 0, "", errors.New("only a file can be downloaded, not a folder or a shortcut")
 	}
-	file, err := root.Open(req.Path)
+	// The app can swap the path between that look and this open — for a
+	// device node of the host's own disk, say — so what was opened is
+	// checked again, by the file itself, before a byte of it is read.
+	file, err := root.OpenFile(req.Path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return 0, "", ErrNoFile
 	}
 	defer func() { _ = file.Close() }()
+	if opened, err := file.Stat(); err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return 0, "", errors.New("the file changed while it was being opened; try again")
+	}
 
 	sum := sha256.New()
 	buffer := make([]byte, ChunkBytes)

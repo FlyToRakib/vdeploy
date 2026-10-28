@@ -66,6 +66,27 @@ func TestFileRoutesEveryHostToEveryReplica(t *testing.T) {
 	}
 }
 
+// A named host beats a wildcard covering it, whichever app holds which:
+// Traefik's default ranks by rule length, and the wildcard's regexp is longer.
+func TestNamedHostOutranksAWildcard(t *testing.T) {
+	route := func(key, host string, paths ...string) map[string]any {
+		raw, ok := File(key, network(), []spec.Domain{domain(host, "none", paths...)}, nil,
+			Traffic{Backends: []Backend{{"vd-" + key + "-v1-r0-0", 3000}}}, nil)
+		if !ok {
+			t.Fatal("no routing produced")
+		}
+		return decode(t, raw)["routers"].(map[string]any)[key+"-0"].(map[string]any)
+	}
+	wildcard := route("all", "*.example.com", "/api")
+	named := route("shop", "shop.example.com", "/")
+	if len(wildcard["rule"].(string)) <= len(named["rule"].(string)) {
+		t.Fatal("the test needs the wildcard's rule to be the longer one")
+	}
+	if named["priority"].(float64) <= wildcard["priority"].(float64) {
+		t.Fatalf("named %v must outrank wildcard %v", named["priority"], wildcard["priority"])
+	}
+}
+
 func TestOldHostsRedirectToTheNewOne(t *testing.T) {
 	raw, ok := File("abc", network(), []spec.Domain{domain("blog.apps.example.com", "letsencrypt", "/")},
 		[]Redirect{{From: "blog.8-8-4-4.sslip.io", To: "blog.apps.example.com", Secure: true}},
