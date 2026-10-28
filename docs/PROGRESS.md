@@ -3,7 +3,113 @@
 **Milestone:** v1 completion — the plan audited line by line against the code (M1 2026-09-19, M2 2026-09-21, M3 code complete 2026-09-24, exit met 2026-10-22; M4, M5 and M6 reopened 2026-09-30, see below)
 **Task:** `vdeploy up` from a local folder, then routing
 **Status:** in progress
-**Updated:** 2026-10-22 UTC
+**Updated:** 2026-10-28 UTC
+
+## Pre-release audit — 2026-10-28
+
+The whole platform read again for security, correctness, performance and
+the assistant, before a public release; every finding below was traced
+through the code end to end (or reproduced) before it was fixed, and each
+fix carries a test that fails without it.
+
+**The assistant**
+- [x] **an AI call to an operation with no plan ran at once, in any mode.**
+  23 operations are administrative — a notification channel, `secret.generate`,
+  `sso.disconnect`, `plugin.uninstall` — and `runOperation` ignored the
+  gate's "needs approval" for them, so a log line could have the model add
+  a webhook of its own in propose mode. The AI may now make such a change
+  only where nothing would have asked a person (autopilot, untainted,
+  granted); a change that asks a person for their password again always
+  needs approval, planned or not.
+- [x] **tool answers reached the model unredacted**: `project.get` sent
+  every variable's value. Answers now pass the same redaction as the
+  context, whatever their shape.
+- [x] **a crash diagnosis quoted the app's own output into the context
+  untainted**; it is framed as untrusted and taints the session now.
+- [x] the context described a project the grants exclude from the AI.
+- [x] a chat kept open since last month escaped the monthly spend cap.
+
+**Tenancy and access**
+- [x] `database.restore` took any backup by id — another organization's
+  included, and in place it overwrote *that* database. Every database
+  step now resolves ids within the plan's own organization, and a
+  restore takes only a backup of the database it names.
+- [x] `spec.build.builder` could name another organization's server.
+- [x] any member, a read-only key included, could reject any plan; and a
+  reject racing an approval overwrote it.
+- [x] the terminal's websocket had no Origin check (GETs were exempt from
+  CSRF), so a page on a sibling domain could open a stepped-up shell.
+- [x] a stolen session cookie could register a passkey and then pass
+  step-up with it: adding a passkey now asks for step-up first.
+- [x] answers that carry a one-time credential (API keys, enrollment
+  tokens, plugin keys, webhook secrets, the offsite password) were kept
+  in the idempotency store, and a replay skipped the gate.
+- [x] uploads and dump uploads read up to 200 MB into memory before
+  asking who was sending them.
+- [x] one-time tokens in addresses (password reset, email verification)
+  were written to the request log.
+- [x] **behind the TLS terminator the README asks for, every visitor had
+  the same address** — Docker's gateway, reproduced in the testbed — so
+  five failed sign-ins anywhere locked out everybody. Caddy now works out
+  the visitor's address from the terminator's header and passes on that
+  one.
+
+**On the server**
+- [x] the file browser opened whatever the app had put in its folder: a
+  pipe hung it, and a device node made with `mknod` — app containers kept
+  `CAP_MKNOD` — could be read as root on the host by swapping it in
+  between the check and the open. Folders are opened as folders only,
+  files are checked again after opening, and app containers drop `MKNOD`.
+- [x] a wildcard domain on one app took a named host from another: Traefik
+  ranks routers by rule length and the wildcard's regexp is longer. Named
+  hosts now always outrank wildcards.
+- [x] the terminal's 30-minute idle limit was declared and never enforced;
+  two opens of one session raced, and a shell opened as its connection
+  dropped was left running.
+
+**Runs that never end, and work that never stops**
+- [x] a daily cron job beside an every-minute one ran **every minute** for
+  most of the day once its last run fell out of the 200 rows read.
+- [x] a plan claimed by a worker that then stopped stayed `applying`
+  forever, and one approved while the queue was down was never queued;
+  the worker settles both as it starts.
+- [x] scaling rules ignored their own cooldown (and scanned the whole
+  audit log each minute to find it); finished job runs and sent
+  notifications were never pruned; the DNS sync asked for each app's edge
+  server separately every five seconds; a registry that never answered
+  held the one apply slot for twenty minutes.
+
+**Smaller**
+- [x] the CAPTCHA could not load on a sign-in page reached by signing
+  out, so nobody could sign in there without a reload.
+- [x] `vdeploy login` saved a key before trying it, sent it over plain
+  http to any host, and crashed on a proxy's error page.
+- [x] the setup and company sign-in forms stuck on a network error; a
+  dropped connection on a project page said the project did not exist; a
+  terminal opened again stacked a second one under the first.
+- [x] the install run (`e2e.mjs --install`) had not passed since setup
+  codes arrived; the object store check raced RustFS starting up.
+
+**Verified after the fixes**: lint, typecheck and every suite run fresh
+(no cache); the end-to-end run, 68/68, on images rebuilt from this tree;
+the install, upgrade and rollback run, 5/5; the assistant's eval on
+`claude-haiku-4-5` above its 80% mark; and a person's first hour done by
+hand in a browser — setup with the code (a wrong one refused), a server
+connected with the one command, an image live, logs, a terminal (the same
+session refused from another origin), and a secret setting rolled out
+blue/green.
+
+**Left as they are, and why** (owner's call; none is reachable from
+outside an organization):
+- Forward-auth may point at any address the router reaches, and a
+  project's mesh forward listens on its network's gateway, which other
+  projects' containers can also reach (credentials still apply).
+- Managed databases are not checked by the agent's own L6 limits (a
+  hostile control plane could run another image as one); the build cache
+  is shared by an organization's projects on a server.
+- Revoye reads a tool call anywhere in an answer; with taint in place a
+  quoted one can only ever become a proposal. Revoye was down for
+  maintenance, so it was not run live.
 
 ## Revoye as an AI provider — 2026-10-22
 
