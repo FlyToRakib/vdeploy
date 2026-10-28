@@ -27,4 +27,11 @@ export const VALUE_BEARING_OPERATIONS: ReadonlySet<string> = new Set([
   'secret.read_value',
   // Its answer carries the webhook secret, shown once per connection.
   'git.connect_token',
+  // Each of these shows a credential once, as it is made.
+  'api_key.create',
+  'plugin.install',
+  'server.add',
+  'server.enrollment_token',
+  'backup.set_offsite',
+  'notification.channel_create',
 ]);

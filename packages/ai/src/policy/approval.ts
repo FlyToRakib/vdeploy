@@ -73,6 +73,8 @@ export function approvalReasons(
     reasons.push('This session analyzed external content. All changes require your approval.');
   }
   if (op.tier === 'destructive') reasons.push('Destructive changes always need your approval');
+  // A person proves it is them before these; the AI has nothing to prove it with.
+  if (op.stepUp) reasons.push('Changes that ask for your password again always need your approval');
   const tier = op.tier === 'safe' || op.tier === 'sensitive' ? op.tier : null;
   if (tier && !(grants.autoApply[tier] && target.projectAutoApply.includes(tier))) {
     reasons.push(`Auto-apply is not granted for ${tier} changes here`);

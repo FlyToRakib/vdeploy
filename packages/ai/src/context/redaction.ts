@@ -69,3 +69,26 @@ export function redactSpec(spec: unknown): unknown {
   }
   return copy;
 }
+
+/**
+ * Any tool's answer, fit to send. A read such as `project.get` returns the
+ * spec, a release or an export, so the same rule as the context applies to
+ * whatever shape comes back: a `{ key, value }` variable is judged by its
+ * name, every other field by its own name and its value.
+ */
+export function redactResult(value: unknown, name = ''): unknown {
+  if (typeof value === 'string') return redactValue(name, value);
+  if (Array.isArray(value)) return value.map((item) => redactResult(item));
+  if (typeof value !== 'object' || value === null) return value;
+  const object = value as Json;
+  const variable = typeof object.key === 'string' && typeof object.value === 'string';
+  return Object.fromEntries(
+    Object.entries(object).map(([field, inner]) => {
+      // A variable's name is what the model works with; only its value is judged.
+      if (variable && field === 'key') return [field, inner];
+      if (variable && field === 'value')
+        return [field, redactValue(object.key as string, inner as string)];
+      return [field, redactResult(inner, field)];
+    }),
+  );
+}

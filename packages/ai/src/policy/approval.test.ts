@@ -89,6 +89,7 @@ describe('approvalReasons', () => {
       'The AI session is in propose mode',
       'This session analyzed external content. All changes require your approval.',
       'Destructive changes always need your approval',
+      'Changes that ask for your password again always need your approval',
       'Production is frozen for AI changes',
       'The hourly limit of automatic AI changes is reached',
     ]);

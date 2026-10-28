@@ -213,8 +213,6 @@ export async function runOperation(
 ): Promise<OperationResponse> {
   const op = findOperation(name);
   if (!op) throw new VDeployError('not_found', `There is no operation called ${name}`);
-  const replay = await remembered(deps, actor, name, request.idempotencyKey);
-  if (replay) return replay;
 
   const target = await resolveTarget(deps.db, op, request.input, actor.orgId);
   const grants = await loadGrants(deps, actor.orgId);
@@ -253,6 +251,10 @@ export async function runOperation(
     await audit(deps, actor, name, target, 'denied', { code: 'forbidden', reason: outsideTeam });
     throw new VDeployError('forbidden', outsideTeam);
   }
+  // A repeat is answered as the first time was, but only once the gate has
+  // let this caller through: a stored answer is no way around it.
+  const replay = await remembered(deps, actor, name, request.idempotencyKey);
+  if (replay) return replay;
 
   const context = { deps, actor, args: decision.args };
   if (!op.mutates) {
@@ -296,6 +298,18 @@ export async function runOperation(
 
   const handler = ADMIN[op.name];
   if (!handler) throw new VDeployError('unavailable', `${name} is not available yet`);
+  // An administrative change has no plan to hold for approval, so the AI
+  // may make one only where nothing would have asked a person first: not
+  // in propose mode, not from a tainted session, not outside its grants,
+  // and never one that asks a person for their password again.
+  if (actor.kind === 'ai') {
+    const reasons = approvalReasons(actor, op, target, grants, call, now);
+    if (reasons.length) {
+      const reason = `${name} is made by a person in VDeploy, not proposed by the AI`;
+      await audit(deps, actor, name, target, 'denied', { code: 'policy_denied', reason, reasons });
+      throw new VDeployError('policy_denied', reason);
+    }
+  }
   let result: unknown;
   try {
     result = await handler(context);

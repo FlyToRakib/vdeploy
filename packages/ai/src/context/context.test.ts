@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildContext, SLOT_BUDGET, type ContextInput } from './context.js';
+import { redactResult } from './redaction.js';
 
 const base: ContextInput = {
   organization: 'Acme',
@@ -36,7 +37,7 @@ describe('the context engine', () => {
   });
 
   it('adds the project in focus with its credentials hidden', () => {
-    const { text } = buildContext({
+    const { text, tainted } = buildContext({
       ...base,
       focus: {
         name: 'shop',
@@ -58,6 +59,37 @@ describe('the context engine', () => {
     expect(text).not.toContain('sk_live_0123456789');
     expect(text).toContain('v4 app@sha256:abc');
     expect(text).toContain('wrong_port (high): It answers on 8080. Fix: Use 8080.');
+    // A finding quotes the app's own output: framed, and the session tainted.
+    expect(text).toContain('<untrusted source="diagnosis" project="shop">');
+    expect(tainted).toBe(true);
+  });
+
+  it('hides credentials in what a tool answers, whatever its shape', () => {
+    const answer = redactResult({
+      name: 'shop',
+      spec: {
+        runtime: {
+          env: [
+            { key: 'PORT', value: '3000' },
+            { key: 'API_TOKEN', value: 'abc' },
+          ],
+        },
+        build: { args: { NPM_TOKEN: 'npm_x', NODE_ENV: 'production' } },
+      },
+      signingSecret: 'whsec_0123456789abcdef',
+      url: 'postgres://app:hunter2@db:5432/app',
+    }) as {
+      spec: { runtime: { env: { key: string; value: string }[] }; build: { args: object } };
+      signingSecret: string;
+      url: string;
+    };
+    expect(answer.spec.runtime.env).toEqual([
+      { key: 'PORT', value: '3000' },
+      { key: 'API_TOKEN', value: '«hidden»' },
+    ]);
+    expect(answer.spec.build.args).toEqual({ NPM_TOKEN: '«hidden»', NODE_ENV: 'production' });
+    expect(answer.signingSecret).toBe('«hidden»');
+    expect(answer.url).toBe('postgres://«hidden»@db:5432/app');
   });
 
   it('frames the app’s own output as untrusted, and says the session is tainted', () => {

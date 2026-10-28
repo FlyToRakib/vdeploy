@@ -1,9 +1,11 @@
 import {
   bindTools,
   buildContext,
+  checkGrants,
   checkSpend,
   estimateCost,
   ModelUnavailable,
+  redactResult,
   systemPrompt,
   taintsSession,
   toolName,
@@ -12,7 +14,14 @@ import {
   type HumanActor,
   type Turn,
 } from '@vdeploy/ai';
-import { findOperation, newId, OPERATIONS, VDeployError, type Id } from '@vdeploy/contracts';
+import {
+  findOperation,
+  newId,
+  OPERATIONS,
+  VDeployError,
+  type AiGrants,
+  type Id,
+} from '@vdeploy/contracts';
 import {
   aiSession,
   aiSpendThisMonth,
@@ -25,6 +34,7 @@ import {
 } from '@vdeploy/db';
 import type { KernelDeps } from '../kernel/context.js';
 import { loadGrants, runOperation } from '../kernel/pipeline.js';
+import { resolveTarget } from '../kernel/target.js';
 
 /** How many times the model may call tools before a turn has to end. */
 const MAX_STEPS = 6;
@@ -117,9 +127,18 @@ export async function ask(
       },
       now,
     ));
-  // A tainted session can never be in autopilot (§8 L4).
-  const mode: AiMode = session.tainted ? 'propose' : (input.mode ?? session.mode);
   const focusProjectId = input.projectId ?? session.focusProjectId;
+  const context = buildContext(
+    await gatherContext(
+      deps.db,
+      human.orgId,
+      await readableFocus(deps, human, focusProjectId, grants),
+    ),
+  );
+  // A tainted session can never be in autopilot (§8 L4), and a context that
+  // quotes the app's own output taints it before the model has read a word.
+  let tainted = session.tainted || context.tainted;
+  const mode: AiMode = tainted ? 'propose' : (input.mode ?? session.mode);
 
   const actor: AiActor = {
     kind: 'ai',
@@ -133,10 +152,9 @@ export async function ask(
     aiSessionId: session.id as Id<'aiSession'>,
     model: model.model,
     mode,
-    tainted: session.tainted,
+    tainted,
   };
 
-  const context = buildContext(await gatherContext(deps.db, human.orgId, focusProjectId));
   const system = systemPrompt(mode);
   const tools = bindTools(actor, grants);
   const messages: Turn[] = [...(await aiTurns(deps.db, session.id))];
@@ -146,7 +164,6 @@ export async function ask(
   const proposals: ProposalMade[] = [];
   const applied: { operation: string; planId: string | null }[] = [];
   let costUsd = 0;
-  let tainted = session.tainted;
   let answer = '';
 
   for (let step = 0; step < MAX_STEPS; step++) {
@@ -232,6 +249,27 @@ export async function ask(
   return { sessionId: session.id, text: answer, proposals, applied, tainted, costUsd };
 }
 
+/**
+ * The project the context describes, when the grants let the AI read it:
+ * one excluded from the AI, outside its scope or not managed by it is no
+ * more described to it than it may be fetched with a tool.
+ */
+async function readableFocus(
+  deps: KernelDeps,
+  human: HumanActor,
+  projectId: string | null | undefined,
+  grants: AiGrants,
+): Promise<string | null> {
+  const read = findOperation('project.get');
+  if (!projectId || !read) return null;
+  try {
+    const target = await resolveTarget(deps.db, read, { projectId }, human.orgId);
+    return checkGrants(read, target, grants) ? null : projectId;
+  } catch {
+    return null;
+  }
+}
+
 interface ToolOutcome {
   result: string;
   isError?: boolean;
@@ -257,7 +295,8 @@ async function callTool(
       idempotencyKey: newId('aiSession').slice(0, 40),
     });
     if (response.status === 'done') {
-      return { result: summarise(response.result), planId: null };
+      // A read can return a spec or a release, with its variables in it.
+      return { result: summarise(redactResult(response.result)), planId: null };
     }
     const plan = response.plan;
     if (response.status === 'pending_approval') {

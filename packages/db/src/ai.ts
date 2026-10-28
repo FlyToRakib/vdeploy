@@ -120,13 +120,17 @@ export async function updateAiSession(
     .where(eq(aiSessions.id, sessionId));
 }
 
-/** What the organization's AI has cost this calendar month, for the spend cap (§8 L7). */
+/**
+ * What the organization's AI has cost this calendar month, for the spend cap
+ * (§8 L7). A chat used this month counts in full, wherever it began: by
+ * when it started, one kept open since last month would never be capped.
+ */
 export async function aiSpendThisMonth(db: Executor, orgId: string, now: Date): Promise<number> {
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const [row] = await db
     .select({ total: sql<string>`coalesce(sum(${aiSessions.spendUsd}), 0)` })
     .from(aiSessions)
-    .where(and(eq(aiSessions.orgId, orgId), gte(aiSessions.createdAt, from)));
+    .where(and(eq(aiSessions.orgId, orgId), gte(aiSessions.updatedAt, from)));
   return Number(row?.total ?? 0);
 }
 
