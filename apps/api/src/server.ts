@@ -3,7 +3,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { anthropicModel, openAiModel, revoyeModel, type ModelClient } from '@vdeploy/ai';
 import type { Database } from '@vdeploy/db';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import {
   serializerCompiler,
   validatorCompiler,
@@ -55,6 +55,16 @@ export const REDACTED_PATHS = [
   '*.value',
 ];
 
+/**
+ * A request's address as the log keeps it. One-time tokens travel in
+ * addresses — a verification link's query, a password reset's path — so
+ * the query is left out, and so is the reset token.
+ */
+export function loggedUrl(url: string): string {
+  const path = url.split('?')[0] ?? '';
+  return path.replace(/(\/reset-password\/)[^/]+/, '$1[redacted]');
+}
+
 export interface ServerDeps {
   config: ApiConfig;
   db: Database;
@@ -89,6 +99,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     logger: {
       level: config.LOG_LEVEL,
       redact: { paths: REDACTED_PATHS, censor: '[redacted]' },
+      serializers: {
+        req: (req: FastifyRequest) => ({
+          method: req.method,
+          url: loggedUrl(req.url),
+          remoteAddress: req.ip,
+        }),
+      },
     },
     trustProxy: true,
     bodyLimit: 1024 * 1024,

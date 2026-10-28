@@ -1,4 +1,10 @@
-import { APPROVAL_TTL_MS, checkApprover, signApproval, type HumanActor } from '@vdeploy/ai';
+import {
+  APPROVAL_TTL_MS,
+  checkApprover,
+  roleAtLeast,
+  signApproval,
+  type HumanActor,
+} from '@vdeploy/ai';
 import {
   findOperation,
   newId,
@@ -118,11 +124,24 @@ export async function rejectPlan(
   planId: string,
 ): Promise<PlanView> {
   const row = await pendingPlan(deps, actor, planId);
+  // Turning a change down is deciding on it too: whoever asked for it may
+  // withdraw it, and anybody else needs what the change itself needs.
+  const op = findOperation(row.operation);
+  const own = row.actor.userId === actor.userId;
+  if (
+    !own &&
+    (!op ||
+      !roleAtLeast(actor.role, op.minRole) ||
+      (actor.allowed && !actor.allowed.includes(op.name)))
+  ) {
+    throw new VDeployError('forbidden', 'Only someone who could make this change can turn it down');
+  }
   const [updated] = await deps.db
     .update(plans)
     .set({ status: 'rejected', updatedAt: deps.now() })
-    .where(eq(plans.id, row.id))
+    .where(and(eq(plans.id, row.id), eq(plans.status, 'pending_approval')))
     .returning();
+  if (!updated) throw new VDeployError('conflict', 'This plan was already decided');
   await appendAudit(deps.db, {
     chain: actor.orgId,
     actor: actorRecord(actor),
@@ -131,6 +150,5 @@ export async function rejectPlan(
     outcome: 'succeeded',
     details: { operation: row.operation },
   });
-  if (!updated) throw new VDeployError('internal', 'The plan could not be updated');
   return planView(updated);
 }

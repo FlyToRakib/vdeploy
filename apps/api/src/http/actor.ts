@@ -159,7 +159,12 @@ export async function resolveSession(
     await db.delete(sessionTable).where(eq(sessionTable.id, found.session.id));
     throw new VDeployError('unauthenticated', 'Your session has ended; please sign in again');
   }
-  const safe = req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
+  // A websocket opens with a GET, but what it carries is a change — a
+  // terminal's keystrokes — and a browser applies no CORS to it, so it
+  // must come from the dashboard like any other write.
+  const upgrade = req.headers.upgrade?.toLowerCase() === 'websocket';
+  const safe =
+    !upgrade && (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS');
   if (!safe && req.headers.origin !== publicOrigin) {
     throw new VDeployError('forbidden', 'This request did not come from the VDeploy dashboard');
   }

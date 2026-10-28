@@ -444,9 +444,15 @@ describe('planned changes', () => {
     const { plan } = (await op(owner, 'project.delete', { projectId })).json<{
       plan: { id: string };
     }>();
+    // Somebody who could not make the change cannot turn it down either.
+    const viewer = await member('viewer', 'rejecter@example.com');
+    const refused = await viewer.request('POST', `/api/v1/plans/${plan.id}/reject`);
+    expect(refused.statusCode).toBe(403);
     const res = await owner.request('POST', `/api/v1/plans/${plan.id}/reject`);
     expect(res.json()).toMatchObject({ status: 'rejected' });
     expect(t.queued).not.toContain(plan.id);
+    const again = await owner.request('POST', `/api/v1/plans/${plan.id}/reject`);
+    expect(again.statusCode).toBe(409);
   });
 
   it('applies an idempotent request once', async () => {
@@ -895,6 +901,12 @@ describe('the gate', () => {
       { origin: 'https://evil.example.net' },
     );
     expect(csrf.statusCode).toBe(403);
+    // A websocket is opened with a GET, and is held to the same origin.
+    const hijack = await owner.request('GET', '/api/v1/plans', undefined, {
+      upgrade: 'websocket',
+      origin: 'https://evil.example.net',
+    });
+    expect(hijack.statusCode).toBe(403);
   });
 });
 

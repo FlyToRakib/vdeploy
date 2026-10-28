@@ -3,20 +3,35 @@
 import { KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { useStepUp } from '@/components/step-up';
 import { Card } from '@/components/ui/card';
 import { authClient } from '@/lib/auth-client';
 import { messageOf } from '@/lib/forms';
+import { OperationError } from '@/lib/operations';
 
 /** Passkeys: phishing-proof sign-in, recommended over passwords (§20.2). */
 export function PasskeysPanel() {
   const { data: passkeys, refetch } = authClient.useListPasskeys();
+  const stepUp = useStepUp();
 
   async function add() {
-    const result = await authClient.passkey.addPasskey();
-    if (result.error) toast.error(messageOf(result.error, 'The passkey was not added.'));
-    else {
-      toast.success('Passkey added.');
-      void refetch();
+    try {
+      // A new way to sign in asks the person to confirm it is them first.
+      await stepUp(async () => {
+        const result = await authClient.passkey.addPasskey();
+        if (result.error && 'code' in result.error && result.error.code === 'STEP_UP_REQUIRED') {
+          throw new OperationError(result.error.message, 'step_up_required');
+        }
+        if (result.error) toast.error(messageOf(result.error, 'The passkey was not added.'));
+        else {
+          toast.success('Passkey added.');
+          void refetch();
+        }
+      });
+    } catch (err) {
+      if (!(err instanceof OperationError && err.code === 'cancelled')) {
+        toast.error(err instanceof Error ? err.message : 'The passkey was not added.');
+      }
     }
   }
 

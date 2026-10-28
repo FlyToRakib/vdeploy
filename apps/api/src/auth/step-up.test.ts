@@ -136,6 +136,17 @@ describe('step-up by whatever the person signs in with', () => {
     });
   });
 
+  it('asks for step-up before a new passkey can be added', async () => {
+    const browser = new Browser(t.app, 'NewKey/1.0');
+    await browser.signIn('owner@example.com', PASSWORD);
+    const register = () => browser.request('GET', '/api/auth/passkey/generate-register-options');
+    const refused = await register();
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json<{ code: string }>().code).toBe('STEP_UP_REQUIRED');
+    expect((await stepUp(browser, { password: PASSWORD })).statusCode).toBe(204);
+    expect((await register()).statusCode).toBe(200);
+  });
+
   it('takes a passkey, verified, answered once, and only this person’s', async () => {
     const browser = new Browser(t.app, 'Passkey/1.0');
     await browser.signIn('owner@example.com', PASSWORD);

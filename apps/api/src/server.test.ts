@@ -2,6 +2,7 @@ import { VDeployError } from '@vdeploy/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
+import { loggedUrl } from './server.js';
 import { startTestApp, type TestApp } from './test-helpers.js';
 
 let t: TestApp;
@@ -74,6 +75,18 @@ describe('api server', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: { code: 'invalid_input' } });
+  });
+});
+
+describe('the request log', () => {
+  it('keeps one-time tokens out of the addresses it writes', () => {
+    expect(loggedUrl('/api/auth/verify-email?token=abc&callbackURL=/')).toBe(
+      '/api/auth/verify-email',
+    );
+    expect(loggedUrl('/api/auth/reset-password/tok123?callbackURL=x')).toBe(
+      '/api/auth/reset-password/[redacted]',
+    );
+    expect(loggedUrl('/api/v1/plans/pln_1')).toBe('/api/v1/plans/pln_1');
   });
 });
 

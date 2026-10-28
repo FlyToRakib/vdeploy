@@ -1,9 +1,11 @@
 import { createHash, createHmac } from 'node:crypto';
-import { appendAudit, knownDevice, member, type Database } from '@vdeploy/db';
+import { STEP_UP_WINDOW_MS } from '@vdeploy/ai';
+import { appendAudit, knownDevice, member, session, type Database } from '@vdeploy/db';
 import type { BetterAuthOptions } from 'better-auth';
-import { APIError, createAuthMiddleware, isAPIError } from 'better-auth/api';
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from 'better-auth/api';
 import { asc, eq } from 'drizzle-orm';
 import { assertMayRegister } from './registration.js';
+import { stepUpMethods } from './step-up.js';
 import { clearFailures, failureCount, lockedUntil, recordFailure } from './lockout.js';
 import type { Mailer } from './mailer.js';
 import type { Locate } from './geoip.js';
@@ -77,7 +79,35 @@ export function notMeSignature(secret: string, sessionId: string, userId: string
 export function createHooks(deps: HookDeps) {
   const { db } = deps;
 
+  /**
+   * A new way to sign in is itself a step-up action (§20.2): otherwise a
+   * session cookie someone took could give itself a passkey, and pass every
+   * step-up after that with it. Somebody with no way to confirm it is them
+   * yet — signed in through GitHub, say — is adding their first one.
+   */
+  const assertSteppedUp = async (ctx: Parameters<typeof getSessionFromCtx>[0]) => {
+    const found = await getSessionFromCtx(ctx);
+    if (!found) return; // the endpoint itself refuses a request with no session
+    const methods = await stepUpMethods(db, found.user.id);
+    if (!methods.password && !methods.code && !methods.passkey) return;
+    const [row] = await db
+      .select({ stepUpAt: session.stepUpAt })
+      .from(session)
+      .where(eq(session.id, found.session.id));
+    const fresh = row?.stepUpAt && Date.now() - row.stepUpAt.getTime() <= STEP_UP_WINDOW_MS;
+    if (!fresh) {
+      throw new APIError('FORBIDDEN', {
+        code: 'STEP_UP_REQUIRED',
+        message: 'Confirm it is you before adding a way to sign in.',
+      });
+    }
+  };
+
   const before = createAuthMiddleware(async (ctx) => {
+    if (ctx.path === '/passkey/generate-register-options') {
+      await assertSteppedUp(ctx);
+      return;
+    }
     if (ctx.path !== '/sign-in/email') return;
     const email = emailOf(ctx.body);
     if (!email) return;
